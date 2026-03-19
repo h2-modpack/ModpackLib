@@ -29,13 +29,30 @@ local backup, restore = lib.createBackupSystem()
 -- =============================================================================
 
 public.definition = {
-    id           = "",       -- Unique key, e.g. "CorrosionFix"
-    name         = "",       -- Display name, e.g. "Corrosion Fix"
-    category     = "",       -- "BugFixes" | "RunModifiers" | "QoLSettings"
-    group        = "",       -- UI group header, e.g. "NPC & Encounters"
+    id           = "",       -- Unique key
+    name         = "",       -- Display name
+    category     = "",       -- "BugFixes" | "RunModifiers" | "QoLSettings" | "More"
+    group        = "",       -- UI group header
     tooltip      = "",       -- Hover text
     default      = true,     -- Default enabled state
     dataMutation = true,     -- true if apply() modifies game tables, false for hook-only mods
+
+    -- Optional: inline options rendered below the checkbox in Core's UI.
+    -- Core handles staging, hashing, and UI — module just reads config values in hooks.
+    -- Bits auto-calculated from #values if omitted.
+    --
+    -- Supported types:
+    --   "checkbox" — toggle, stores true/false
+    --   "dropdown" — combo box, stores selected string value
+    --   "radio"    — radio buttons, stores selected string value
+    --
+    -- options = {
+    --     { type = "checkbox", configKey = "Strict", label = "Strict Mode", default = false },
+    --     { type = "dropdown", configKey = "Mode",   label = "Mode",
+    --       values = {"Vanilla", "Always", "Never"}, default = "Vanilla" },
+    --     { type = "radio",    configKey = "Speed",  label = "Speed",
+    --       values = {"Slow", "Normal", "Fast"}, default = "Normal" },
+    -- },
 }
 
 -- =============================================================================
@@ -53,7 +70,7 @@ end
 
 local function registerHooks()
     -- modutil.mod.Path.Wrap("SomeGameFunction", function(baseFunc, ...)
-    --     if not config.Enabled then return baseFunc(...) end
+    --     if not lib.isEnabled(config) then return baseFunc(...) end
     --     return baseFunc(...)
     -- end)
 end
@@ -71,7 +88,7 @@ modutil.once_loaded.game(function()
     loader.load(function()
         import_as_fallback(rom.game)
         registerHooks()
-        if config.Enabled then apply() end
+        if lib.isEnabled(config) then apply() end
         if public.definition.dataMutation and not mods['adamant-Modpack_Core'] then
             SetupRunData()
         end
