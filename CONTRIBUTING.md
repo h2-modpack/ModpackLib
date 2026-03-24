@@ -20,8 +20,6 @@ local lib = rom.mods['adamant-Modpack_Lib']
 | `lib.standaloneUI(def, config, apply, revert)` | Returns menu-bar callback for standalone mode |
 | `lib.readPath(tbl, key)` | Read from table using string or path key |
 | `lib.writePath(tbl, key, value)` | Write to table using string or path key |
-| `lib.encodeField(field, value, addBits)` | Encode a field into a bit stream |
-| `lib.decodeField(field, readBits)` | Decode a field from a bit stream |
 | `lib.drawField(imgui, field, value, width)` | Render a field widget, returns `(newValue, changed)` |
 | `lib.validateSchema(schema, label)` | Validate field descriptors at declaration time |
 | `lib.createSpecialState(config, schema)` | Returns `staging, snapshot, sync` for special modules |
@@ -86,25 +84,23 @@ All field types live in the `FieldTypes` registry in main.lua. Each type impleme
 
 | Method | Signature | Purpose |
 |---|---|---|
-| `bits(field)` | `-> number` | Number of bits for hash encoding |
 | `validate(field, prefix)` | | Declaration-time checks |
-| `encode(field, value, addBits)` | | Write value into bit stream |
-| `decode(field, readBits)` | `-> any` | Read value from bit stream |
+| `toHash(field, value)` | `-> string` | Serialize value to canonical hash string |
+| `fromHash(field, str)` | `-> any` | Deserialize value from canonical hash string |
 | `toStaging(val)` | `-> any` | Transform config value for staging table |
 | `draw(imgui, field, value, width)` | `-> newValue, changed` | Render the ImGui widget |
 
 ### Adding a new field type
 
-Add one entry to the registry -- all consumers (encoding, decoding, UI, validation, staging) pick it up automatically:
+Add one entry to the registry -- all consumers (UI, validation, staging, hashing) pick it up automatically:
 
 ```lua
 FieldTypes.mytype = {
-    bits     = function(field) return field.bits or 1 end,
-    validate = function(field, prefix) end,
-    encode   = function(field, current, addBits) ... end,
-    decode   = function(field, readBits) ... end,
+    validate  = function(field, prefix) end,
+    toHash    = function(field, value) return tostring(value) end,
+    fromHash  = function(field, str)   return str end,
     toStaging = function(val) return val end,
-    draw     = function(imgui, field, value, width) ... end,
+    draw      = function(imgui, field, value, width) ... end,
 }
 ```
 

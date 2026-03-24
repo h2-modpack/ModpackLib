@@ -11,8 +11,6 @@
 --   lib.isEnabled(modConfig) — true if module AND master toggle are both on
 --   lib.FieldTypes — central registry of field types (checkbox, dropdown, radio)
 --   lib.drawField(imgui, field, value, width) — render a field widget
---   lib.encodeField(field, current, addBits)  — encode field into bit stream
---   lib.decodeField(field, readBits)          — decode field from bit stream
 
 local mods = rom.mods
 mods['SGG_Modding-ENVY'].auto()
@@ -173,27 +171,6 @@ end
 -- FIELD TYPE DISPATCHERS
 -- =============================================================================
 
---- Encode a single schema field into the bit stream.
---- @param field table       Field descriptor
---- @param current any       The current value to encode
---- @param addBits function  function(value, numBits)
-function public.encodeField(field, current, addBits)
-    local ft = FieldTypes[field.type]
-    if ft then ft.encode(field, current, addBits)
-    else public.warn("encodeField: unknown type '" .. tostring(field.type) .. "'") end
-end
-
---- Decode a single schema field from the bit stream.
---- @param field table        Field descriptor
---- @param readBits function  function(numBits) -> number
---- @return any value
-function public.decodeField(field, readBits)
-    local ft = FieldTypes[field.type]
-    if ft then return ft.decode(field, readBits) end
-    public.warn("decodeField: unknown type '" .. tostring(field.type) .. "'")
-    return nil
-end
-
 --- Render a schema field widget. Returns (newValue, changed).
 --- @param imgui table       ImGui handle
 --- @param field table       Field descriptor
@@ -314,29 +291,18 @@ end
 -- FIELD TYPE REGISTRY
 -- =============================================================================
 -- Central definition of all schema field types. Each type declares its own:
---   bits(field)                        — number of bits for hashing
 --   validate(field, prefix)            — declaration-time validation
---   encode(field, current, addBits)    — write value into bit stream
---   decode(field, readBits)            — read value from bit stream
+--   toHash(field, value)               — serialize value to canonical hash string
+--   fromHash(field, str)               — deserialize value from canonical hash string
 --   toStaging(val)                     — transform value for staging table
 --   draw(imgui, field, value, width)   — render widget, returns (newValue, changed)
 --
 -- To add a new type: add one entry here. All consumers dispatch automatically.
 
-local function bitsRequired(n)
-    if n <= 1 then return 1 end
-    return math.ceil(math.log(n) / math.log(2))
-end
-
 FieldTypes.checkbox = {
-    bits = function(field) return field.bits or 1 end,
-    validate = function(_, _) end,
-    encode = function(_, current, addBits)
-        addBits(current and 1 or 0, 1)
-    end,
-    decode = function(_, readBits)
-        return readBits(1) == 1
-    end,
+    validate  = function(_, _) end,
+    toHash    = function(_, value) return value and "1" or "0" end,
+    fromHash  = function(_, str)   return str == "1" end,
     toStaging = function(val) return val == true end,
     draw = function(imgui, field, value)
         if value == nil then value = field.default end
@@ -345,30 +311,25 @@ FieldTypes.checkbox = {
 }
 
 FieldTypes.dropdown = {
-    bits = function(field) return field.bits or bitsRequired(#(field.values or {})) end,
     validate = function(field, prefix)
         if not field.values then
             public.warn(prefix .. ": dropdown missing values list")
         elseif type(field.values) ~= "table" or #field.values == 0 then
             public.warn(prefix .. ": dropdown values must be a non-empty list")
+        else
+            for _, v in ipairs(field.values) do
+                if type(v) == "string" and string.find(v, "|", 1, true) then
+                    public.warn(prefix .. ": value '" .. v .. "' contains reserved separator '|'")
+                end
+            end
         end
     end,
-    encode = function(field, current, addBits)
-        current = current or field.default or ""
-        local bits = field.bits or bitsRequired(#(field.values or {}))
-        local idx = 0
-        for i, v in ipairs(field.values or {}) do
-            if v == current then idx = i - 1; break end
+    toHash   = function(_, value) return tostring(value) end,
+    fromHash = function(field, str)
+        for _, v in ipairs(field.values or {}) do
+            if v == str then return str end
         end
-        addBits(idx, bits)
-    end,
-    decode = function(field, readBits)
-        local bits = field.bits or bitsRequired(#(field.values or {}))
-        local idx = readBits(bits)
-        if field.values and idx < #field.values then
-            return field.values[idx + 1]
-        end
-        return nil
+        return field.default
     end,
     toStaging = function(val) return val end,
     draw = function(imgui, field, value, width)
@@ -400,30 +361,25 @@ FieldTypes.dropdown = {
 }
 
 FieldTypes.radio = {
-    bits = function(field) return field.bits or bitsRequired(#(field.values or {})) end,
     validate = function(field, prefix)
         if not field.values then
             public.warn(prefix .. ": radio missing values list")
         elseif type(field.values) ~= "table" or #field.values == 0 then
             public.warn(prefix .. ": radio values must be a non-empty list")
+        else
+            for _, v in ipairs(field.values) do
+                if type(v) == "string" and string.find(v, "|", 1, true) then
+                    public.warn(prefix .. ": value '" .. v .. "' contains reserved separator '|'")
+                end
+            end
         end
     end,
-    encode = function(field, current, addBits)
-        current = current or field.default or ""
-        local bits = field.bits or bitsRequired(#(field.values or {}))
-        local idx = 0
-        for i, v in ipairs(field.values or {}) do
-            if v == current then idx = i - 1; break end
+    toHash   = function(_, value) return tostring(value) end,
+    fromHash = function(field, str)
+        for _, v in ipairs(field.values or {}) do
+            if v == str then return str end
         end
-        addBits(idx, bits)
-    end,
-    decode = function(field, readBits)
-        local bits = field.bits or bitsRequired(#(field.values or {}))
-        local idx = readBits(bits)
-        if field.values and idx < #field.values then
-            return field.values[idx + 1]
-        end
-        return nil
+        return field.default
     end,
     toStaging = function(val) return val end,
     draw = function(imgui, field, value)
