@@ -1,13 +1,13 @@
 -- =============================================================================
 -- ADAMANT-LIB: Shared utilities for adamant standalone mods
 -- =============================================================================
--- Access via: local lib = rom.mods['adamant-Modpack_Lib']
+-- Access via: local lib = rom.mods['adamant-ModpackLib']
 --
 -- Provides:
 --   backup, restore = lib.createBackupSystem()
 --   local cb = lib.standaloneUI(def, config, apply, revert)  -- returns callback
 --   rom.gui.add_to_menu_bar(cb)  -- caller registers in own plugin context
---   staging, snapshot, sync = lib.createSpecialState(config, schema)
+--   specialState = lib.createSpecialState(config, schema)
 --   lib.isEnabled(modConfig, packId) — true if module AND coordinator's ModEnabled are both on
 --   lib.isCoordinated(packId) — true if a coordinator has registered for this packId
 --   lib.registerCoordinator(packId, config) — called by Framework.init
@@ -300,17 +300,16 @@ end
 --
 -- Hashing is handled by Core via definition.stateSchema — modules don't encode/decode.
 --
--- Returns: staging, snapshot, sync
+-- Returns: specialState
 --
 --- @param modConfig table  The module's chalk config
 --- @param schema table     Ordered list of field descriptors
---- @return table staging       Plain table mirroring config (fast reads/writes for UI)
---- @return function snapshot   Re-read config into staging (after profile load)
---- @return function sync       Flush staging to config (after UI edits)
+--- @return table specialState  Managed special-state object
 function public.createSpecialState(modConfig, schema)
     public.validateSchema(schema, _PLUGIN.guid or "unknown module")
 
     local staging = {}
+    local dirty = false
 
     -- -----------------------------------------------------------------
     -- Copy helpers (using shared path accessors)
@@ -341,18 +340,146 @@ function public.createSpecialState(modConfig, schema)
     copyConfigToStaging()
 
     -- -----------------------------------------------------------------
+    -- Read-only view (recursive proxy over staging)
+    -- -----------------------------------------------------------------
+
+    local readonlyCache = setmetatable({}, { __mode = "k" })
+
+    local function makeReadonly(node)
+        if type(node) ~= "table" then
+            return node
+        end
+        if readonlyCache[node] then
+            return readonlyCache[node]
+        end
+
+        local proxy = {}
+        local mt = {
+            __index = function(_, key)
+                local value = node[key]
+                if type(value) == "table" then
+                    return makeReadonly(value)
+                end
+                return value
+            end,
+            __newindex = function()
+                error("special state view is read-only; use state.set/update/toggle", 2)
+            end,
+            __pairs = function()
+                return function(_, lastKey)
+                    local nextKey, nextVal = next(node, lastKey)
+                    if type(nextVal) == "table" then
+                        nextVal = makeReadonly(nextVal)
+                    end
+                    return nextKey, nextVal
+                end, proxy, nil
+            end,
+            __ipairs = function()
+                local i = 0
+                return function()
+                    i = i + 1
+                    local value = node[i]
+                    if value ~= nil and type(value) == "table" then
+                        value = makeReadonly(value)
+                    end
+                    if value ~= nil then
+                        return i, value
+                    end
+                end, proxy, 0
+            end,
+        }
+
+        setmetatable(proxy, mt)
+        readonlyCache[node] = proxy
+        return proxy
+    end
+
+    -- -----------------------------------------------------------------
     -- Public functions
     -- -----------------------------------------------------------------
 
     local function snapshot()
         copyConfigToStaging()
+        dirty = false
     end
 
     local function sync()
         copyStagingToConfig()
+        dirty = false
     end
 
-    return staging, snapshot, sync
+    local specialState = {
+        view = makeReadonly(staging),
+        get = function(key)
+            local value = readPath(staging, key)
+            return value
+        end,
+        set = function(key, value)
+            writePath(staging, key, value)
+            dirty = true
+        end,
+        update = function(key, updater)
+            local current = readPath(staging, key)
+            writePath(staging, key, updater(current))
+            dirty = true
+        end,
+        toggle = function(key)
+            local current = readPath(staging, key)
+            writePath(staging, key, not (current == true))
+            dirty = true
+        end,
+        reloadFromConfig = snapshot,
+        flushToConfig = sync,
+        isDirty = function()
+            return dirty
+        end,
+    }
+
+    return specialState
+end
+
+-- =============================================================================
+-- SPECIAL MODULE DEBUG HELPERS
+-- =============================================================================
+
+local function SpecialFieldKey(configKey)
+    if type(configKey) == "table" then
+        return table.concat(configKey, ".")
+    end
+    return tostring(configKey)
+end
+
+--- Capture the current config values for a special module's schema-backed fields.
+--- Useful for detecting direct config writes during DrawTab/DrawQuickContent.
+--- @param modConfig table
+--- @param schema table
+--- @return table snapshot
+function public.captureSpecialConfigSnapshot(modConfig, schema)
+    local snapshot = {}
+    for _, field in ipairs(schema or {}) do
+        snapshot[SpecialFieldKey(field.configKey)] = public.readPath(modConfig, field.configKey)
+    end
+    return snapshot
+end
+
+--- Debug helper: warn if schema-backed config changed during draw without going through specialState.
+--- @param name string
+--- @param enabled boolean
+--- @param specialState table
+--- @param modConfig table
+--- @param schema table
+--- @param before table
+function public.warnIfSpecialConfigBypassedState(name, enabled, specialState, modConfig, schema, before)
+    if specialState.isDirty() then return end
+    for _, field in ipairs(schema or {}) do
+        local key = SpecialFieldKey(field.configKey)
+        local current = public.readPath(modConfig, field.configKey)
+        if current ~= before[key] then
+            public.log(name, enabled,
+                "special UI modified config directly; use public.specialState for schema-backed state")
+            return
+        end
+    end
 end
 
 -- =============================================================================

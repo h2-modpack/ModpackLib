@@ -1,4 +1,4 @@
-# adamant-Modpack_Lib
+# adamant-ModpackLib
 
 Shared utility library for the adamant H2 modpack. Provides the module contract, backup/restore system, field type encoding, standalone UI, and special module state management.
 

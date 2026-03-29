@@ -1,29 +1,31 @@
 # Contributing to adamant-Lib
 
-Shared utility library for all adamant modpack modules. Provides the module contract, UI primitives, state management, and field type system.
+Shared utility library for adamant modpack modules. Provides the module contract, UI primitives, managed special-state handling, and the field type system.
 
 ## Architecture
 
-Single-file library (`src/main.lua`) loaded as `adamant-Modpack_Lib`. Modules access it with:
+Single-file library (`src/main.lua`) loaded as `adamant-ModpackLib`. Modules access it with:
 
 ```lua
-local lib = rom.mods['adamant-Modpack_Lib']
+local lib = rom.mods["adamant-ModpackLib"]
 ```
 
 ## Public API
 
 | Function | Purpose |
 |---|---|
-| `lib.isEnabled(modConfig)` | True if module + master toggle are both on |
-| `lib.warn(msg)` | Framework diagnostic print, gated on `lib.config.DebugMode`. For framework-detected problems (schema errors, unknown types, skipped modules). Never call this from module code. |
-| `lib.log(name, enabled, msg)` | Module trace print, gated on the caller-supplied `enabled` flag. Pass `config.DebugMode` for the flag. For intentional author traces — execution flow, values, decisions. |
+| `lib.isEnabled(modConfig, packId)` | True if module plus coordinator master toggle are both on |
+| `lib.warn(packId, enabled, msg)` | Framework diagnostic print. For framework-detected problems. Do not use for normal module tracing. |
+| `lib.log(name, enabled, msg)` | Module trace print, gated by the caller-supplied boolean |
 | `lib.createBackupSystem()` | Returns `backup, revert` for isolated state save/restore |
-| `lib.standaloneUI(def, config, apply, revert)` | Returns menu-bar callback for standalone mode |
+| `lib.standaloneUI(def, config, apply, revert)` | Returns menu-bar callback for standalone regular modules |
 | `lib.readPath(tbl, key)` | Read from table using string or path key |
 | `lib.writePath(tbl, key, value)` | Write to table using string or path key |
-| `lib.drawField(imgui, field, value, width)` | Render a field widget, returns `(newValue, changed)` |
+| `lib.drawField(imgui, field, value, width)` | Render a regular-module option widget, returns `(newValue, changed)` |
 | `lib.validateSchema(schema, label)` | Validate field descriptors at declaration time |
-| `lib.createSpecialState(config, schema)` | Returns `staging, snapshot, sync` for special modules |
+| `lib.createSpecialState(config, schema)` | Returns a managed `specialState` object for special modules |
+| `lib.captureSpecialConfigSnapshot(modConfig, schema)` | Debug helper for detecting direct config writes in special-module UI |
+| `lib.warnIfSpecialConfigBypassedState(name, enabled, specialState, modConfig, schema, before)` | Debug helper that logs when a special writes schema-backed config directly during draw |
 | `lib.FieldTypes` | The field type registry table |
 
 ## Module contract
@@ -32,74 +34,103 @@ Every module must expose `public.definition`:
 
 ```lua
 public.definition = {
-    id           = "MyMod",        -- unique key (hash-stable)
-    name         = "My Mod",       -- display name
-    category     = "Bug Fixes",    -- tab label in Core UI, e.g. "Bug Fixes" | "Run Modifiers" | "QoL"
-    group        = "General",      -- UI group header
-    tooltip      = "...",          -- hover text
-    default      = true,           -- default Enabled value
-    dataMutation = true,           -- true if apply() changes game tables
+    id           = "MyMod",
+    name         = "My Mod",
+    category     = "Bug Fixes",
+    group        = "General",
+    tooltip      = "...",
+    default      = true,
+    dataMutation = true,
 }
 
-public.definition.apply  = apply   -- mutate game state
-public.definition.revert = revert  -- restore vanilla state
+public.definition.apply  = apply
+public.definition.revert = revert
 ```
 
 - `apply` is called when the module is enabled
-- `revert` is called when disabled (typically the closure from `createBackupSystem`)
-- Core wraps both in pcall -- a failing module won't crash the framework
+- `revert` is called when disabled, usually the closure from `createBackupSystem()`
+- Framework wraps both in `pcall`; a failing module should not crash the pack UI
 
-### Inline options (optional)
+### Inline options (regular modules)
 
 Boolean modules can declare options rendered below their checkbox:
 
 ```lua
 public.definition.options = {
     { type = "checkbox", configKey = "Strict", label = "Strict Mode", default = false },
-    { type = "dropdown", configKey = "Mode",   label = "Mode",
-      values = {"Vanilla", "Always", "Never"}, default = "Vanilla" },
+    { type = "dropdown", configKey = "Mode", label = "Mode",
+      values = { "Vanilla", "Always", "Never" }, default = "Vanilla" },
 }
 ```
 
-**`configKey` must be a flat string** — never a table. Table-path keys are only valid in `def.stateSchema` (special modules). The configKey must also exist in `config.lua` with the correct default value.
+`configKey` must be a flat string. Table-path keys are only valid in `definition.stateSchema` for special modules.
 
 ### Special modules
 
 Special modules get their own sidebar tab and custom state:
 
 ```lua
-public.definition.special    = true
-public.definition.tabLabel   = "Hammers"
-public.definition.stateSchema = { ... }  -- field descriptors for hashing
+public.definition.special     = true
+public.definition.tabLabel    = "Hammers"
+public.definition.stateSchema = { ... }
+public.specialState           = lib.createSpecialState(config, public.definition.stateSchema)
 
-public.SnapshotStaging = snapshotStaging  -- re-read config into staging
-public.SyncToConfig    = syncToConfig     -- flush staging to config
-
-function public.DrawTab(imgui, onChanged, theme) ... end
-function public.DrawQuickContent(imgui, onChanged, theme) ... end
+function public.DrawTab(imgui, specialState, theme) ... end
+function public.DrawQuickContent(imgui, specialState, theme) ... end
 ```
+
+`public.specialState` is the managed state object for schema-backed UI state.
+
+It exposes:
+- `specialState.view` - read-only render view
+- `specialState.get(path)`
+- `specialState.set(path, value)`
+- `specialState.update(path, fn)`
+- `specialState.toggle(path)`
+- `specialState.reloadFromConfig()`
+- `specialState.flushToConfig()`
+- `specialState.isDirty()`
+
+### Special-module rules
+
+For schema-backed state:
+- read from `specialState.view`
+- mutate only through `specialState.set/update/toggle`
+- do not write `config` directly during `DrawTab` / `DrawQuickContent`
+
+Framework-owned hosted flow:
+- Framework calls `DrawTab` / `DrawQuickContent`
+- if `specialState.isDirty()` is true after draw, Framework calls `specialState.flushToConfig()`
+- Framework then invalidates the cached hash and updates the HUD fingerprint
+
+Standalone special-module flow:
+- the module renders its own window
+- after `DrawTab` / `DrawQuickContent`, the module should call `specialState.flushToConfig()` if dirty
+- the module may use `lib.captureSpecialConfigSnapshot(...)` and `lib.warnIfSpecialConfigBypassedState(...)` in debug mode to detect direct config writes during draw
 
 ## Field type system
 
-All field types live in the `FieldTypes` registry in main.lua. Each type implements:
+All field types live in the `FieldTypes` registry in `src/main.lua`. Each type implements:
 
-| Method | Signature | Purpose |
-|---|---|---|
-| `validate(field, prefix)` | | Declaration-time checks |
-| `toHash(field, value)` | `-> string` | Serialize value to canonical hash string |
-| `fromHash(field, str)` | `-> any` | Deserialize value from canonical hash string |
-| `toStaging(val)` | `-> any` | Transform config value for staging table |
-| `draw(imgui, field, value, width)` | `-> newValue, changed` | Render the ImGui widget |
+| Method | Purpose |
+|---|---|
+| `validate(field, prefix)` | Declaration-time checks |
+| `toHash(field, value)` | Serialize value to canonical hash string |
+| `fromHash(field, str)` | Deserialize value from canonical hash string |
+| `toStaging(val)` | Transform config value for managed special-state staging |
+| `draw(imgui, field, value, width)` | Render the ImGui widget for regular-module options |
+
+Note: special modules use field types as typed state descriptors for hashing and state management, but Framework does not render `stateSchema` fields automatically.
 
 ### Adding a new field type
 
-Add one entry to the registry -- all consumers (UI, validation, staging, hashing) pick it up automatically:
+Add one entry to the registry and all consumers pick it up automatically:
 
 ```lua
 FieldTypes.mytype = {
     validate  = function(field, prefix) end,
     toHash    = function(field, value) return tostring(value) end,
-    fromHash  = function(field, str)   return str end,
+    fromHash  = function(field, str) return str end,
     toStaging = function(val) return val end,
     draw      = function(imgui, field, value, width) ... end,
 }
@@ -107,16 +138,17 @@ FieldTypes.mytype = {
 
 ## Templates
 
-The canonical templates live in the [h2-modpack-template](https://github.com/h2-modpack/h2-modpack-template) repo:
-
-- `src/main.lua` -- boolean module starting point
-- `src/main_special.lua` -- special module starting point
-
-Copy the relevant template as `src/main.lua` in a new mod repo and fill in the marked sections.
+The canonical templates live in the `h2-modpack-template` repo:
+- `src/main.lua` - regular module starting point
+- `src/main_special.lua` - special module starting point
 
 ## Standalone mode
 
-Every module works without Core installed. Boolean modules get a menu-bar toggle via `lib.standaloneUI()` — this renders an Enabled checkbox, a DebugMode checkbox, and any inline options. Special modules render their own ImGui window. When Core is installed, standalone UI is automatically suppressed.
+Every module works without Core installed.
+- Regular modules get a menu-bar toggle via `lib.standaloneUI()`
+- Special modules render their own window and use `public.specialState` there too
+
+When Core is installed, standalone UI is automatically suppressed.
 
 ## Debug system
 
@@ -124,19 +156,14 @@ Two distinct functions, two distinct purposes:
 
 | Function | Purpose | Gated by |
 |---|---|---|
-| `lib.warn(msg)` | Framework-detected problems — schema errors, unknown types, skipped modules. Called by lib/core internally. | `lib.config.DebugMode` (Framework Debug in Core's Dev tab) |
-| `lib.log(name, enabled, msg)` | Module author traces — execution flow, values, decisions. Called from module hooks. | Caller-supplied boolean (pass `config.DebugMode`) |
+| `lib.warn(packId, enabled, msg)` | Framework-detected problems such as schema errors, discovery errors, skipped modules | Caller-supplied coordinator debug flag |
+| `lib.log(name, enabled, msg)` | Module author traces and debug warnings | Caller-supplied boolean, usually `config.DebugMode` |
 
 Console output is visually distinct:
-```
-[adamant] schema validation failed: missing configKey    -- lib.warn
-[MyMod] applying first hammer: BaseStaffAspect           -- lib.log
-```
 
-Module authors should never call `lib.warn` directly. Use `lib.log` for all intentional diagnostic output:
-
-```lua
-lib.log("MyMod", config.DebugMode, "hook fired: value=" .. tostring(val))
+```text
+[run-director] Skipping special foo: missing public.specialState
+[MyMod] hook fired: value=Always
 ```
 
-Core's Dev tab controls both flags. Without Core, each module's standalone UI exposes its own DebugMode checkbox.
+Module authors should use `lib.log(...)` for all intentional diagnostics. `lib.warn(...)` is for framework-level problems.
