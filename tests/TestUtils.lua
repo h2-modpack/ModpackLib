@@ -44,6 +44,10 @@ rom.mods['SGG_Modding-Chalk'] = {
     auto = function() return { DebugMode = false } end,
 }
 
+import = function(path)
+    dofile("src/" .. path)
+end
+
 -- Warning capture: collect warnings for assertions
 Warnings = {}
 
