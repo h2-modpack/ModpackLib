@@ -162,7 +162,10 @@ function public.standaloneUI(def, modConfig, apply, revert)
             imgui.Indent()
         end
 
-        local currentValue = opt.configKey and modConfig[opt.configKey] or nil
+        local currentValue = nil
+        if opt.configKey ~= nil then
+            currentValue = modConfig[opt.configKey]
+        end
         local newVal, newChg = public.drawField(imgui, opt, currentValue)
         if newChg and opt.configKey then
             modConfig[opt.configKey] = newVal
