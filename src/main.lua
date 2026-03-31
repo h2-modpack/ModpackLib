@@ -271,7 +271,7 @@ function public.drawField(imgui, field, value, width)
     local ft = FieldTypes[field.type]
     if ft then
         if not field._imguiId then
-            field._imguiId = "##" .. tostring(field.configKey)
+            field._imguiId = "##" .. tostring(field._schemaKey or field.configKey)
         end
         return ft.draw(imgui, field, value, width)
     end
@@ -359,12 +359,30 @@ function public.createSpecialState(modConfig, schema)
 
     local staging = {}
     local dirty = false
+    local fieldByKey = {}
 
     -- -----------------------------------------------------------------
     -- Copy helpers (using shared path accessors)
     -- -----------------------------------------------------------------
     local readPath  = public.readPath
     local writePath = public.writePath
+    for _, field in ipairs(schema) do
+        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+        fieldByKey[schemaKey] = field
+    end
+
+    local function normalizeValue(key, value)
+        local field = fieldByKey[SpecialFieldKey(key)]
+        if not field then
+            return value
+        end
+
+        local ft = FieldTypes[field.type]
+        if not ft or not ft.toStaging then
+            return value
+        end
+        return ft.toStaging(value, field)
+    end
 
     local function copyConfigToStaging()
         for _, field in ipairs(schema) do
@@ -464,17 +482,17 @@ function public.createSpecialState(modConfig, schema)
             return value
         end,
         set = function(key, value)
-            writePath(staging, key, value)
+            writePath(staging, key, normalizeValue(key, value))
             dirty = true
         end,
         update = function(key, updater)
             local current = readPath(staging, key)
-            writePath(staging, key, updater(current))
+            writePath(staging, key, normalizeValue(key, updater(current)))
             dirty = true
         end,
         toggle = function(key)
             local current = readPath(staging, key)
-            writePath(staging, key, not (current == true))
+            writePath(staging, key, normalizeValue(key, not (current == true)))
             dirty = true
         end,
         reloadFromConfig = snapshot,
@@ -563,7 +581,8 @@ FieldTypes.checkbox = {
     toStaging = function(val) return val == true end,
     draw = function(imgui, field, value)
         if value == nil then value = field.default end
-        local newVal, changed = imgui.Checkbox(field.label or field.configKey, value or false)
+        local label = tostring(field.label or field.configKey)
+        local newVal, changed = imgui.Checkbox(label .. (field._imguiId or ""), value or false)
         if imgui.IsItemHovered() and (field.tooltip or "") ~= "" then
             imgui.SetTooltip(field.tooltip)
         end
