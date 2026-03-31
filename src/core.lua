@@ -219,6 +219,188 @@ function public.writePath(tbl, key, value)
     tbl[key] = value
 end
 
+function PrepareSchemaFieldRuntimeMetadata(field)
+    if not field or field.configKey == nil then
+        return
+    end
+    field._schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+    if not field._readValue or not field._writeValue then
+        local configKey = field.configKey
+        if type(configKey) ~= "table" then
+            local key = configKey
+            field._readValue = function(tbl)
+                return tbl[key]
+            end
+            field._writeValue = function(tbl, value)
+                tbl[key] = value
+            end
+            return
+        end
+
+        local len = #configKey
+        if len == 0 then
+            field._readValue = function()
+                return nil
+            end
+            field._writeValue = function()
+            end
+            return
+        end
+
+        if len == 1 then
+            local key = configKey[1]
+            field._readValue = function(tbl)
+                return tbl[key]
+            end
+            field._writeValue = function(tbl, value)
+                tbl[key] = value
+            end
+            return
+        end
+
+        if len == 2 then
+            local key1, key2 = configKey[1], configKey[2]
+            field._readValue = function(tbl)
+                local child = tbl[key1]
+                return child and child[key2] or nil
+            end
+            field._writeValue = function(tbl, value)
+                local child = tbl[key1]
+                if not child then
+                    child = {}
+                    tbl[key1] = child
+                end
+                child[key2] = value
+            end
+            return
+        end
+
+        if len == 3 then
+            local key1, key2, key3 = configKey[1], configKey[2], configKey[3]
+            field._readValue = function(tbl)
+                local child1 = tbl[key1]
+                if not child1 then return nil end
+                local child2 = child1[key2]
+                return child2 and child2[key3] or nil
+            end
+            field._writeValue = function(tbl, value)
+                local child1 = tbl[key1]
+                if not child1 then
+                    child1 = {}
+                    tbl[key1] = child1
+                end
+                local child2 = child1[key2]
+                if not child2 then
+                    child2 = {}
+                    child1[key2] = child2
+                end
+                child2[key3] = value
+            end
+            return
+        end
+
+        field._readValue = function(tbl)
+            return public.readPath(tbl, configKey)
+        end
+        field._writeValue = function(tbl, value)
+            public.writePath(tbl, configKey, value)
+        end
+    end
+end
+
+local ConfigBackendCache = setmetatable({}, { __mode = "k" })
+
+local function GetChalkSectionAndKey(configKey)
+    if type(configKey) == "table" then
+        local len = #configKey
+        if len == 0 then
+            return nil, nil
+        end
+        if len == 1 then
+            return "config", tostring(configKey[1])
+        end
+        return "config." .. table.concat(configKey, ".", 1, len - 1), tostring(configKey[len])
+    end
+    return "config", tostring(configKey)
+end
+
+function public.getConfigBackend(config)
+    local chalkMod = rom and rom.mods and rom.mods["SGG_Modding-Chalk"]
+    if not chalkMod or type(chalkMod.original) ~= "function" then
+        return nil
+    end
+
+    local ok, rawConfig = pcall(chalkMod.original, config)
+    if not ok or type(rawConfig) ~= "table" or type(rawConfig.entries) ~= "table" then
+        return nil
+    end
+
+    local backend = ConfigBackendCache[rawConfig]
+    if backend then
+        return backend
+    end
+
+    local entryIndex = {}
+    for descriptor, entry in pairs(rawConfig.entries) do
+        local section = descriptor.section
+        local key = descriptor.key
+        if section ~= nil and key ~= nil then
+            local sectionEntries = entryIndex[section]
+            if not sectionEntries then
+                sectionEntries = {}
+                entryIndex[section] = sectionEntries
+            end
+            sectionEntries[key] = entry
+        end
+    end
+
+    local pathEntryCache = {}
+    backend = {}
+
+    function backend.getEntry(configKey)
+        local pathKey = SpecialFieldKey(configKey)
+        local cached = pathEntryCache[pathKey]
+        if cached ~= nil then
+            return cached or nil
+        end
+
+        local section, key = GetChalkSectionAndKey(configKey)
+        local entry = section and entryIndex[section] and entryIndex[section][key] or nil
+        if entry and type(entry.get) == "function" and type(entry.set) == "function" then
+            pathEntryCache[pathKey] = entry
+            return entry
+        end
+
+        pathEntryCache[pathKey] = false
+        return nil
+    end
+
+    function backend.readValue(configKey)
+        local entry = backend.getEntry(configKey)
+        if entry then
+            return entry:get()
+        end
+        return nil
+    end
+
+    function backend.writeValue(configKey, value)
+        local entry = backend.getEntry(configKey)
+        if entry then
+            entry:set(value)
+            return true
+        end
+        return false
+    end
+
+    backend.rawConfig = rawConfig
+    ConfigBackendCache[rawConfig] = backend
+    return backend
+end
+
+function public.prepareConfigBackend(config)
+    return public.getConfigBackend(config)
+end
+
 function SpecialFieldKey(configKey)
     if type(configKey) == "table" then
         return table.concat(configKey, ".")

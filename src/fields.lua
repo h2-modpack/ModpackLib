@@ -36,19 +36,21 @@ function public.validateSchema(schema, label)
         return
     end
     local seenKeys = {}
+    local configFields = {}
     for i, field in ipairs(schema) do
         local prefix = label .. " field #" .. i
         if field.type ~= "separator" and not field.configKey then
             libWarn("%s: missing configKey", prefix)
         end
         if field.configKey then
-            field._schemaKey = SpecialFieldKey(field.configKey)
+            PrepareSchemaFieldRuntimeMetadata(field)
             if IsSchemaConfigField(field) then
                 if seenKeys[field._schemaKey] then
                     libWarn("%s: duplicate configKey '%s'", prefix, field._schemaKey)
                 else
                     seenKeys[field._schemaKey] = true
                 end
+                table.insert(configFields, field)
             end
         end
         if not field.type then
@@ -69,6 +71,7 @@ function public.validateSchema(schema, label)
             end
         end
     end
+    schema._configFields = configFields
 end
 
 function NormalizeInteger(field, value)

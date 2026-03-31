@@ -1,21 +1,82 @@
+local function GetSchemaConfigFields(schema)
+    if type(schema) ~= "table" then
+        return {}
+    end
+
+    local configFields = rawget(schema, "_configFields")
+    if configFields then
+        return configFields
+    end
+
+    configFields = {}
+    for _, field in ipairs(schema) do
+        if IsSchemaConfigField(field) then
+            PrepareSchemaFieldRuntimeMetadata(field)
+            table.insert(configFields, field)
+        end
+    end
+    schema._configFields = configFields
+    return configFields
+end
+
+local function BuildConfigEntries(configFields, configBackend)
+    if not configBackend then
+        return nil
+    end
+    local configEntries = {}
+    for _, field in ipairs(configFields) do
+        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+        configEntries[schemaKey] = configBackend.getEntry(field.configKey)
+    end
+    return configEntries
+end
+
+local function ReadConfigFieldValue(field, modConfig, configEntries)
+    local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+    local entry = configEntries and configEntries[schemaKey] or nil
+    if entry then
+        return entry:get()
+    end
+    return field._readValue(modConfig)
+end
+
+local function WriteConfigFieldValue(field, modConfig, value, configEntries)
+    local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+    local entry = configEntries and configEntries[schemaKey] or nil
+    if entry then
+        entry:set(value)
+        return
+    end
+    field._writeValue(modConfig, value)
+end
+
+local function ResolveDebugFieldState(modConfig, schema, specialState)
+    if specialState then
+        return specialState._schemaConfigFields or GetSchemaConfigFields(schema),
+            specialState._configEntries
+    end
+    local configFields = GetSchemaConfigFields(schema)
+    local configEntries = BuildConfigEntries(configFields, public.getConfigBackend(modConfig))
+    return configFields, configEntries
+end
+
 --- Create managed staging state for a special module.
 --- @param modConfig table
 --- @param schema table
 --- @return table
+
 function public.createSpecialState(modConfig, schema)
     public.validateSchema(schema, _PLUGIN.guid or "unknown module")
 
     local staging = {}
     local dirty = false
+    local dirtyKeys = {}
     local fieldByKey = {}
-
-    local readPath = public.readPath
-    local writePath = public.writePath
-    for _, field in ipairs(schema) do
-        if IsSchemaConfigField(field) then
-            local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-            fieldByKey[schemaKey] = field
-        end
+    local configFields = GetSchemaConfigFields(schema)
+    local configEntries = BuildConfigEntries(configFields, public.getConfigBackend(modConfig))
+    for _, field in ipairs(configFields) do
+        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+        fieldByKey[schemaKey] = field
     end
 
     local function normalizeValue(key, value)
@@ -32,24 +93,31 @@ function public.createSpecialState(modConfig, schema)
     end
 
     local function copyConfigToStaging()
-        for _, field in ipairs(schema) do
-            if IsSchemaConfigField(field) then
-                local val = readPath(modConfig, field.configKey)
-                local ft = FieldTypes[field.type]
-                if ft then
-                    writePath(staging, field.configKey, ft.toStaging(val, field))
-                end
+        for _, field in ipairs(configFields) do
+            local val = ReadConfigFieldValue(field, modConfig, configEntries)
+            local ft = FieldTypes[field.type]
+            if ft then
+                field._writeValue(staging, ft.toStaging(val, field))
             end
         end
     end
 
     local function copyStagingToConfig()
-        for _, field in ipairs(schema) do
-            if IsSchemaConfigField(field) then
-                local val = readPath(staging, field.configKey)
-                writePath(modConfig, field.configKey, val)
+        for _, field in ipairs(configFields) do
+            local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+            if dirtyKeys[schemaKey] then
+                local val = field._readValue(staging)
+                WriteConfigFieldValue(field, modConfig, val, configEntries)
             end
         end
+    end
+
+    local function markDirty(key)
+        local schemaKey = SpecialFieldKey(key)
+        if fieldByKey[schemaKey] then
+            dirtyKeys[schemaKey] = true
+        end
+        dirty = true
     end
 
     copyConfigToStaging()
@@ -108,51 +176,79 @@ function public.createSpecialState(modConfig, schema)
     local function snapshot()
         copyConfigToStaging()
         dirty = false
+        dirtyKeys = {}
     end
 
     local function sync()
         copyStagingToConfig()
         dirty = false
+        dirtyKeys = {}
     end
 
     return {
         view = makeReadonly(staging),
         get = function(key)
-            local value = readPath(staging, key)
-            return value
+            local field = fieldByKey[SpecialFieldKey(key)]
+            if field then
+                return field._readValue(staging)
+            end
+            return public.readPath(staging, key)
         end,
         set = function(key, value)
-            writePath(staging, key, normalizeValue(key, value))
-            dirty = true
+            local field = fieldByKey[SpecialFieldKey(key)]
+            local normalized = normalizeValue(key, value)
+            if field then
+                field._writeValue(staging, normalized)
+            else
+                public.writePath(staging, key, normalized)
+            end
+            markDirty(key)
         end,
         update = function(key, updater)
-            local current = readPath(staging, key)
-            writePath(staging, key, normalizeValue(key, updater(current)))
-            dirty = true
+            local field = fieldByKey[SpecialFieldKey(key)]
+            local current = field and field._readValue(staging) or public.readPath(staging, key)
+            local normalized = normalizeValue(key, updater(current))
+            if field then
+                field._writeValue(staging, normalized)
+            else
+                public.writePath(staging, key, normalized)
+            end
+            markDirty(key)
         end,
         toggle = function(key)
-            local current = readPath(staging, key)
-            writePath(staging, key, normalizeValue(key, not (current == true)))
-            dirty = true
+            local field = fieldByKey[SpecialFieldKey(key)]
+            local current = field and field._readValue(staging) or public.readPath(staging, key)
+            local normalized = normalizeValue(key, not (current == true))
+            if field then
+                field._writeValue(staging, normalized)
+            else
+                public.writePath(staging, key, normalized)
+            end
+            markDirty(key)
         end,
         reloadFromConfig = snapshot,
         flushToConfig = sync,
         isDirty = function()
             return dirty
         end,
+        _configEntries = configEntries,
+        _schemaConfigFields = configFields,
+        _debugSnapshot = {},
     }
 end
 
 --- Capture the current config values for a special module's schema-backed fields.
 --- @param modConfig table
 --- @param schema table
+--- @param snapshot table|nil
+--- @param specialState table|nil
 --- @return table
-function public.captureSpecialConfigSnapshot(modConfig, schema)
-    local snapshot = {}
-    for _, field in ipairs(schema or {}) do
-        if IsSchemaConfigField(field) then
-            snapshot[field._schemaKey or SpecialFieldKey(field.configKey)] = public.readPath(modConfig, field.configKey)
-        end
+function public.captureSpecialConfigSnapshot(modConfig, schema, snapshot, specialState)
+    local configFields, configEntries = ResolveDebugFieldState(modConfig, schema, specialState)
+    snapshot = snapshot or {}
+    for _, field in ipairs(configFields) do
+        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+        snapshot[schemaKey] = ReadConfigFieldValue(field, modConfig, configEntries)
     end
     return snapshot
 end
@@ -166,15 +262,15 @@ end
 --- @param before table
 function public.warnIfSpecialConfigBypassedState(name, enabled, specialState, modConfig, schema, before)
     if not enabled then return end
-    for _, field in ipairs(schema or {}) do
-        if IsSchemaConfigField(field) then
-            local key = field._schemaKey or SpecialFieldKey(field.configKey)
-            local current = public.readPath(modConfig, field.configKey)
-            if current ~= before[key] then
-                public.log(name, true,
-                    "special UI modified config directly; use public.specialState for schema-backed state")
-                return
-            end
+    local configFields, configEntries = ResolveDebugFieldState(modConfig, schema, specialState)
+    for _, field in ipairs(configFields) do
+        local key = field._schemaKey or SpecialFieldKey(field.configKey)
+        local current = ReadConfigFieldValue(field, modConfig, configEntries)
+        if current ~= before[key] then
+            public.log(name, true,
+                "special UI modified config directly at '%s'; use public.specialState for schema-backed state",
+                key)
+            return
         end
     end
 end
@@ -197,7 +293,11 @@ function public.runSpecialUiPass(opts)
 
     local before = nil
     if validateEnabled then
-        before = public.captureSpecialConfigSnapshot(opts.config, opts.schema)
+        local snapshot = specialState and specialState._debugSnapshot or nil
+        before = public.captureSpecialConfigSnapshot(opts.config, opts.schema, snapshot, specialState)
+        if specialState then
+            specialState._debugSnapshot = before
+        end
     end
 
     draw(opts.imgui or rom.ImGui, specialState, opts.theme)

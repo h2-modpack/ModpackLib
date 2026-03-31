@@ -151,6 +151,92 @@ function TestSpecialState:testReloadFromConfigClearsUnsyncedViewChanges()
     lu.assertFalse(specialState.isDirty())
 end
 
+function TestSpecialState:testFlushOnlyWritesDirtyKeys()
+    local config = {
+        FlagA = false,
+        FlagB = false,
+    }
+    local schema = {
+        { type = "checkbox", configKey = "FlagA", default = false },
+        { type = "checkbox", configKey = "FlagB", default = false },
+    }
+
+    local specialState = lib.createSpecialState(config, schema)
+    specialState.set("FlagA", true)
+
+    -- Simulate an unrelated runtime update that should not be clobbered by flush.
+    config.FlagB = true
+
+    specialState.flushToConfig()
+
+    lu.assertTrue(config.FlagA)
+    lu.assertTrue(config.FlagB)
+    lu.assertFalse(specialState.isDirty())
+end
+
+function TestSpecialState:testChalkEntryFastPathBypassesWrapperReadsAndWrites()
+    local previousOriginal = rom.mods['SGG_Modding-Chalk'].original
+
+    local values = {
+        Mode = "Fast",
+        Strict = false,
+    }
+    local rawConfig = { entries = {} }
+    local function addEntry(section, key, valueKey)
+        local descriptor = { section = section, key = key }
+        rawConfig.entries[descriptor] = {
+            get = function()
+                return values[valueKey]
+            end,
+            set = function(_, value)
+                values[valueKey] = value
+            end,
+        }
+    end
+    addEntry("config", "Mode", "Mode")
+    addEntry("config", "Strict", "Strict")
+
+    local wrapper = setmetatable({}, {
+        __index = function()
+            error("wrapper read should not be used", 2)
+        end,
+        __newindex = function()
+            error("wrapper write should not be used", 2)
+        end,
+    })
+
+    rom.mods['SGG_Modding-Chalk'].original = function(obj)
+        if obj == wrapper then
+            return rawConfig
+        end
+        return obj
+    end
+
+    local schema = {
+        { type = "dropdown", configKey = "Mode", values = { "Fast", "Slow" }, default = "Fast" },
+        { type = "checkbox", configKey = "Strict", default = false },
+    }
+
+    local specialState = lib.createSpecialState(wrapper, schema)
+    local flushed = lib.runSpecialUiPass({
+        name = "ChalkFastPath",
+        config = wrapper,
+        schema = schema,
+        specialState = specialState,
+        validateEnabled = true,
+        draw = function(_, state)
+            state.set("Mode", "Slow")
+            state.set("Strict", true)
+        end,
+    })
+
+    rom.mods['SGG_Modding-Chalk'].original = previousOriginal
+
+    lu.assertTrue(flushed)
+    lu.assertEquals(values.Mode, "Slow")
+    lu.assertTrue(values.Strict)
+end
+
 TestSpecialConfigWarnings = {}
 
 function TestSpecialConfigWarnings:setUp()
@@ -190,6 +276,7 @@ function TestSpecialConfigWarnings:testWarnsOnDirectConfigWriteWithoutDirtyState
 
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "special UI modified config directly")
+    lu.assertStrContains(Warnings[1], "Strict")
 end
 
 function TestSpecialConfigWarnings:testDoesNotWarnWhenSpecialStateIsDirty()
