@@ -263,11 +263,9 @@ end
 --- @param def table
 --- @param store table
 --- @param specialState table
---- @param apply function
---- @param revert function
 --- @param opts table|nil
 --- @return table
-function public.standaloneSpecialUI(def, store, specialState, apply, revert, opts)
+function public.standaloneSpecialUI(def, store, specialState, opts)
     opts = opts or {}
 
     local function getDrawQuickContent()
@@ -286,8 +284,8 @@ function public.standaloneSpecialUI(def, store, specialState, apply, revert, opt
 
     local function onStateFlushed()
         if def.dataMutation and store.read("Enabled") == true then
-            revert()
-            apply()
+            public.revertDefinition(def, store)
+            public.applyDefinition(def, store)
             rom.game.SetupRunData()
         end
     end
@@ -306,9 +304,9 @@ function public.standaloneSpecialUI(def, store, specialState, apply, revert, opt
             if enabledChanged then
                 store.write("Enabled", enabledValue)
                 if enabledValue then
-                    apply()
+                    public.applyDefinition(def, store)
                 else
-                    revert()
+                    public.revertDefinition(def, store)
                 end
                 if def.dataMutation then
                     rom.game.SetupRunData()

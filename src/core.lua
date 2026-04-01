@@ -3,6 +3,8 @@ local shared = internal.shared
 local libConfig = shared.libConfig
 local _coordinators = shared.coordinators
 local chalk = shared.chalk
+local _mutationRuntime = shared.mutationRuntime or setmetatable({}, { __mode = "k" })
+shared.mutationRuntime = _mutationRuntime
 local SpecialFieldKey
 local PrepareSchemaFieldRuntimeMetadata
 local IsSchemaConfigField
@@ -59,6 +61,37 @@ function public.log(name, enabled, fmt, ...)
     print("[" .. name .. "] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
 end
 
+public.MutationMode = {
+    Patch = "patch",
+    Manual = "manual",
+    Hybrid = "hybrid",
+}
+
+local function CloneMutationValue(value)
+    if type(value) == "table" then
+        return rom.game.DeepCopyTable(value)
+    end
+    return value
+end
+
+local function MutationDeepEqual(a, b)
+    if a == b then return true end
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return false end
+
+    for key, value in pairs(a) do
+        if not MutationDeepEqual(value, b[key]) then
+            return false
+        end
+    end
+    for key in pairs(b) do
+        if a[key] == nil then
+            return false
+        end
+    end
+    return true
+end
+
 --- Create an isolated backup/restore pair.
 --- @return function backup
 --- @return function restore
@@ -95,17 +128,285 @@ function public.createBackupSystem()
     return backup, restore
 end
 
+--- Create a reversible declarative mutation plan.
+--- @return table
+function public.createMutationPlan()
+    local backup, restore = public.createBackupSystem()
+    local operations = {}
+    local applied = false
+    local plan = {}
+
+    local function appendOperation(op)
+        operations[#operations + 1] = op
+        return plan
+    end
+
+    function plan.set(_, tbl, key, value)
+        return appendOperation({
+            kind = "set",
+            tbl = tbl,
+            key = key,
+            value = CloneMutationValue(value),
+        })
+    end
+
+    function plan.setMany(_, tbl, kv)
+        return appendOperation({
+            kind = "setMany",
+            tbl = tbl,
+            kv = kv,
+        })
+    end
+
+    function plan.transform(_, tbl, key, fn)
+        return appendOperation({
+            kind = "transform",
+            tbl = tbl,
+            key = key,
+            fn = fn,
+        })
+    end
+
+    function plan.append(_, tbl, key, value)
+        return appendOperation({
+            kind = "append",
+            tbl = tbl,
+            key = key,
+            value = CloneMutationValue(value),
+        })
+    end
+
+    function plan.appendUnique(_, tbl, key, value, equivalentFn)
+        return appendOperation({
+            kind = "appendUnique",
+            tbl = tbl,
+            key = key,
+            value = CloneMutationValue(value),
+            equivalentFn = equivalentFn or MutationDeepEqual,
+        })
+    end
+
+    function plan.apply()
+        if applied then
+            return false
+        end
+
+        for _, op in ipairs(operations) do
+            local tbl = op.tbl
+            local key = op.key
+
+            if op.kind == "set" then
+                if tbl[key] ~= op.value then
+                    backup(tbl, key)
+                    tbl[key] = CloneMutationValue(op.value)
+                end
+            elseif op.kind == "setMany" then
+                for mapKey, value in pairs(op.kv) do
+                    if tbl[mapKey] ~= value then
+                        backup(tbl, mapKey)
+                        tbl[mapKey] = CloneMutationValue(value)
+                    end
+                end
+            elseif op.kind == "transform" then
+                backup(tbl, key)
+                tbl[key] = op.fn(tbl[key], key, tbl)
+            elseif op.kind == "append" then
+                local list = tbl[key]
+                if list == nil then
+                    backup(tbl, key)
+                    list = {}
+                    tbl[key] = list
+                elseif type(list) ~= "table" then
+                    error(("mutation plan append requires table at key '%s'"):format(tostring(key)), 0)
+                else
+                    backup(tbl, key)
+                end
+                list[#list + 1] = CloneMutationValue(op.value)
+            elseif op.kind == "appendUnique" then
+                local list = tbl[key]
+                if list == nil then
+                    backup(tbl, key)
+                    list = {}
+                    tbl[key] = list
+                elseif type(list) ~= "table" then
+                    error(("mutation plan appendUnique requires table at key '%s'"):format(tostring(key)), 0)
+                end
+
+                local exists = false
+                for _, entry in ipairs(list) do
+                    if op.equivalentFn(entry, op.value) then
+                        exists = true
+                        break
+                    end
+                end
+                if not exists then
+                    if tbl[key] == list then
+                        backup(tbl, key)
+                    end
+                    list[#list + 1] = CloneMutationValue(op.value)
+                end
+            end
+        end
+
+        applied = true
+        return true
+    end
+
+    function plan.revert()
+        if not applied then
+            return false
+        end
+        restore()
+        applied = false
+        return true
+    end
+
+    return plan
+end
+
+--- Infer a module's mutation authoring shape from its exports.
+--- @param def table
+--- @return string|nil, table
+function public.inferMutationMode(def)
+    local hasPatch = def and type(def.patchPlan) == "function" or false
+    local hasApply = def and type(def.apply) == "function" or false
+    local hasRevert = def and type(def.revert) == "function" or false
+    local hasManual = hasApply and hasRevert
+
+    local inferred = nil
+    if hasPatch and hasManual then
+        inferred = public.MutationMode.Hybrid
+    elseif hasPatch then
+        inferred = public.MutationMode.Patch
+    elseif hasManual then
+        inferred = public.MutationMode.Manual
+    end
+
+    return inferred, {
+        hasPatch = hasPatch,
+        hasApply = hasApply,
+        hasRevert = hasRevert,
+        hasManual = hasManual,
+    }
+end
+
+local function GetActiveMutationPlan(store)
+    local runtime = store and _mutationRuntime[store]
+    return runtime and runtime.plan or nil
+end
+
+local function SetActiveMutationPlan(store, plan)
+    if not store then
+        return
+    end
+    if plan == nil then
+        _mutationRuntime[store] = nil
+        return
+    end
+    _mutationRuntime[store] = { plan = plan }
+end
+
+local function BuildMutationPlan(def, store)
+    local builder = def and def.patchPlan
+    if type(builder) ~= "function" then
+        return nil
+    end
+
+    local plan = public.createMutationPlan()
+    builder(plan, store)
+    return plan
+end
+
+--- Activate a module definition using inferred patch/manual/hybrid mutation behavior.
+--- @param def table
+--- @param store table|nil
+--- @return boolean, string|nil
+function public.applyDefinition(def, store)
+    local inferred, info = public.inferMutationMode(def)
+    if not inferred then
+        return false, "no supported mutation lifecycle found"
+    end
+
+    local activePlan = GetActiveMutationPlan(store)
+    if activePlan then
+        activePlan:revert()
+        SetActiveMutationPlan(store, nil)
+    end
+
+    local builtPlan = nil
+    if info.hasPatch then
+        local okBuild, result = pcall(BuildMutationPlan, def, store)
+        if not okBuild then
+            return false, result
+        end
+        builtPlan = result
+        if builtPlan then
+            local okApply, errApply = pcall(builtPlan.apply, builtPlan)
+            if not okApply then
+                return false, errApply
+            end
+            SetActiveMutationPlan(store, builtPlan)
+        end
+    end
+
+    if info.hasManual then
+        local okManual, errManual = pcall(def.apply)
+        if not okManual then
+            if builtPlan then
+                pcall(builtPlan.revert, builtPlan)
+                SetActiveMutationPlan(store, nil)
+            end
+            return false, errManual
+        end
+    end
+
+    return true, nil
+end
+
+--- Deactivate a module definition using inferred patch/manual/hybrid mutation behavior.
+--- @param def table
+--- @param store table|nil
+--- @return boolean, string|nil
+function public.revertDefinition(def, store)
+    local inferred, info = public.inferMutationMode(def)
+    if not inferred then
+        return false, "no supported mutation lifecycle found"
+    end
+
+    local firstErr = nil
+
+    if info.hasManual then
+        local okManual, errManual = pcall(def.revert)
+        if not okManual and not firstErr then
+            firstErr = errManual
+        end
+    end
+
+    local activePlan = GetActiveMutationPlan(store)
+    if activePlan then
+        local okPlan, errPlan = pcall(activePlan.revert, activePlan)
+        SetActiveMutationPlan(store, nil)
+        if not okPlan and not firstErr then
+            firstErr = errPlan
+        end
+    end
+
+    if firstErr then
+        return false, firstErr
+    end
+
+    return true, nil
+end
+
 --- Build a menu-bar callback for a boolean mod.
 --- @param def table
 --- @param store table
---- @param apply function
---- @param revert function
 --- @return function
-function public.standaloneUI(def, store, apply, revert)
+function public.standaloneUI(def, store)
     local function onOptionChanged()
         if def.dataMutation then
-            revert()
-            apply()
+            public.revertDefinition(def, store)
+            public.applyDefinition(def, store)
             rom.game.SetupRunData()
         end
     end
@@ -152,7 +453,11 @@ function public.standaloneUI(def, store, apply, revert)
             local val, chg = imgui.Checkbox(def.name, enabled)
             if chg then
                 store.write("Enabled", val)
-                if val then apply() else revert() end
+                if val then
+                    public.applyDefinition(def, store)
+                else
+                    public.revertDefinition(def, store)
+                end
                 if def.dataMutation then rom.game.SetupRunData() end
             end
             if imgui.IsItemHovered() and (def.tooltip or "") ~= "" then

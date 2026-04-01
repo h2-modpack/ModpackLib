@@ -6,6 +6,7 @@ See also:
 
 - `FIELD_TYPES.md` for the dedicated field type contract
 - `../adamant-ModpackFramework/HASH_PROFILE_ABI.md` for the shared hash/profile ABI policy
+- `../Support/mutation_plan_migration.md` for mutation-plan migration examples
 
 ## Architecture
 
@@ -23,7 +24,9 @@ local lib = rom.mods["adamant-ModpackLib"]
 | `lib.warn(packId, enabled, fmt, ...)` | Framework diagnostic print, printf-style. For framework-detected problems. Do not use for normal module tracing. |
 | `lib.log(name, enabled, fmt, ...)` | Module trace print, printf-style, gated by the caller-supplied boolean |
 | `lib.createBackupSystem()` | Returns `backup, revert` for isolated state save/restore |
-| `lib.standaloneUI(def, store, apply, revert)` | Returns menu-bar callback for standalone regular modules |
+| `lib.createMutationPlan()` | Returns a reversible declarative mutation plan for patch-style data edits |
+| `lib.MutationMode` | Optional enum-like constants for `definition.mutationMode` |
+| `lib.standaloneUI(def, store)` | Returns menu-bar callback for standalone regular modules |
 | `lib.readPath(tbl, key)` | Read from table using string or path key |
 | `lib.writePath(tbl, key, value)` | Write to table using string or path key |
 | `lib.drawField(imgui, field, value, width)` | Render a regular-module option widget, returns `(newValue, changed)` |
@@ -51,37 +54,148 @@ public.definition = {
     dataMutation = true,
 }
 
-public.definition.apply  = apply
-public.definition.revert = revert
+public.definition.apply  = apply   -- optional in patch-only modules
+public.definition.revert = revert  -- optional in patch-only modules
 ```
 
-- `apply` is called when the module is enabled
-- `revert` is called when disabled, usually the closure from `createBackupSystem()`
-- Framework wraps both in `pcall`; a failing module should not crash the pack UI
+- mutation lifecycle is inferred from exports
+- Framework and standalone helpers both call Lib-owned orchestration, not raw `apply/revert` directly
+- failing mutation lifecycle work is warned, not allowed to crash the pack UI
 
 ### Mutation authoring contract
 
-For modules that mutate game data, `apply` / `revert` is still an author-owned semantic contract.
-Framework and Lib orchestrate when those functions run; they do not verify that the module backed up
-the right keys or restored them completely.
+For modules that mutate game data, Lib now supports three authoring shapes:
 
-Current standard:
+- patch-only
+- manual-only
+- hybrid
 
-- `lib.createBackupSystem()` is the default backup / restore primitive
+Current v1 rule:
+
+- shape is inferred from exports
+- `definition.mutationMode = lib.MutationMode.*` is optional
+- if the enum is present and does not match the inferred shape, Framework warns
+
+### Patch-only modules
+
+Patch-only modules expose:
+
+```lua
+public.definition.dataMutation = true
+public.definition.patchPlan = function(plan, store)
+    plan:set(SomeTable, "SomeKey", 123)
+end
+```
+
+Patch plans use `lib.createMutationPlan()` internally and are the preferred path for common
+reversible table edits.
+
+Supported v1 primitives:
+
+- `plan:set(tbl, key, value)`
+- `plan:setMany(tbl, kv)`
+- `plan:transform(tbl, key, fn)`
+- `plan:append(tbl, key, value)`
+- `plan:appendUnique(tbl, key, value, equivalentFn?)`
+
+Important:
+
+- plans are built fresh on every apply
+- `appendUnique(...)` uses Lib-owned deep-equivalence by default
+- `transform(...)` returns the full replacement value for the targeted key
+
+### Manual-only modules
+
+Manual modules expose:
+
+```lua
+public.definition.dataMutation = true
+public.definition.apply = apply
+public.definition.revert = revert
+```
+
+Use this when the mutation logic is too procedural or engine-specific for a patch plan.
+
+Current standard manual primitive:
+
+- `lib.createBackupSystem()`
+
+Current guidance:
+
 - call `backup(...)` before every write performed by `apply()`
 - use the returned `restore()` as `revert()` unless the module has a clear reason to wrap it
-- set `definition.dataMutation = true` when `apply` / `revert` touches game data rather than only config
+- do not hand-roll ad hoc saved-value registries when `createBackupSystem()` is sufficient
 
-Do not default to ad hoc saved-value tables when `createBackupSystem()` is sufficient. If the
-mutation contract is tightened in the future, modules already using the shared primitive will be the
-easiest to migrate.
+### Hybrid modules
 
-Likely future direction:
+Hybrid modules expose both:
 
-- explicit mutation modes such as `patch` vs `manual`
-- a Lib-owned patch / mutation plan for common mutation modules
+```lua
+public.definition.patchPlan = function(plan, store) ... end
+public.definition.apply = apply
+public.definition.revert = revert
+```
 
-Until then, `apply` / `revert` remains an explicit author responsibility.
+Use this when the module has:
+
+- deterministic table edits that fit patch mode
+- plus procedural leftovers that still need manual mode
+
+Lib orchestration order is stable:
+
+- apply: patch first, then manual
+- revert: manual first, then patch
+
+Practical rule:
+
+- keep patch-owned keys and manual-owned keys conceptually separate where possible
+- do not intentionally make patch and manual logic fight over the same `(table, key)` unless the
+  module author owns that interaction deliberately
+
+### Optional mutation enum
+
+Modules may declare:
+
+```lua
+public.definition.mutationMode = lib.MutationMode.Patch
+public.definition.mutationMode = lib.MutationMode.Manual
+public.definition.mutationMode = lib.MutationMode.Hybrid
+```
+
+This is optional in v1.
+
+Current behavior:
+
+- absent enum: shape is inferred silently
+- present matching enum: accepted
+- present mismatched enum: warning only
+
+### When to choose which
+
+Prefer patch mode when the change is fundamentally:
+
+- set/replace one or more keys
+- append to a list
+- append-if-missing
+- clone/modify/replace one keyed value
+
+Prefer manual mode when the change is fundamentally:
+
+- procedural
+- hook-like
+- engine-side
+- difficult to express as a bounded table mutation
+
+Prefer hybrid when a module is mostly patch-shaped but still has a small procedural remainder.
+
+### Current enforcement
+
+Framework warns when:
+
+- `dataMutation = true` but the module exposes neither patch plan nor manual `apply/revert`
+- `definition.mutationMode` is present but does not match the inferred shape
+
+Patch mode and hybrid mode are now the preferred tightening path for reversible data edits.
 
 ### Inline options (regular modules)
 
@@ -216,6 +330,15 @@ Every module works without Core installed.
 - Special modules render their own window and use `public.store.specialState` there too
 
 When Core is installed, standalone UI is automatically suppressed.
+
+Standalone helpers now follow the same inferred mutation lifecycle as Framework:
+
+- patch-only modules are supported
+- manual-only modules are supported
+- hybrid modules are supported
+
+The helper signatures still accept `apply` / `revert` for compatibility, but the mutation lifecycle
+is driven by the module definition shape rather than those callback parameters alone.
 
 ## Debug system
 
