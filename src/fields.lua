@@ -1,3 +1,11 @@
+local internal = AdamantModpackLib_Internal
+local shared = internal.shared
+local FieldTypes = shared.FieldTypes
+local libWarn = shared.libWarn
+local PrepareSchemaFieldRuntimeMetadata = shared.PrepareSchemaFieldRuntimeMetadata
+local IsSchemaConfigField = shared.IsSchemaConfigField
+local ChoiceDisplay = shared.ChoiceDisplay
+
 --- Render a schema field widget. Returns (newValue, changed).
 --- @param imgui table
 --- @param field table
@@ -74,7 +82,7 @@ function public.validateSchema(schema, label)
     schema._configFields = configFields
 end
 
-function NormalizeInteger(field, value)
+local function NormalizeInteger(field, value)
     local num = tonumber(value)
     if num == nil then
         num = tonumber(field.default) or 0
@@ -88,6 +96,7 @@ function NormalizeInteger(field, value)
     end
     return num
 end
+shared.NormalizeInteger = NormalizeInteger
 
 FieldTypes.checkbox = {
     validate = function(field, prefix)

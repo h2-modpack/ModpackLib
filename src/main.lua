@@ -11,11 +11,18 @@ rom = rom
 _PLUGIN = _PLUGIN
 
 local chalk = mods['SGG_Modding-Chalk']
-libConfig = chalk.auto('config.lua')
+local libConfig = chalk.auto('config.lua')
 public.config = libConfig
 
-FieldTypes = {}
-_coordinators = {}
+local FieldTypes = {}
+local _coordinators = {}
+AdamantModpackLib_Internal = AdamantModpackLib_Internal or {}
+local internal = AdamantModpackLib_Internal
+internal.shared = {
+    libConfig = libConfig,
+    FieldTypes = FieldTypes,
+    coordinators = _coordinators,
+}
 
 import 'core.lua'
 import 'fields.lua'

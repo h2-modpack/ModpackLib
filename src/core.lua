@@ -1,3 +1,12 @@
+local internal = AdamantModpackLib_Internal
+local shared = internal.shared
+local libConfig = shared.libConfig
+local _coordinators = shared.coordinators
+local SpecialFieldKey
+local PrepareSchemaFieldRuntimeMetadata
+local IsSchemaConfigField
+local ChoiceDisplay
+
 --- Register a coordinator's config under its packId.
 --- Called by Framework.init on behalf of the coordinator.
 --- Pass nil to deregister (used in tests and hot-reload).
@@ -25,10 +34,11 @@ function public.isEnabled(modConfig, packId)
 end
 
 --- Lib-internal diagnostic — gated on lib's own DebugMode.
-function libWarn(fmt, ...)
+local function libWarn(fmt, ...)
     if not libConfig.DebugMode then return end
     print("[lib] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
 end
+shared.libWarn = libWarn
 
 --- Print a framework diagnostic warning, gated on the caller's enabled flag.
 --- @param packId string
@@ -219,7 +229,7 @@ function public.writePath(tbl, key, value)
     tbl[key] = value
 end
 
-function PrepareSchemaFieldRuntimeMetadata(field)
+PrepareSchemaFieldRuntimeMetadata = function(field)
     if not field or field.configKey == nil then
         return
     end
@@ -307,6 +317,7 @@ function PrepareSchemaFieldRuntimeMetadata(field)
         end
     end
 end
+shared.PrepareSchemaFieldRuntimeMetadata = PrepareSchemaFieldRuntimeMetadata
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })
 
@@ -401,20 +412,23 @@ function public.prepareConfigBackend(config)
     return public.getConfigBackend(config)
 end
 
-function SpecialFieldKey(configKey)
+SpecialFieldKey = function(configKey)
     if type(configKey) == "table" then
         return table.concat(configKey, ".")
     end
     return tostring(configKey)
 end
+shared.SpecialFieldKey = SpecialFieldKey
 
-function IsSchemaConfigField(field)
+IsSchemaConfigField = function(field)
     return field and field.type ~= "separator" and field.configKey ~= nil
 end
+shared.IsSchemaConfigField = IsSchemaConfigField
 
-function ChoiceDisplay(field, value)
+ChoiceDisplay = function(field, value)
     if field.displayValues and field.displayValues[value] ~= nil then
         return tostring(field.displayValues[value])
     end
     return tostring(value)
 end
+shared.ChoiceDisplay = ChoiceDisplay

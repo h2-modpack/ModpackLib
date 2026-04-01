@@ -1,3 +1,11 @@
+local internal = AdamantModpackLib_Internal
+local shared = internal.shared
+local FieldTypes = shared.FieldTypes
+local _coordinators = shared.coordinators
+local SpecialFieldKey = shared.SpecialFieldKey
+local PrepareSchemaFieldRuntimeMetadata = shared.PrepareSchemaFieldRuntimeMetadata
+local IsSchemaConfigField = shared.IsSchemaConfigField
+
 local function GetSchemaConfigFields(schema)
     if type(schema) ~= "table" then
         return {}
@@ -403,6 +411,7 @@ function public.standaloneSpecialUI(def, modConfig, specialState, apply, revert,
                     specialState = specialState,
                     theme = opts.theme,
                     draw = drawQuickContent,
+                    validateEnabled = false,
                     onFlushed = onStateFlushed,
                 })
             end
