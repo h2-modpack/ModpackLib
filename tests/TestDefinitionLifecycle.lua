@@ -1,8 +1,8 @@
 local lu = require('luaunit')
 
-TestMutationPlan = {}
+TestDefinitionLifecycle = {}
 
-function TestMutationPlan:testSetApplyAndRevert()
+function TestDefinitionLifecycle:testSetApplyAndRevert()
     local plan = lib.createMutationPlan()
     local tbl = { HP = 100 }
 
@@ -14,7 +14,7 @@ function TestMutationPlan:testSetApplyAndRevert()
     lu.assertEquals(tbl.HP, 100)
 end
 
-function TestMutationPlan:testSetClonesTableValue()
+function TestDefinitionLifecycle:testSetClonesTableValue()
     local plan = lib.createMutationPlan()
     local replacement = { Damage = 100 }
     local tbl = { Data = { Damage = 10 } }
@@ -28,7 +28,7 @@ function TestMutationPlan:testSetClonesTableValue()
     lu.assertEquals(tbl.Data.Damage, 10)
 end
 
-function TestMutationPlan:testSetManyApplyAndRevert()
+function TestDefinitionLifecycle:testSetManyApplyAndRevert()
     local plan = lib.createMutationPlan()
     local tbl = { A = 1, B = 2, C = 3 }
 
@@ -45,7 +45,7 @@ function TestMutationPlan:testSetManyApplyAndRevert()
     lu.assertEquals(tbl.C, 3)
 end
 
-function TestMutationPlan:testTransformApplyAndRevert()
+function TestDefinitionLifecycle:testTransformApplyAndRevert()
     local plan = lib.createMutationPlan()
     local tbl = { Requirements = { "A" } }
 
@@ -62,7 +62,7 @@ function TestMutationPlan:testTransformApplyAndRevert()
     lu.assertEquals(tbl.Requirements, { "A" })
 end
 
-function TestMutationPlan:testAppendCreatesMissingListAndRestoresNil()
+function TestDefinitionLifecycle:testAppendCreatesMissingListAndRestoresNil()
     local plan = lib.createMutationPlan()
     local tbl = {}
 
@@ -75,7 +75,7 @@ function TestMutationPlan:testAppendCreatesMissingListAndRestoresNil()
     lu.assertNil(tbl.Values)
 end
 
-function TestMutationPlan:testAppendUniqueUsesDeepEquivalenceByDefault()
+function TestDefinitionLifecycle:testAppendUniqueUsesDeepEquivalenceByDefault()
     local plan = lib.createMutationPlan()
     local tbl = {
         Requirements = {
@@ -91,7 +91,7 @@ function TestMutationPlan:testAppendUniqueUsesDeepEquivalenceByDefault()
     lu.assertEquals(#tbl.Requirements, 1)
 end
 
-function TestMutationPlan:testAppendUniqueCanUseCustomComparator()
+function TestDefinitionLifecycle:testAppendUniqueCanUseCustomComparator()
     local plan = lib.createMutationPlan()
     local tbl = { Values = { { Name = "A", Count = 1 } } }
 
@@ -103,7 +103,7 @@ function TestMutationPlan:testAppendUniqueCanUseCustomComparator()
     lu.assertEquals(#tbl.Values, 1)
 end
 
-function TestMutationPlan:testApplyAndRevertAreRepeatSafe()
+function TestDefinitionLifecycle:testApplyAndRevertAreRepeatSafe()
     local plan = lib.createMutationPlan()
     local tbl = { Values = {} }
 
@@ -117,7 +117,7 @@ function TestMutationPlan:testApplyAndRevertAreRepeatSafe()
     lu.assertEquals(tbl.Values, {})
 end
 
-function TestMutationPlan:testAppendErrorsOnNonTableTarget()
+function TestDefinitionLifecycle:testAppendErrorsOnNonTableTarget()
     local plan = lib.createMutationPlan()
     local tbl = { Values = 5 }
 
@@ -125,7 +125,7 @@ function TestMutationPlan:testAppendErrorsOnNonTableTarget()
     lu.assertError(plan.apply)
 end
 
-function TestMutationPlan:testAppendUniqueDoesNotAliasInsertedTable()
+function TestDefinitionLifecycle:testAppendUniqueDoesNotAliasInsertedTable()
     local plan = lib.createMutationPlan()
     local entry = { Name = "A", Meta = { Count = 1 } }
     local tbl = { Values = {} }
@@ -137,7 +137,7 @@ function TestMutationPlan:testAppendUniqueDoesNotAliasInsertedTable()
     lu.assertEquals(tbl.Values[1].Meta.Count, 1)
 end
 
-function TestMutationPlan:testInferMutationShapeManual()
+function TestDefinitionLifecycle:testInferMutationShapeManual()
     local mode, info = lib.inferMutationShape({
         apply = function() end,
         revert = function() end,
@@ -148,7 +148,7 @@ function TestMutationPlan:testInferMutationShapeManual()
     lu.assertFalse(info.hasPatch)
 end
 
-function TestMutationPlan:testInferMutationShapePatch()
+function TestDefinitionLifecycle:testInferMutationShapePatch()
     local mode, info = lib.inferMutationShape({
         patchPlan = function() end,
     })
@@ -158,7 +158,7 @@ function TestMutationPlan:testInferMutationShapePatch()
     lu.assertFalse(info.hasManual)
 end
 
-function TestMutationPlan:testInferMutationShapeHybrid()
+function TestDefinitionLifecycle:testInferMutationShapeHybrid()
     local mode, info = lib.inferMutationShape({
         patchPlan = function() end,
         apply = function() end,
@@ -170,14 +170,14 @@ function TestMutationPlan:testInferMutationShapeHybrid()
     lu.assertTrue(info.hasManual)
 end
 
-function TestMutationPlan:testAffectsRunDataIgnoresDeprecatedFlag()
+function TestDefinitionLifecycle:testAffectsRunDataIgnoresDeprecatedFlag()
     lu.assertTrue(lib.affectsRunData({ affectsRunData = true }))
     lu.assertFalse(lib.affectsRunData({ affectsRunData = false }))
     lu.assertFalse(lib.affectsRunData({ dataMutation = true }))
     lu.assertFalse(lib.affectsRunData({}))
 end
 
-function TestMutationPlan:testApplyDefinitionSupportsPatchOnly()
+function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()
     local store = lib.createStore({ Enabled = false })
     local target = { Value = 1 }
     local def = {
@@ -197,7 +197,7 @@ function TestMutationPlan:testApplyDefinitionSupportsPatchOnly()
     lu.assertEquals(target.Value, 1)
 end
 
-function TestMutationPlan:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunDataUnaffected()
+function TestDefinitionLifecycle:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunDataUnaffected()
     local store = lib.createStore({ Enabled = false })
     local def = {
         affectsRunData = false,
@@ -212,7 +212,7 @@ function TestMutationPlan:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunData
     lu.assertNil(err)
 end
 
-function TestMutationPlan:testSetDefinitionEnabledCommitsOnlyAfterSuccessfulEnable()
+function TestDefinitionLifecycle:testSetDefinitionEnabledCommitsOnlyAfterSuccessfulEnable()
     local store = lib.createStore({ Enabled = false })
     local applied = false
     local def = {
@@ -230,7 +230,7 @@ function TestMutationPlan:testSetDefinitionEnabledCommitsOnlyAfterSuccessfulEnab
     lu.assertTrue(store.read("Enabled"))
 end
 
-function TestMutationPlan:testSetDefinitionEnabledDoesNotCommitFailedEnable()
+function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedEnable()
     local store = lib.createStore({ Enabled = false })
     local def = {
         apply = function()
@@ -246,7 +246,7 @@ function TestMutationPlan:testSetDefinitionEnabledDoesNotCommitFailedEnable()
     lu.assertFalse(store.read("Enabled"))
 end
 
-function TestMutationPlan:testSetDefinitionEnabledDoesNotCommitFailedDisable()
+function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedDisable()
     local store = lib.createStore({ Enabled = true })
     local def = {
         apply = function() end,
@@ -262,7 +262,7 @@ function TestMutationPlan:testSetDefinitionEnabledDoesNotCommitFailedDisable()
     lu.assertTrue(store.read("Enabled"))
 end
 
-function TestMutationPlan:testSetDefinitionEnabledReappliesWhenAlreadyEnabled()
+function TestDefinitionLifecycle:testSetDefinitionEnabledReappliesWhenAlreadyEnabled()
     local store = lib.createStore({ Enabled = true })
     local calls = {}
     local def = {
@@ -282,7 +282,7 @@ function TestMutationPlan:testSetDefinitionEnabledReappliesWhenAlreadyEnabled()
     lu.assertTrue(store.read("Enabled"))
 end
 
-function TestMutationPlan:testSetDefinitionEnabledNoOpsWhenAlreadyDisabled()
+function TestDefinitionLifecycle:testSetDefinitionEnabledNoOpsWhenAlreadyDisabled()
     local store = lib.createStore({ Enabled = false })
     local revertCalls = 0
     local def = {
@@ -300,7 +300,7 @@ function TestMutationPlan:testSetDefinitionEnabledNoOpsWhenAlreadyDisabled()
     lu.assertFalse(store.read("Enabled"))
 end
 
-function TestMutationPlan:testReapplyDefinitionStopsWhenRevertFails()
+function TestDefinitionLifecycle:testReapplyDefinitionStopsWhenRevertFails()
     local store = lib.createStore({ Enabled = true })
     local applyCalls = 0
     local def = {
@@ -319,7 +319,7 @@ function TestMutationPlan:testReapplyDefinitionStopsWhenRevertFails()
     lu.assertEquals(applyCalls, 0)
 end
 
-function TestMutationPlan:testHybridOrderingIsPatchThenManualOnApplyAndManualThenPatchOnRevert()
+function TestDefinitionLifecycle:testHybridOrderingIsPatchThenManualOnApplyAndManualThenPatchOnRevert()
     local store = lib.createStore({ Enabled = false })
     local target = { Value = 0 }
     local order = {}

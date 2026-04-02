@@ -8,7 +8,7 @@ require('tests/TestPathHelpers')
 require('tests/TestFieldTypes')
 require('tests/TestValidation')
 require('tests/TestBackupSystem')
-require('tests/TestMutationPlan')
+require('tests/TestDefinitionLifecycle')
 require('tests/TestUiState')
 require('tests/TestIsEnabled')
 
