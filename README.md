@@ -16,6 +16,16 @@ It owns:
 - [FIELD_TYPES.md](FIELD_TYPES.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
+## Public Contract Freeze
+
+The public Lib contract is intended to be stable:
+- `createStore(...)`, `store.read/write`, and `store.uiState`
+- field definitions and built-in field types
+- lifecycle helpers for `affectsRunData` modules
+- standalone regular/special UI helpers
+
+Anything not documented in the public docs should be treated as internal.
+
 ## Validation
 
 ```bash
