@@ -2,12 +2,6 @@ local lu = require('luaunit')
 
 TestMutationPlan = {}
 
-function TestMutationPlan:testMutationModeEnum()
-    lu.assertEquals(lib.MutationMode.Patch, "patch")
-    lu.assertEquals(lib.MutationMode.Manual, "manual")
-    lu.assertEquals(lib.MutationMode.Hybrid, "hybrid")
-end
-
 function TestMutationPlan:testSetApplyAndRevert()
     local plan = lib.createMutationPlan()
     local tbl = { HP = 100 }
@@ -143,37 +137,44 @@ function TestMutationPlan:testAppendUniqueDoesNotAliasInsertedTable()
     lu.assertEquals(tbl.Values[1].Meta.Count, 1)
 end
 
-function TestMutationPlan:testInferMutationModeManual()
-    local mode, info = lib.inferMutationMode({
+function TestMutationPlan:testInferMutationShapeManual()
+    local mode, info = lib.inferMutationShape({
         apply = function() end,
         revert = function() end,
     })
 
-    lu.assertEquals(mode, lib.MutationMode.Manual)
+    lu.assertEquals(mode, "manual")
     lu.assertTrue(info.hasManual)
     lu.assertFalse(info.hasPatch)
 end
 
-function TestMutationPlan:testInferMutationModePatch()
-    local mode, info = lib.inferMutationMode({
+function TestMutationPlan:testInferMutationShapePatch()
+    local mode, info = lib.inferMutationShape({
         patchPlan = function() end,
     })
 
-    lu.assertEquals(mode, lib.MutationMode.Patch)
+    lu.assertEquals(mode, "patch")
     lu.assertTrue(info.hasPatch)
     lu.assertFalse(info.hasManual)
 end
 
-function TestMutationPlan:testInferMutationModeHybrid()
-    local mode, info = lib.inferMutationMode({
+function TestMutationPlan:testInferMutationShapeHybrid()
+    local mode, info = lib.inferMutationShape({
         patchPlan = function() end,
         apply = function() end,
         revert = function() end,
     })
 
-    lu.assertEquals(mode, lib.MutationMode.Hybrid)
+    lu.assertEquals(mode, "hybrid")
     lu.assertTrue(info.hasPatch)
     lu.assertTrue(info.hasManual)
+end
+
+function TestMutationPlan:testAffectsRunDataIgnoresDeprecatedFlag()
+    lu.assertTrue(lib.affectsRunData({ affectsRunData = true }))
+    lu.assertFalse(lib.affectsRunData({ affectsRunData = false }))
+    lu.assertFalse(lib.affectsRunData({ dataMutation = true }))
+    lu.assertFalse(lib.affectsRunData({}))
 end
 
 function TestMutationPlan:testApplyDefinitionSupportsPatchOnly()
@@ -194,6 +195,128 @@ function TestMutationPlan:testApplyDefinitionSupportsPatchOnly()
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
+end
+
+function TestMutationPlan:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunDataUnaffected()
+    local store = lib.createStore({ Enabled = false })
+    local def = {
+        affectsRunData = false,
+    }
+
+    local ok, err = lib.applyDefinition(def, store)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+
+    ok, err = lib.revertDefinition(def, store)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+end
+
+function TestMutationPlan:testSetDefinitionEnabledCommitsOnlyAfterSuccessfulEnable()
+    local store = lib.createStore({ Enabled = false })
+    local applied = false
+    local def = {
+        apply = function()
+            applied = true
+        end,
+        revert = function() end,
+    }
+
+    local ok, err = lib.setDefinitionEnabled(def, store, true)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertTrue(applied)
+    lu.assertTrue(store.read("Enabled"))
+end
+
+function TestMutationPlan:testSetDefinitionEnabledDoesNotCommitFailedEnable()
+    local store = lib.createStore({ Enabled = false })
+    local def = {
+        apply = function()
+            error("enable boom")
+        end,
+        revert = function() end,
+    }
+
+    local ok, err = lib.setDefinitionEnabled(def, store, true)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "enable boom")
+    lu.assertFalse(store.read("Enabled"))
+end
+
+function TestMutationPlan:testSetDefinitionEnabledDoesNotCommitFailedDisable()
+    local store = lib.createStore({ Enabled = true })
+    local def = {
+        apply = function() end,
+        revert = function()
+            error("disable boom")
+        end,
+    }
+
+    local ok, err = lib.setDefinitionEnabled(def, store, false)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "disable boom")
+    lu.assertTrue(store.read("Enabled"))
+end
+
+function TestMutationPlan:testSetDefinitionEnabledReappliesWhenAlreadyEnabled()
+    local store = lib.createStore({ Enabled = true })
+    local calls = {}
+    local def = {
+        apply = function()
+            table.insert(calls, "apply")
+        end,
+        revert = function()
+            table.insert(calls, "revert")
+        end,
+    }
+
+    local ok, err = lib.setDefinitionEnabled(def, store, true)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(calls, { "revert", "apply" })
+    lu.assertTrue(store.read("Enabled"))
+end
+
+function TestMutationPlan:testSetDefinitionEnabledNoOpsWhenAlreadyDisabled()
+    local store = lib.createStore({ Enabled = false })
+    local revertCalls = 0
+    local def = {
+        apply = function() end,
+        revert = function()
+            revertCalls = revertCalls + 1
+        end,
+    }
+
+    local ok, err = lib.setDefinitionEnabled(def, store, false)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(revertCalls, 0)
+    lu.assertFalse(store.read("Enabled"))
+end
+
+function TestMutationPlan:testReapplyDefinitionStopsWhenRevertFails()
+    local store = lib.createStore({ Enabled = true })
+    local applyCalls = 0
+    local def = {
+        apply = function()
+            applyCalls = applyCalls + 1
+        end,
+        revert = function()
+            error("revert boom")
+        end,
+    }
+
+    local ok, err = lib.reapplyDefinition(def, store)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "revert boom")
+    lu.assertEquals(applyCalls, 0)
 end
 
 function TestMutationPlan:testHybridOrderingIsPatchThenManualOnApplyAndManualThenPatchOnRevert()

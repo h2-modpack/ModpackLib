@@ -11,26 +11,26 @@ local IsSchemaConfigField
 local GetSchemaConfigFields
 local ChoiceDisplay
 
---- Register a coordinator's config under its packId.
+--- Register or clear the coordinator config used for pack-level enable gating.
 --- Called by Framework.init on behalf of the coordinator.
---- Pass nil to deregister (used in tests and hot-reload).
---- @param packId string
---- @param config table|nil
+--- @param packId string Stable modpack identifier shared by coordinator and modules.
+--- @param config table|nil Coordinator config table, or nil to deregister during tests/reload.
 function public.registerCoordinator(packId, config)
     _coordinators[packId] = config
 end
 
---- Return true if a coordinator has registered for this packId.
---- @param packId string
---- @return boolean
+--- Return whether a coordinator config is currently registered for the given pack.
+--- @param packId string Stable modpack identifier.
+--- @return boolean isRegistered True when a coordinator config is available.
 function public.isCoordinated(packId)
     return _coordinators[packId] ~= nil
 end
 
---- Check if a store-backed module should be active.
---- @param store table
---- @param packId string
---- @return boolean
+--- Return whether a store-backed module should currently be active.
+--- Considers both the module's own Enabled bit and an optional coordinator ModEnabled gate.
+--- @param store table Store created by lib.createStore(...).
+--- @param packId string|nil Optional modpack identifier for coordinator gating.
+--- @return boolean isEnabled True when runtime behavior should be active.
 function public.isEnabled(store, packId)
     local coord = packId and _coordinators[packId]
     if coord and not coord.ModEnabled then return false end
@@ -38,35 +38,50 @@ function public.isEnabled(store, packId)
 end
 
 --- Lib-internal diagnostic — gated on lib's own DebugMode.
+local function FormatWarning(prefix, fmt, ...)
+    return prefix .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt)
+end
+
+--- Lib-internal diagnostic — gated on lib's own DebugMode.
 local function libWarn(fmt, ...)
     if not libConfig.DebugMode then return end
-    print("[lib] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
+    print(FormatWarning("[lib] ", fmt, ...))
 end
 shared.libWarn = libWarn
 
---- Print a framework diagnostic warning, gated on the caller's enabled flag.
---- @param packId string
---- @param enabled boolean
---- @param fmt string
+--- Lib-internal contract warning — always printed.
+local function libWarnAlways(fmt, ...)
+    print(FormatWarning("[lib] ", fmt, ...))
+end
+shared.libWarnAlways = libWarnAlways
+
+--- Print a framework diagnostic warning when the caller's debug flag is enabled.
+--- @param packId string Pack identifier used as the warning prefix.
+--- @param enabled boolean Debug gate; false suppresses output.
+--- @param fmt string Message text or string.format pattern.
+--- @vararg any Format arguments used with fmt.
 function public.warn(packId, enabled, fmt, ...)
     if not enabled then return end
-    print("[" .. packId .. "] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
+    print(FormatWarning("[" .. packId .. "] ", fmt, ...))
 end
 
---- Print a module-level diagnostic trace when the module's own DebugMode is enabled.
---- @param name string
---- @param enabled boolean
---- @param fmt string
+--- Print a framework contract or compatibility warning. Always printed.
+--- @param packId string Pack identifier used as the warning prefix.
+--- @param fmt string Message text or string.format pattern.
+--- @vararg any Format arguments used with fmt.
+function public.contractWarn(packId, fmt, ...)
+    print(FormatWarning("[" .. packId .. "] ", fmt, ...))
+end
+
+--- Print a module-level diagnostic trace when that module's DebugMode is enabled.
+--- @param name string Module display name used as the warning prefix.
+--- @param enabled boolean Debug gate; false suppresses output.
+--- @param fmt string Message text or string.format pattern.
+--- @vararg any Format arguments used with fmt.
 function public.log(name, enabled, fmt, ...)
     if not enabled then return end
     print("[" .. name .. "] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
 end
-
-public.MutationMode = {
-    Patch = "patch",
-    Manual = "manual",
-    Hybrid = "hybrid",
-}
 
 local function CloneMutationValue(value)
     if type(value) == "table" then
@@ -75,13 +90,13 @@ local function CloneMutationValue(value)
     return value
 end
 
-local function MutationDeepEqual(a, b)
+local function DeepValueEqual(a, b)
     if a == b then return true end
     if type(a) ~= type(b) then return false end
     if type(a) ~= "table" then return false end
 
     for key, value in pairs(a) do
-        if not MutationDeepEqual(value, b[key]) then
+        if not DeepValueEqual(value, b[key]) then
             return false
         end
     end
@@ -93,9 +108,12 @@ local function MutationDeepEqual(a, b)
     return true
 end
 
---- Create an isolated backup/restore pair.
---- @return function backup
---- @return function restore
+local MutationDeepEqual = DeepValueEqual
+
+--- Create an isolated backup/restore pair for manual mutation lifecycles.
+--- The backup function snapshots keys on first touch; the restore function reverts all captured values.
+--- @return function backup Function `(tbl, ...)` that snapshots one or more keys on a table.
+--- @return function restore Function `()` that restores every captured key to its original value.
 function public.createBackupSystem()
     local NIL = {}
     local savedValues = {}
@@ -129,8 +147,9 @@ function public.createBackupSystem()
     return backup, restore
 end
 
---- Create a reversible declarative mutation plan.
---- @return table
+--- Create a reversible declarative mutation plan for patch-style data edits.
+--- Returned plans support `set`, `setMany`, `transform`, `append`, `appendUnique`, `apply`, and `revert`.
+--- @return table plan Mutation plan object.
 function public.createMutationPlan()
     local backup, restore = public.createBackupSystem()
     local operations = {}
@@ -265,10 +284,11 @@ function public.createMutationPlan()
     return plan
 end
 
---- Infer a module's mutation authoring shape from its exports.
---- @param def table
---- @return string|nil, table
-function public.inferMutationMode(def)
+--- Infer a module's mutation authoring shape from its exported lifecycle surface.
+--- @param def table|nil Module definition table.
+--- @return string|nil shape `"patch"`, `"manual"`, `"hybrid"`, or nil when no lifecycle is exposed.
+--- @return table info Lifecycle capability flags `{ hasPatch, hasApply, hasRevert, hasManual }`.
+function public.inferMutationShape(def)
     local hasPatch = def and type(def.patchPlan) == "function" or false
     local hasApply = def and type(def.apply) == "function" or false
     local hasRevert = def and type(def.revert) == "function" or false
@@ -276,11 +296,11 @@ function public.inferMutationMode(def)
 
     local inferred = nil
     if hasPatch and hasManual then
-        inferred = public.MutationMode.Hybrid
+        inferred = "hybrid"
     elseif hasPatch then
-        inferred = public.MutationMode.Patch
+        inferred = "patch"
     elseif hasManual then
-        inferred = public.MutationMode.Manual
+        inferred = "manual"
     end
 
     return inferred, {
@@ -289,6 +309,30 @@ function public.inferMutationMode(def)
         hasRevert = hasRevert,
         hasManual = hasManual,
     }
+end
+
+--- Return whether this module's config/lifecycle changes require run-data rebuild behavior.
+--- @param def table|nil Module definition table.
+--- @return boolean affectsRunData True when run-data rebuild/reapply should occur after successful changes.
+function public.affectsRunData(def)
+    if not def then
+        return false
+    end
+    return def.affectsRunData == true
+end
+
+--- Compare two field values using field-type equality when provided, otherwise deep structural equality.
+--- @param field table|nil Field definition used to resolve an optional field-type-specific equality function.
+--- @param a any First value.
+--- @param b any Second value.
+--- @return boolean equal True when the values are semantically equal.
+function public.valuesEqual(field, a, b)
+    local fieldTypes = shared.FieldTypes
+    local fieldType = field and fieldTypes and field.type and fieldTypes[field.type] or nil
+    if fieldType and type(fieldType.equals) == "function" then
+        return fieldType.equals(field, a, b)
+    end
+    return DeepValueEqual(a, b)
 end
 
 local function GetActiveMutationPlan(store)
@@ -319,18 +363,25 @@ local function BuildMutationPlan(def, store)
 end
 
 --- Activate a module definition using inferred patch/manual/hybrid mutation behavior.
---- @param def table
---- @param store table|nil
---- @return boolean, string|nil
+--- @param def table Module definition table.
+--- @param store table|nil Module store used for patch-plan ownership and config reads.
+--- @return boolean ok True when activation succeeded.
+--- @return string|nil err Error text when activation failed.
 function public.applyDefinition(def, store)
-    local inferred, info = public.inferMutationMode(def)
+    local inferred, info = public.inferMutationShape(def)
     if not inferred then
+        if not public.affectsRunData(def) then
+            return true, nil
+        end
         return false, "no supported mutation lifecycle found"
     end
 
     local activePlan = GetActiveMutationPlan(store)
     if activePlan then
-        activePlan:revert()
+        local okRevert, errRevert = pcall(activePlan.revert, activePlan)
+        if not okRevert then
+            return false, errRevert
+        end
         SetActiveMutationPlan(store, nil)
     end
 
@@ -365,12 +416,16 @@ function public.applyDefinition(def, store)
 end
 
 --- Deactivate a module definition using inferred patch/manual/hybrid mutation behavior.
---- @param def table
---- @param store table|nil
---- @return boolean, string|nil
+--- @param def table Module definition table.
+--- @param store table|nil Module store used for active patch-plan lookup.
+--- @return boolean ok True when deactivation succeeded.
+--- @return string|nil err Error text when deactivation failed.
 function public.revertDefinition(def, store)
-    local inferred, info = public.inferMutationMode(def)
+    local inferred, info = public.inferMutationShape(def)
     if not inferred then
+        if not public.affectsRunData(def) then
+            return true, nil
+        end
         return false, "no supported mutation lifecycle found"
     end
 
@@ -399,35 +454,83 @@ function public.revertDefinition(def, store)
     return true, nil
 end
 
-local function BuildManagedFields(definitionOrSchema)
-    if type(definitionOrSchema) ~= "table" then
+--- Persist a definition's Enabled state only after the corresponding lifecycle work succeeds.
+--- Already-enabled `true` requests trigger a reapply; already-disabled `false` requests are no-ops.
+--- @param def table Module definition table.
+--- @param store table Module store that owns the persisted Enabled flag.
+--- @param enabled boolean Desired persisted/runtime state.
+--- @return boolean ok True when the requested state was committed successfully.
+--- @return string|nil err Error text when lifecycle work failed.
+function public.setDefinitionEnabled(def, store, enabled)
+    local current = store and type(store.read) == "function" and store.read("Enabled") == true or false
+
+    local ok, err
+    if enabled and current then
+        ok, err = public.reapplyDefinition(def, store)
+    elseif enabled then
+        ok, err = public.applyDefinition(def, store)
+    elseif current then
+        ok, err = public.revertDefinition(def, store)
+    else
+        ok, err = true, nil
+    end
+
+    if not ok then
+        return false, err
+    end
+
+    store.write("Enabled", enabled)
+    return true, nil
+end
+
+--- Reapply a definition by reverting the current runtime state and applying it again.
+--- @param def table Module definition table.
+--- @param store table Module store used for patch-plan lookup and config reads.
+--- @return boolean ok True when reapply succeeded.
+--- @return string|nil err Error text when revert or apply failed.
+function public.reapplyDefinition(def, store)
+    local okRevert, errRevert = public.revertDefinition(def, store)
+    if not okRevert then
+        return false, errRevert
+    end
+
+    local okApply, errApply = public.applyDefinition(def, store)
+    if not okApply then
+        return false, errApply
+    end
+
+    return true, nil
+end
+
+local function BuildManagedFields(definition)
+    if type(definition) ~= "table" then
         return nil
     end
 
-    if definitionOrSchema.stateSchema ~= nil
-        or definitionOrSchema.options ~= nil
-        or definitionOrSchema.special ~= nil
-        or definitionOrSchema.id ~= nil
+    if definition.stateSchema ~= nil
+        or definition.options ~= nil
+        or definition.special ~= nil
+        or definition.id ~= nil
     then
-        local label = tostring(definitionOrSchema.name or definitionOrSchema.id or _PLUGIN.guid or "module")
+        local label = tostring(definition.name or definition.id or _PLUGIN.guid or "module")
 
-        if type(definitionOrSchema.stateSchema) == "table" then
-            return definitionOrSchema.stateSchema
+        if type(definition.stateSchema) == "table" then
+            return definition.stateSchema
         end
 
-        if definitionOrSchema.special then
-            libWarn("%s: special modules must declare definition.stateSchema; no uiState created", label)
+        if definition.special then
+            libWarnAlways("%s: special modules must declare definition.stateSchema; no uiState created", label)
             return nil
         end
 
-        if type(definitionOrSchema.options) == "table" then
+        if type(definition.options) == "table" then
             local managedFields = {}
             local hasManagedField = false
-            for _, field in ipairs(definitionOrSchema.options) do
+            for _, field in ipairs(definition.options) do
                 if field.type == "separator" then
                     table.insert(managedFields, field)
                 elseif type(field.configKey) == "table" then
-                    libWarn("%s: regular definition.options configKey must be a flat string; nested option skipped",
+                    libWarnAlways("%s: regular definition.options configKey must be a flat string; nested option skipped",
                         label)
                 else
                     table.insert(managedFields, field)
@@ -442,18 +545,19 @@ local function BuildManagedFields(definitionOrSchema)
         return nil
     end
 
-    return definitionOrSchema
+    if #definition > 0 then
+        error("createStore expects a module definition table; raw schema/options arrays are not supported", 2)
+    end
+    return nil
 end
 
---- Build a menu-bar callback for a boolean mod.
---- @param def table
---- @param store table
---- @return function
+--- Build a standalone menu-bar callback for a regular module outside a coordinator.
+--- @param def table Module definition table.
+--- @param store table Module store created by lib.createStore(...).
+--- @return function renderMenu Callback suitable for `rom.gui.add_to_menu_bar(...)`.
 function public.standaloneUI(def, store)
     local function onUiStateFlushed()
-        if def.dataMutation then
-            public.revertDefinition(def, store)
-            public.applyDefinition(def, store)
+        if public.affectsRunData(def) and store.read("Enabled") == true then
             rom.game.SetupRunData()
         end
     end
@@ -502,13 +606,15 @@ function public.standaloneUI(def, store)
             local enabled = store.read("Enabled") == true
             local val, chg = imgui.Checkbox(def.name, enabled)
             if chg then
-                store.write("Enabled", val)
-                if val then
-                    public.applyDefinition(def, store)
+                local ok, err = public.setDefinitionEnabled(def, store, val)
+                if ok then
+                    if public.affectsRunData(def) then rom.game.SetupRunData() end
                 else
-                    public.revertDefinition(def, store)
+                    libWarnAlways("%s %s failed: %s",
+                        tostring(def.name or def.id or "module"),
+                        val and "enable" or "disable",
+                        tostring(err))
                 end
-                if def.dataMutation then rom.game.SetupRunData() end
             end
             if imgui.IsItemHovered() and (def.tooltip or "") ~= "" then
                 imgui.SetTooltip(def.tooltip)
@@ -532,6 +638,9 @@ function public.standaloneUI(def, store)
                     name = def.name,
                     imgui = imgui,
                     uiState = store.uiState,
+                    commit = function(state)
+                        return public.commitUiState(def, store, state)
+                    end,
                     draw = function()
                         for index, opt in ipairs(def.options) do
                             DrawOption(imgui, opt, index)
@@ -546,10 +655,12 @@ function public.standaloneUI(def, store)
     end
 end
 
---- Read a value from a table using a configKey (string or table path).
---- @param tbl table
---- @param key string|table
---- @return any, table|nil, string|nil
+--- Read a value from a table using a flat key or nested path.
+--- @param tbl table Root table to read from.
+--- @param key string|table Flat config key or `{...}` path.
+--- @return any value Current value, or nil when the path is missing.
+--- @return table|nil parent Parent table containing the resolved key, when found.
+--- @return string|nil leafKey Final key segment used for the lookup, when found.
 function public.readPath(tbl, key)
     if type(key) == "table" then
         if #key == 0 then return nil, nil, nil end
@@ -562,10 +673,11 @@ function public.readPath(tbl, key)
     return tbl[key], tbl, key
 end
 
---- Write a value to a table using a configKey (string or table path).
---- @param tbl table
---- @param key string|table
---- @param value any
+--- Write a value to a table using a flat key or nested path.
+--- Missing intermediate tables are created automatically for nested paths.
+--- @param tbl table Root table to write into.
+--- @param key string|table Flat config key or `{...}` path.
+--- @param value any Value to persist.
 function public.writePath(tbl, key, value)
     if type(key) == "table" then
         for i = 1, #key - 1 do
@@ -578,12 +690,12 @@ function public.writePath(tbl, key, value)
     tbl[key] = value
 end
 
---- Create the module-owned store facade around persisted Chalk-backed config.
---- Modules may pass either definition tables or legacy stateSchema tables.
---- @param modConfig table
---- @param definitionOrSchema table|nil
---- @return table
-function public.createStore(modConfig, definitionOrSchema)
+--- Create the module-owned store facade around persisted config.
+--- Pass the module definition table to enable managed `uiState` for `options` or `stateSchema`.
+--- @param modConfig table Persisted config table, usually from Chalk.
+--- @param definition table|nil Module definition table, or nil for a plain store without `uiState`.
+--- @return table store Store exposing `read`, `write`, and optional `uiState`.
+function public.createStore(modConfig, definition)
     local backend = GetConfigBackend(modConfig)
     local store = {}
 
@@ -604,7 +716,7 @@ function public.createStore(modConfig, definitionOrSchema)
         public.writePath(modConfig, key, value)
     end
 
-    local managedFields = BuildManagedFields(definitionOrSchema)
+    local managedFields = BuildManagedFields(definition)
     if managedFields then
         store.uiState = shared.CreateUiState(modConfig, backend, managedFields)
     end
@@ -825,6 +937,10 @@ GetSchemaConfigFields = function(schema)
     return configFields
 end
 shared.GetSchemaConfigFields = GetSchemaConfigFields
+--- Return the config-backed fields in a validated schema, excluding separators.
+--- Runtime metadata is prepared lazily and cached on the schema table.
+--- @param schema table|nil Validated schema or options list.
+--- @return table configFields Array of config-backed field definitions.
 public.getSchemaConfigFields = GetSchemaConfigFields
 
 ChoiceDisplay = function(field, value)

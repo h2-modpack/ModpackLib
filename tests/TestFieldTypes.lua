@@ -330,28 +330,21 @@ end
 
 TestFieldTypeValidation = {}
 
-function TestFieldTypeValidation:testValidateFieldTypesWarnsOnMissingRequiredMethods()
+function TestFieldTypeValidation:testValidateFieldTypesErrorsOnMissingRequiredMethods()
     local original = lib.FieldTypes.customBroken
     lib.FieldTypes.customBroken = {
         validate = function() end,
         draw = function() end,
     }
 
-    CaptureWarnings()
-    local ok = lib.validateFieldTypes()
-    local warnings = Warnings
-    RestoreWarnings()
-
+    local ok, err = pcall(lib.validateFieldTypes)
     lib.FieldTypes.customBroken = original
 
     lu.assertFalse(ok)
-    lu.assertTrue(#warnings > 0)
-    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'toHash'")
-    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'fromHash'")
-    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'toStaging'")
+    lu.assertStrContains(tostring(err), "field type 'customBroken' is missing required method 'toHash'")
 end
 
-function TestFieldTypeValidation:testValidateSchemaSkipsBrokenFieldTypeFromConfigFields()
+function TestFieldTypeValidation:testValidateSchemaErrorsOnBrokenRegisteredFieldType()
     local original = lib.FieldTypes.customBroken
     lib.FieldTypes.customBroken = {
         validate = function() end,
@@ -363,14 +356,9 @@ function TestFieldTypeValidation:testValidateSchemaSkipsBrokenFieldTypeFromConfi
         { type = "checkbox", configKey = "Good", default = false },
     }
 
-    CaptureWarnings()
-    lib.validateSchema(schema, "BrokenTypeMod")
-    local warnings = Warnings
-    RestoreWarnings()
-
+    local ok, err = pcall(lib.validateSchema, schema, "BrokenTypeMod")
     lib.FieldTypes.customBroken = original
 
-    lu.assertEquals(#(schema._configFields or {}), 1)
-    lu.assertEquals(schema._configFields[1].configKey, "Good")
-    lu.assertStrContains(table.concat(warnings, "\n"), "field type 'customBroken' is missing required method 'toHash'")
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "field type 'customBroken' is missing required method 'toHash'")
 end

@@ -60,6 +60,18 @@ function TestStore:testCreateStoreWithRegularOptionsExposesUiState()
     lu.assertFalse(store.uiState.view.Strict)
 end
 
+function TestStore:testCreateStoreWithRawSchemaArrayErrors()
+    local config = { Strict = false }
+    local rawSchema = {
+        { type = "checkbox", configKey = "Strict", default = false },
+    }
+
+    local ok, err = pcall(lib.createStore, config, rawSchema)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "raw schema/options arrays are not supported")
+end
+
 function TestStore:testCreateStoreWithNestedRegularOptionsSkipsUiState()
     local previousDebug = lib.config.DebugMode
     lib.config.DebugMode = true
@@ -357,6 +369,38 @@ function TestUiState:testCollectConfigMismatchesReturnsExactKeys()
     lu.assertEquals(uiState.collectConfigMismatches(), { "FlagB" })
 end
 
+function TestUiState:testCollectConfigMismatchesDeepComparesTableValues()
+    local previousFieldType = lib.FieldTypes.tableblob
+    lib.FieldTypes.tableblob = {
+        validate = function() end,
+        toHash = function(_, value)
+            return tostring(value and value.value or "")
+        end,
+        fromHash = function(_, str)
+            return { value = str }
+        end,
+        toStaging = function(value)
+            return rom.game.DeepCopyTable(value or {})
+        end,
+        draw = function(_, _, value)
+            return value, false
+        end,
+    }
+
+    local config = {
+        Blob = { value = "A" },
+    }
+    local uiState = lib.createStore(config, {
+        stateSchema = {
+            { type = "tableblob", configKey = "Blob", default = { value = "A" } },
+        },
+    }).uiState
+
+    lu.assertEquals(uiState.collectConfigMismatches(), {})
+
+    lib.FieldTypes.tableblob = previousFieldType
+end
+
 function TestUiState:testAuditAndResyncWarnsAndReloadsUiState()
     CaptureWarnings()
 
@@ -399,4 +443,67 @@ function TestUiState:testAuditAndResyncIsSilentWhenStateMatchesConfig()
     lu.assertEquals(#warnings, 0)
     lu.assertFalse(uiState.isDirty())
     lu.assertFalse(uiState.view.Flag)
+end
+
+function TestUiState:testCommitUiStateRollsBackConfigAndViewWhenReapplyFails()
+    local config = {
+        Enabled = true,
+        Mode = "Vanilla",
+    }
+    local store = lib.createStore(config, {
+        options = {
+            { type = "dropdown", configKey = "Mode", values = { "Vanilla", "Always" }, default = "Vanilla" },
+        },
+    })
+    local uiState = store.uiState
+    local def = {
+        affectsRunData = true,
+        apply = function()
+            if config.Mode == "Always" then
+                error("apply boom")
+            end
+        end,
+        revert = function() end,
+    }
+
+    uiState.set("Mode", "Always")
+    local ok, err = lib.commitUiState(def, store, uiState)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "apply boom")
+    lu.assertEquals(config.Mode, "Vanilla")
+    lu.assertEquals(uiState.view.Mode, "Vanilla")
+    lu.assertFalse(uiState.isDirty())
+end
+
+function TestUiState:testRunUiStatePassDoesNotCallOnFlushedWhenCommitFails()
+    local config = {
+        Enabled = true,
+        Flag = false,
+    }
+    local store = lib.createStore(config, {
+        options = {
+            { type = "checkbox", configKey = "Flag", default = false },
+        },
+    })
+    local flushed = false
+
+    local ok = lib.runUiStatePass({
+        name = "TransactionalCommit",
+        uiState = store.uiState,
+        draw = function(_, state)
+            state.set("Flag", true)
+        end,
+        commit = function()
+            return false, "commit boom"
+        end,
+        onFlushed = function()
+            flushed = true
+        end,
+    })
+
+    lu.assertFalse(ok)
+    lu.assertFalse(flushed)
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "[lib] TransactionalCommit: uiState commit failed: commit boom")
 end

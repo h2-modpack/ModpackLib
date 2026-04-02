@@ -3,9 +3,14 @@ local shared = internal.shared
 local FieldTypes = shared.FieldTypes
 local _coordinators = shared.coordinators
 local SpecialFieldKey = shared.SpecialFieldKey
-local PrepareSchemaFieldRuntimeMetadata = shared.PrepareSchemaFieldRuntimeMetadata
-local IsSchemaConfigField = shared.IsSchemaConfigField
 local GetSchemaConfigFields = shared.GetSchemaConfigFields
+
+local function ClonePersistedValue(value)
+    if type(value) == "table" then
+        return rom.game.DeepCopyTable(value)
+    end
+    return value
+end
 
 local function BuildConfigEntries(configFields, configBackend)
     if not configBackend then
@@ -39,10 +44,10 @@ local function WriteConfigFieldValue(field, modConfig, value, configEntries)
 end
 
 --- Create managed staging state for schema-backed or option-backed UI fields.
---- @param modConfig table
---- @param configBackend table|nil
---- @param schema table
---- @return table
+--- @param modConfig table Persisted config table backing the state.
+--- @param configBackend table|nil Optional Chalk backend wrapper for entry-based read/write access.
+--- @param schema table Validated schema/options list.
+--- @return table uiState Managed staging object with `view/get/set/update/toggle/reloadFromConfig/flushToConfig`.
 function shared.CreateUiState(modConfig, configBackend, schema)
     public.validateSchema(schema, _PLUGIN.guid or "unknown module")
 
@@ -87,6 +92,26 @@ function shared.CreateUiState(modConfig, configBackend, schema)
                 local val = field._readValue(staging)
                 WriteConfigFieldValue(field, modConfig, val, configEntries)
             end
+        end
+    end
+
+    local function captureDirtyConfigSnapshot()
+        local snapshot = {}
+        for _, field in ipairs(configFields) do
+            local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
+            if dirtyKeys[schemaKey] then
+                table.insert(snapshot, {
+                    field = field,
+                    value = ClonePersistedValue(ReadConfigFieldValue(field, modConfig, configEntries)),
+                })
+            end
+        end
+        return snapshot
+    end
+
+    local function restoreConfigSnapshot(snapshot)
+        for _, entry in ipairs(snapshot or {}) do
+            WriteConfigFieldValue(entry.field, modConfig, ClonePersistedValue(entry.value), configEntries)
         end
     end
 
@@ -206,6 +231,8 @@ function shared.CreateUiState(modConfig, configBackend, schema)
         end,
         reloadFromConfig = snapshot,
         flushToConfig = sync,
+        _captureDirtyConfigSnapshot = captureDirtyConfigSnapshot,
+        _restoreConfigSnapshot = restoreConfigSnapshot,
         isDirty = function()
             return dirty
         end,
@@ -218,7 +245,7 @@ function shared.CreateUiState(modConfig, configBackend, schema)
                 if ft and ft.toStaging then
                     currentValue = ft.toStaging(currentValue, field)
                 end
-                if currentValue ~= stagedValue then
+                if not public.valuesEqual(field, currentValue, stagedValue) then
                     table.insert(mismatches, field._schemaKey or SpecialFieldKey(field.configKey))
                 end
             end
@@ -227,9 +254,17 @@ function shared.CreateUiState(modConfig, configBackend, schema)
     }
 end
 
---- Run one managed UI-state draw pass and flush staged state if dirty.
---- @param opts table
---- @return boolean
+--- Run one managed `uiState` draw pass and persist changes when the pass dirties staging.
+--- @param opts table Options table containing:
+---   `name`      string|nil  Human-readable label used in warnings.
+---   `imgui`     table|nil   ImGui binding to pass to the draw callback.
+---   `uiState`   table       Managed uiState object.
+---   `theme`     table|nil   Optional theme object forwarded to the draw callback.
+---   `draw`      function    Callback `(imgui, uiState, theme)` that renders controls.
+---   `commit`    function|nil Optional transactional commit callback `(uiState) -> ok, err`.
+---   `onFlushed` function|nil Callback invoked after a successful flush/commit.
+--- @return boolean changed True when staged state was successfully flushed or committed.
+--- @return string|nil err Error text when a transactional commit failed.
 function public.runUiStatePass(opts)
     local draw = opts and opts.draw
     if type(draw) ~= "function" then
@@ -246,6 +281,22 @@ function public.runUiStatePass(opts)
     draw(opts.imgui or rom.ImGui, uiState, opts.theme)
 
     if uiState.isDirty() then
+        if type(opts.commit) == "function" then
+            local ok, err = opts.commit(uiState)
+            if ok then
+                if type(opts.onFlushed) == "function" then
+                    opts.onFlushed()
+                end
+                return true, nil
+            end
+            if shared.libWarnAlways then
+                shared.libWarnAlways("%s: uiState commit failed: %s",
+                    tostring(opts.name or "uiState"),
+                    tostring(err))
+            end
+            return false, err
+        end
+
         uiState.flushToConfig()
         if type(opts.onFlushed) == "function" then
             opts.onFlushed()
@@ -256,10 +307,10 @@ function public.runUiStatePass(opts)
     return false
 end
 
---- Audit staged uiState for drift from persisted config, warn on mismatches, then reload.
---- @param name string
---- @param uiState table
---- @return table
+--- Audit staged `uiState` for drift from persisted config, warn on mismatches, then reload.
+--- @param name string Human-readable module/special name used in warnings.
+--- @param uiState table Managed uiState object.
+--- @return table mismatches Array of schema keys that drifted.
 function public.auditAndResyncUiState(name, uiState)
     if not uiState or type(uiState.collectConfigMismatches) ~= "function" or type(uiState.reloadFromConfig) ~= "function" then
         return {}
@@ -273,12 +324,70 @@ function public.auditAndResyncUiState(name, uiState)
     return mismatches
 end
 
---- Build standalone window + menu-bar callbacks for a special module.
---- @param def table
---- @param store table
---- @param uiState table
---- @param opts table|nil
---- @return table
+--- Flush managed `uiState` transactionally and reapply runtime state when required.
+--- On reapply failure, persisted config and staged state are restored to their previous values.
+--- @param def table Module definition table.
+--- @param store table Module store that owns persisted config and the Enabled bit.
+--- @param uiState table Managed uiState object created for the module.
+--- @return boolean ok True when the new staged values were committed successfully.
+--- @return string|nil err Error text when commit or rollback reapply failed.
+function public.commitUiState(def, store, uiState)
+    if not uiState or type(uiState.isDirty) ~= "function" or type(uiState.flushToConfig) ~= "function"
+        or type(uiState.reloadFromConfig) ~= "function"
+        or type(uiState._captureDirtyConfigSnapshot) ~= "function"
+        or type(uiState._restoreConfigSnapshot) ~= "function" then
+        return false, "uiState is missing transactional commit helpers"
+    end
+
+    if not uiState.isDirty() then
+        return true, nil
+    end
+
+    local snapshot = uiState._captureDirtyConfigSnapshot()
+    uiState.flushToConfig()
+
+    local shouldReapply = public.affectsRunData(def)
+        and store
+        and type(store.read) == "function"
+        and store.read("Enabled") == true
+
+    if not shouldReapply then
+        return true, nil
+    end
+
+    local ok, err = public.reapplyDefinition(def, store)
+    if ok then
+        return true, nil
+    end
+
+    uiState._restoreConfigSnapshot(snapshot)
+    uiState.reloadFromConfig()
+
+    local rollbackOk, rollbackErr = public.reapplyDefinition(def, store)
+    if not rollbackOk then
+        if shared.libWarnAlways then
+            shared.libWarnAlways("%s: uiState rollback reapply failed: %s",
+                tostring(def.name or def.id or "module"),
+                tostring(rollbackErr))
+        end
+        return false, tostring(err) .. " (rollback reapply failed: " .. tostring(rollbackErr) .. ")"
+    end
+
+    return false, err
+end
+
+--- Build standalone window + menu-bar callbacks for a special module outside a coordinator.
+--- @param def table Special module definition table.
+--- @param store table Special module store created by lib.createStore(...).
+--- @param uiState table|nil Optional uiState override; defaults to `store.uiState`.
+--- @param opts table|nil Optional rendering overrides:
+---   `windowTitle`         string|nil
+---   `theme`               table|nil
+---   `drawQuickContent`    function|nil
+---   `drawTab`             function|nil
+---   `getDrawQuickContent` function|nil
+---   `getDrawTab`          function|nil
+--- @return table ui `{ renderWindow, addMenuBar }` callbacks for standalone registration.
 function public.standaloneSpecialUI(def, store, uiState, opts)
     opts = opts or {}
     uiState = uiState or (store and store.uiState) or nil
@@ -298,9 +407,7 @@ function public.standaloneSpecialUI(def, store, uiState, opts)
     end
 
     local function onStateFlushed()
-        if def.dataMutation and store.read("Enabled") == true then
-            public.revertDefinition(def, store)
-            public.applyDefinition(def, store)
+        if public.affectsRunData(def) and store.read("Enabled") == true then
             rom.game.SetupRunData()
         end
     end
@@ -317,14 +424,18 @@ function public.standaloneSpecialUI(def, store, uiState, opts)
             local enabled = store.read("Enabled") == true
             local enabledValue, enabledChanged = imgui.Checkbox("Enabled", enabled)
             if enabledChanged then
-                store.write("Enabled", enabledValue)
-                if enabledValue then
-                    public.applyDefinition(def, store)
+                local ok, err = public.setDefinitionEnabled(def, store, enabledValue)
+                if ok then
+                    if public.affectsRunData(def) then
+                        rom.game.SetupRunData()
+                    end
                 else
-                    public.revertDefinition(def, store)
-                end
-                if def.dataMutation then
-                    rom.game.SetupRunData()
+                    if shared.libWarnAlways then
+                        shared.libWarnAlways("%s %s failed: %s",
+                            tostring(def.name or def.id or "module"),
+                            enabledValue and "enable" or "disable",
+                            tostring(err))
+                    end
                 end
             end
 
@@ -351,6 +462,9 @@ function public.standaloneSpecialUI(def, store, uiState, opts)
                     imgui = imgui,
                     uiState = uiState,
                     theme = opts.theme,
+                    commit = function(state)
+                        return public.commitUiState(def, store, state)
+                    end,
                     draw = drawQuickContent,
                     onFlushed = onStateFlushed,
                 })
@@ -362,14 +476,17 @@ function public.standaloneSpecialUI(def, store, uiState, opts)
             end
 
             if drawTab then
-                public.runUiStatePass({
-                    name = def.name,
-                    imgui = imgui,
-                    uiState = uiState,
-                    theme = opts.theme,
-                    draw = drawTab,
-                    onFlushed = onStateFlushed,
-                })
+                    public.runUiStatePass({
+                        name = def.name,
+                        imgui = imgui,
+                        uiState = uiState,
+                        theme = opts.theme,
+                        commit = function(state)
+                            return public.commitUiState(def, store, state)
+                        end,
+                        draw = drawTab,
+                        onFlushed = onStateFlushed,
+                    })
             end
 
             imgui.End()

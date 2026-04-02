@@ -1,19 +1,24 @@
 # adamant-ModpackLib
 
-Shared utility library for the adamant H2 modpack. Provides the module contract, backup/restore system, field type encoding, standalone UI, and special module state management.
+Shared utility library for adamant modpack modules.
 
-Part of the [H2 Modpack](https://github.com/h2-modpack/h2-modular-modpack).
+It owns:
+- the store contract
+- managed `uiState`
+- field types
+- lifecycle helpers for `affectsRunData` modules
+- standalone regular/special UI helpers
 
-## Install
+## Docs
 
-Install via r2modman or Thunderstore. Most modules list this as a dependency automatically.
+- [API.md](API.md)
+- [MODULE_AUTHORING.md](MODULE_AUTHORING.md)
+- [FIELD_TYPES.md](FIELD_TYPES.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 
-## For contributors
+## Validation
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the public API reference, module contract, field type system, and templates.
-
-Run tests locally:
-
-```
+```bash
+cd adamant-ModpackLib
 lua tests/all.lua
 ```

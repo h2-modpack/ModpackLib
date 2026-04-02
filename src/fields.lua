@@ -7,40 +7,36 @@ local IsSchemaConfigField = shared.IsSchemaConfigField
 local ChoiceDisplay = shared.ChoiceDisplay
 local REQUIRED_FIELD_TYPE_METHODS = { "validate", "toHash", "fromHash", "toStaging", "draw" }
 
-local function ValidateFieldTypeContract(typeName, fieldType, prefix)
+local function AssertFieldTypeContract(typeName, fieldType, prefix)
     if type(fieldType) ~= "table" then
-        libWarn("%s: field type '%s' must be a table", prefix, tostring(typeName))
-        return false
+        error(("%s: field type '%s' must be a table"):format(prefix, tostring(typeName)), 0)
     end
 
-    local ok = true
     for _, methodName in ipairs(REQUIRED_FIELD_TYPE_METHODS) do
         if type(fieldType[methodName]) ~= "function" then
-            libWarn("%s: field type '%s' is missing required method '%s'", prefix, tostring(typeName), methodName)
-            ok = false
+            error(("%s: field type '%s' is missing required method '%s'"):format(
+                prefix, tostring(typeName), methodName), 0)
         end
     end
-    return ok
 end
 
 --- Validate all registered FieldTypes for authoring completeness.
---- @return boolean
+--- Hard-fails if any Lib-owned field type is missing a required method.
+--- @return boolean ok Always true when validation succeeds.
 function public.validateFieldTypes()
-    local ok = true
     for typeName, fieldType in pairs(FieldTypes) do
-        if not ValidateFieldTypeContract(typeName, fieldType, "FieldTypes") then
-            ok = false
-        end
+        AssertFieldTypeContract(typeName, fieldType, "FieldTypes")
     end
-    return ok
+    return true
 end
 
---- Render a schema field widget. Returns (newValue, changed).
---- @param imgui table
---- @param field table
---- @param value any
---- @param width number|nil
---- @return any, boolean
+--- Render a field widget using its registered field type.
+--- @param imgui table ImGui binding table.
+--- @param field table Validated field definition.
+--- @param value any Current staged value for the field.
+--- @param width number|nil Optional width override used by width-aware field types.
+--- @return any newValue Updated value to stage.
+--- @return boolean changed True when the widget changed the value.
 function public.drawField(imgui, field, value, width)
     local ft = FieldTypes[field.type]
     if ft then
@@ -54,9 +50,9 @@ function public.drawField(imgui, field, value, width)
 end
 
 --- Return whether a field should be rendered given the current flat option values.
---- @param field table
---- @param values table
---- @return boolean
+--- @param field table Field definition that may declare `visibleIf`.
+--- @param values table|nil Flat current values table, usually `uiState.view`.
+--- @return boolean visible True when the field should be shown.
 function public.isFieldVisible(field, values)
     if not field.visibleIf then
         return true
@@ -64,9 +60,10 @@ function public.isFieldVisible(field, values)
     return values and values[field.visibleIf] == true or false
 end
 
---- Validate a schema at declaration time. Warns via libWarn.
---- @param schema table
---- @param label string
+--- Validate a schema or options list at declaration time.
+--- Unknown module-side field types warn and are skipped; incomplete registered field types hard-fail.
+--- @param schema table Schema/options array to validate and enrich with runtime metadata.
+--- @param label string Human-readable label used in warnings and errors.
 function public.validateSchema(schema, label)
     if type(schema) ~= "table" then
         libWarn("%s: schema is not a table", label)
@@ -84,7 +81,7 @@ function public.validateSchema(schema, label)
     local configFields = {}
     for i, field in ipairs(schema) do
         local prefix = label .. " field #" .. i
-        local ft = nil
+        local ft
         local ftValid = false
         if field.type ~= "separator" and not field.configKey then
             libWarn("%s: missing configKey", prefix)
@@ -95,7 +92,8 @@ function public.validateSchema(schema, label)
             ft = FieldTypes[field.type]
             if not ft then
                 libWarn("%s: unknown type '%s'", prefix, field.type)
-            elseif ValidateFieldTypeContract(field.type, ft, prefix) then
+            else
+                AssertFieldTypeContract(field.type, ft, prefix)
                 ftValid = true
                 ft.validate(field, prefix)
             end
@@ -372,3 +370,4 @@ FieldTypes.separator = {
 }
 
 public.FieldTypes = FieldTypes
+public.validateFieldTypes()

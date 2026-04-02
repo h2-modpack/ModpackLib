@@ -17,7 +17,7 @@
 
 ### Added (initial release)
 - `createBackupSystem()` - isolated backup/revert with first-call-only semantics
-- `createStore(config, definitionOrSchema?)` - module store facade; modules with managed fields get `store.uiState`
+- `createStore(config, definition?)` - module store facade; modules with managed fields get `store.uiState`
 - `standaloneUI()` - menu-bar toggle callback for regular modules running without Core
 - `isEnabled()` - checks module store and coordinator master toggle
 - `readPath()` / `writePath()` - string and table-path accessors for nested config keys

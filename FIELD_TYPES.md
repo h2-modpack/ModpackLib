@@ -36,7 +36,8 @@ Every field type must provide all of these methods:
 | `toStaging(val)` | Convert persisted config value into managed `uiState` staging value |
 | `draw(imgui, field, value, width)` | Render regular-module widget and return `(newValue, changed)` |
 
-If a type is missing required methods, later consumers will be inconsistent or fail.
+If a registered field type is missing required methods, Lib now hard-fails during validation rather
+than warning and continuing.
 
 ## Where Each Method Is Used
 
@@ -158,7 +159,7 @@ Changing any of these can be compatibility work:
 Treat serialization behavior as frozen after release unless you are intentionally doing migration
 work.
 
-See [HASH_PROFILE_ABI.md](../adamant-ModpackFramework/HASH_PROFILE_ABI.md) for the broader ABI policy.
+See [https://github.com/h2-modpack/ModpackFramework/blob/main/HASH_PROFILE_ABI.md](https://github.com/h2-modpack/ModpackFramework/blob/main/HASH_PROFILE_ABI.md) for the broader ABI policy.
 
 ## Invalid Field Types
 
@@ -169,8 +170,16 @@ Current system behavior:
 - hash encode warns and skips invalid fields
 - hash decode warns and defaults rather than crashing
 
-This means invalid declarations degrade safely, but they are still authoring errors that should be
-fixed.
+For registered field types owned by Lib, incompleteness is treated more strictly:
+
+- missing required methods on a registered field type are a hard error
+- `lib.validateFieldTypes()` hard-fails on incomplete registry entries
+- `lib.validateSchema(...)` hard-fails if a used registered field type is incomplete
+
+That split is intentional:
+
+- module-side unknown type names are authoring mistakes and degrade safely
+- Lib-side broken field type implementations are framework/library regressions and must fail fast
 
 ## Adding a New Field Type
 
