@@ -13,7 +13,7 @@ It owns:
 
 - [API.md](API.md)
 - [MODULE_AUTHORING.md](MODULE_AUTHORING.md)
-- [FIELD_TYPES.md](FIELD_TYPES.md)
+- [FIELD_REGISTRY.md](FIELD_REGISTRY.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Public Contract Freeze

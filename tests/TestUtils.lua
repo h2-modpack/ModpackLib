@@ -8,6 +8,8 @@ public = {}
 -- Mock _PLUGIN
 _PLUGIN = { guid = "test-module" }
 
+local MAX_UINT32 = 4294967295
+
 -- Deep copy helper (replaces rom.game.DeepCopyTable)
 local function deepCopy(orig)
     if type(orig) ~= "table" then return orig end
@@ -16,6 +18,48 @@ local function deepCopy(orig)
         copy[k] = deepCopy(v)
     end
     return copy
+end
+
+local function makeBitBinaryOp(predicate)
+    return function(a, b)
+        local result = 0
+        local bitValue = 1
+        a = a or 0
+        b = b or 0
+
+        while a > 0 or b > 0 do
+            local abit = a % 2
+            local bbit = b % 2
+            if predicate(abit, bbit) then
+                result = result + bitValue
+            end
+            a = math.floor(a / 2)
+            b = math.floor(b / 2)
+            bitValue = bitValue * 2
+        end
+
+        return result
+    end
+end
+
+if bit32 == nil then
+    bit32 = {
+        band = makeBitBinaryOp(function(a, b)
+            return a == 1 and b == 1
+        end),
+        bor = makeBitBinaryOp(function(a, b)
+            return a == 1 or b == 1
+        end),
+        bnot = function(a)
+            return MAX_UINT32 - (a or 0)
+        end,
+        lshift = function(a, n)
+            return ((a or 0) * (2 ^ (n or 0))) % (2 ^ 32)
+        end,
+        rshift = function(a, n)
+            return math.floor((a or 0) / (2 ^ (n or 0)))
+        end,
+    }
 end
 
 -- Mock rom

@@ -1,32 +1,219 @@
 # adamant-ModpackLib API
 
-This is the supported Lib surface for modules and coordinators.
+This is the supported Lib surface after the storage/UI hard cut.
 
-## Core Surface
+## Core Model
+
+Modules now declare:
+- `definition.storage`
+- `definition.ui`
+
+There is no compatibility layer for:
+- `definition.options`
+- `definition.stateSchema`
+
+Storage owns persistence and hashing.
+UI owns widgets and layout.
+
+## Store
 
 ### `lib.createStore(config, definition?)`
 
 Creates the module-owned store facade around persisted config.
 
-Returns:
-- `store.read(key)`
-- `store.write(key, value)`
-- `store.uiState` when `definition.options` or `definition.stateSchema` declares managed fields
+Normal access:
+- `store.read(keyOrAlias)`
+- `store.write(keyOrAlias, value)`
+
+Raw packed access:
+- `store.readBits(configKey, offset, width)`
+- `store.writeBits(configKey, offset, width, value)`
+
+Managed state:
+- `store.storage`
+- `store.ui`
+- `store.uiState` when `definition.storage` exists
 
 Rules:
-- pass the full `public.definition`, not a raw schema/options array
-- regular `definition.options` keys must be flat strings
-- special `definition.stateSchema` keys may use nested path arrays
+- pass the full `public.definition`
+- root storage aliases default to `configKey` when omitted
+- packed child aliases are required
+- widgets bind by alias, not raw `configKey`
+- `store.read/write` accept either a storage alias or a raw config key
 
-### `lib.isEnabled(store, packId?)`
+### `store.read(keyOrAlias)`
 
-Returns `true` only when:
-- the module store has `Enabled = true`
-- and, if coordinated, the pack-level `ModEnabled` flag is also true
+Reads:
+- a root storage alias
+- a packed child alias
+- or a raw config key fallback
 
-### `lib.affectsRunData(def)`
+Examples:
 
-Returns whether successful lifecycle or config changes require run-data rebuild behavior.
+```lua
+store.read("Enabled")
+store.read("BridalGlowTargetBoon")
+store.read("AttackBanned")
+store.read("PackedAphrodite")
+```
+
+### `store.write(keyOrAlias, value)`
+
+Writes:
+- a root storage alias
+- a packed child alias
+- or a raw config key fallback
+
+Packed child writes re-encode the owning packed root automatically.
+
+### `store.readBits(configKey, offset, width)`
+
+Raw numeric packed read.
+
+- no alias lookup
+- no bool coercion
+- no widget semantics
+
+### `store.writeBits(configKey, offset, width, value)`
+
+Raw numeric packed write.
+
+- clamps to the target bit width
+- updates only the selected bit range
+
+## Storage Helpers
+
+### `lib.validateStorage(storage, label)`
+
+Validates and prepares a storage declaration table.
+
+Validation covers:
+- alias uniqueness
+- root `configKey` uniqueness
+- packed bit overlap
+- packed child alias registration
+
+### `lib.getStorageRoots(storage)`
+
+Returns the prepared root storage nodes.
+
+Only root nodes:
+- persist directly
+- hash directly
+- flush directly
+
+### `lib.getStorageAliases(storage)`
+
+Returns the prepared alias map:
+
+```lua
+local aliases = lib.getStorageAliases(definition.storage)
+local node = aliases.AttackBanned
+```
+
+Includes:
+- root aliases
+- packed child aliases
+
+### `lib.valuesEqual(node, a, b)`
+
+Semantic equality helper used by:
+- hash default elision
+- UI state drift checks
+
+Uses storage-type `equals(...)` when provided, otherwise deep structural equality.
+
+## UI Helpers
+
+### `lib.validateUi(ui, label, storage)`
+
+Validates a UI declaration table against storage.
+
+The `storage` argument may be:
+- raw `definition.storage`
+- or already-prepared storage metadata
+
+Validation covers:
+- widget/layout node types
+- alias existence
+- widget/storage type compatibility
+- `visibleIf` alias validity
+
+### `lib.prepareUiNode(node, label?, storage)`
+
+Validates and prepares one UI node in isolation.
+
+Useful for special modules that build reusable widget/layout nodes at load time.
+
+The `storage` argument may be:
+- raw `definition.storage`
+- or already-prepared storage metadata
+
+Store creation is not required before calling this helper.
+
+### `lib.isUiNodeVisible(node, values)`
+
+Evaluates `visibleIf` against the current alias-value table.
+
+### `lib.drawUiNode(imgui, node, uiState, width?)`
+
+Draws one prepared UI node against alias-backed `uiState`.
+
+Supports:
+- scalar widgets through `binds`
+- `steppedRange` through `binds.min` / `binds.max`
+- layout recursion through `children`
+
+### `lib.drawUiTree(imgui, nodes, uiState, width?)`
+
+Draws an ordered UI node list.
+
+### `lib.collectQuickUiNodes(nodes)`
+
+Returns all widget nodes marked `quick = true`, recursing through layout `children`.
+
+## Managed UI State
+
+`store.uiState` stages by alias, not by field/config key.
+
+Surface:
+- `uiState.view`
+- `uiState.get(alias)`
+- `uiState.set(alias, value)`
+- `uiState.update(alias, fn)`
+- `uiState.toggle(alias)`
+- `uiState.reloadFromConfig()`
+- `uiState.flushToConfig()`
+- `uiState.isDirty()`
+
+Behavior:
+- packed child alias writes update the owning packed root in staging
+- flush writes only dirty root storage nodes
+- `view` is read-only
+
+### `lib.runUiStatePass(opts)`
+
+Runs one draw pass for managed alias-backed state and flushes or commits if dirty.
+
+Important options:
+- `uiState`
+- `draw(imgui, uiState, theme)`
+- `commit(uiState)` optional transactional commit hook
+- `onFlushed()` optional success callback
+
+### `lib.commitUiState(def, store, uiState)`
+
+Transactional managed-state commit helper.
+
+Behavior:
+- snapshots dirty persisted root values
+- flushes staged values
+- if needed, reapplies runtime state
+- on failure, restores persisted values and reloads `uiState`
+
+### `lib.auditAndResyncUiState(name, uiState)`
+
+Audits staged alias state against persisted config, warns on drift, then reloads staged values.
 
 ## Mutation Lifecycle
 
@@ -52,7 +239,7 @@ Reverts then reapplies a definition. Stops if revert fails.
 
 ### `lib.setDefinitionEnabled(def, store, enabled)`
 
-Transactional enable/disable helper:
+Transactional enable or disable helper:
 - runs lifecycle work first
 - only writes `Enabled` after success
 
@@ -68,7 +255,7 @@ Returns:
 - `backup(tbl, ...)`
 - `restore()`
 
-Use this for manual mutation modules that need first-write backup/restore semantics.
+Use this for manual mutation modules that need first-write backup or restore semantics.
 
 ### `lib.createMutationPlan()`
 
@@ -80,78 +267,45 @@ Supported operations:
 - `plan:transform(tbl, key, fn)`
 - `plan:append(tbl, key, value)`
 - `plan:appendUnique(tbl, key, value, equivalentFn?)`
+- `plan:removeElement(tbl, key, value, equivalentFn?)`
+- `plan:setElement(tbl, key, oldValue, newValue, equivalentFn?)`
 - `plan:apply()`
 - `plan:revert()`
 
-## Managed UI State
+## Registries
 
-`store.uiState` exists when the definition declares managed fields.
+### `lib.StorageTypes`
 
-Surface:
-- `uiState.view`
-- `uiState.get(path)`
-- `uiState.set(path, value)`
-- `uiState.update(path, fn)`
-- `uiState.toggle(path)`
-- `uiState.reloadFromConfig()`
-- `uiState.flushToConfig()`
-- `uiState.isDirty()`
+Lib-owned storage registry.
 
-### `lib.runUiStatePass(opts)`
+Built-ins:
+- `bool`
+- `int`
+- `string`
+- `packedInt`
 
-Runs one draw pass for managed state and flushes/commits if dirty.
+### `lib.WidgetTypes`
 
-Important options:
-- `uiState`
-- `draw(imgui, uiState, theme)`
-- `commit(uiState)` optional transactional commit hook
-- `onFlushed()` optional success callback
+Lib-owned widget registry.
 
-### `lib.commitUiState(def, store, uiState)`
+Built-ins:
+- `checkbox`
+- `dropdown`
+- `radio`
+- `stepper`
+- `steppedRange`
 
-Transactional managed-state commit helper.
+### `lib.LayoutTypes`
 
-Behavior:
-- snapshots dirty persisted values
-- flushes staged values
-- if needed, reapplies runtime state
-- on failure, restores persisted values and reloads `uiState`
+Lib-owned layout registry.
 
-### `lib.auditAndResyncUiState(name, uiState)`
+Built-ins:
+- `separator`
+- `group`
 
-Audits staged state against persisted config, warns on drift, then reloads staged values.
+### `lib.validateRegistries()`
 
-## Field Helpers
-
-### `lib.drawField(imgui, field, value, width?)`
-
-Renders one field using its registered field type.
-
-### `lib.isFieldVisible(field, values)`
-
-Resolves `visibleIf` against the current flat values table.
-
-### `lib.validateSchema(schema, label)`
-
-Validates schema/options declarations and prepares runtime metadata.
-
-### `lib.getSchemaConfigFields(schema)`
-
-Returns only config-backed fields, excluding separators.
-
-### `lib.valuesEqual(field, a, b)`
-
-Semantic equality helper used by:
-- `uiState` audit
-- hash default elision
-
-Uses field-type `equals(...)` when provided, otherwise deep structural equality.
-
-### `lib.FieldTypes`
-
-The field-type registry.
-
-Built-in field types are Lib-owned and validated strictly.
+Hard-validates registry contracts.
 
 ## Standalone Helpers
 
@@ -163,6 +317,8 @@ Returns a menu-bar callback for regular modules running without a coordinator.
 
 Returns `{ renderWindow, addMenuBar }` for special modules running without a coordinator.
 
+If `def.ui` exists and no custom `DrawTab` is supplied, the helper renders `def.ui` automatically.
+
 ## Path Helpers
 
 ### `lib.readPath(tbl, key)`
@@ -173,6 +329,18 @@ Reads from a flat key or nested path array.
 
 Writes to a flat key or nested path array, creating intermediate tables as needed.
 
+## Coordinator Helpers
+
+### `lib.isEnabled(store, packId?)`
+
+Returns `true` only when:
+- the module store has `Enabled = true`
+- and, if coordinated, the pack-level `ModEnabled` flag is also true
+
+### `lib.affectsRunData(def)`
+
+Returns whether successful lifecycle or config changes require run-data rebuild behavior.
+
 ## Warnings and Logging
 
 ### `lib.warn(packId, enabled, fmt, ...)`
@@ -181,7 +349,7 @@ Debug-gated framework warning.
 
 ### `lib.contractWarn(packId, fmt, ...)`
 
-Always-on framework contract/compatibility warning.
+Always-on framework contract or compatibility warning.
 
 ### `lib.log(name, enabled, fmt, ...)`
 

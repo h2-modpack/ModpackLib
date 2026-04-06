@@ -1,9 +1,6 @@
 local internal = AdamantModpackLib_Internal
 local shared = internal.shared
-local FieldTypes = shared.FieldTypes
 local _coordinators = shared.coordinators
-local SpecialFieldKey = shared.SpecialFieldKey
-local GetSchemaConfigFields = shared.GetSchemaConfigFields
 
 local function ClonePersistedValue(value)
     if type(value) == "table" then
@@ -12,101 +9,103 @@ local function ClonePersistedValue(value)
     return value
 end
 
-local function BuildConfigEntries(configFields, configBackend)
+local function BuildConfigEntries(rootNodes, configBackend)
     if not configBackend then
         return nil
     end
     local configEntries = {}
-    for _, field in ipairs(configFields) do
-        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-        configEntries[schemaKey] = configBackend.getEntry(field.configKey)
+    for _, root in ipairs(rootNodes) do
+        configEntries[root.alias] = configBackend.getEntry(root.configKey)
     end
     return configEntries
 end
 
-local function ReadConfigFieldValue(field, modConfig, configEntries)
-    local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-    local entry = configEntries and configEntries[schemaKey] or nil
+local function NormalizeNodeValue(node, value)
+    local storageType = shared.StorageTypes[node.type]
+    if storageType and type(storageType.normalize) == "function" then
+        return storageType.normalize(node, value)
+    end
+    return value
+end
+
+local function ReadConfigValue(root, modConfig, configEntries)
+    local entry = configEntries and configEntries[root.alias] or nil
     if entry then
         return entry:get()
     end
-    return field._readValue(modConfig)
+    return public.readPath(modConfig, root.configKey)
 end
 
-local function WriteConfigFieldValue(field, modConfig, value, configEntries)
-    local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-    local entry = configEntries and configEntries[schemaKey] or nil
+local function WriteConfigValue(root, modConfig, value, configEntries)
+    local entry = configEntries and configEntries[root.alias] or nil
     if entry then
         entry:set(value)
         return
     end
-    field._writeValue(modConfig, value)
+    public.writePath(modConfig, root.configKey, value)
 end
 
---- Create managed staging state for schema-backed or option-backed UI fields.
---- @param modConfig table Persisted config table backing the state.
---- @param configBackend table|nil Optional Chalk backend wrapper for entry-based read/write access.
---- @param schema table Validated schema/options list.
---- @return table uiState Managed staging object with `view/get/set/update/toggle/reloadFromConfig/flushToConfig`.
-function shared.CreateUiState(modConfig, configBackend, schema)
-    public.validateSchema(schema, _PLUGIN.guid or "unknown module")
-
+function shared.CreateUiState(modConfig, configBackend, storage)
+    local rootNodes = public.getStorageRoots(storage)
+    local aliasNodes = public.getStorageAliases(storage)
     local staging = {}
     local dirty = false
-    local dirtyKeys = {}
-    local fieldByKey = {}
-    local configFields = GetSchemaConfigFields(schema)
-    local configEntries = BuildConfigEntries(configFields, configBackend)
-    for _, field in ipairs(configFields) do
-        local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-        fieldByKey[schemaKey] = field
+    local dirtyRoots = {}
+    local configEntries = BuildConfigEntries(rootNodes, configBackend)
+
+    local function syncPackedChildren(root, packedValue)
+        for _, child in ipairs(root._bitAliases or {}) do
+            local rawValue = public.readBitsValue(packedValue, child.offset, child.width)
+            if child.type == "bool" then
+                rawValue = rawValue ~= 0
+            end
+            staging[child.alias] = NormalizeNodeValue(child, rawValue)
+        end
     end
 
-    local function getField(key)
-        return fieldByKey[SpecialFieldKey(key)]
+    local function writeRootToStaging(root, value)
+        local normalized = NormalizeNodeValue(root, value)
+        staging[root.alias] = normalized
+        if root.type == "packedInt" then
+            syncPackedChildren(root, normalized)
+        end
+        dirtyRoots[root.alias] = true
+        dirty = true
     end
 
-    local function normalizeValue(key, value)
-        local field = getField(key)
-        if not field then
-            return value
+    local function loadRootIntoStaging(root)
+        local value = ReadConfigValue(root, modConfig, configEntries)
+        if value == nil then
+            value = ClonePersistedValue(root.default)
         end
-
-        local ft = FieldTypes[field.type]
-        if not ft or not ft.toStaging then
-            return value
+        local normalized = NormalizeNodeValue(root, value)
+        staging[root.alias] = normalized
+        if root.type == "packedInt" then
+            syncPackedChildren(root, normalized)
         end
-        return ft.toStaging(value, field)
     end
 
     local function copyConfigToStaging()
-        for _, field in ipairs(configFields) do
-            local val = ReadConfigFieldValue(field, modConfig, configEntries)
-            local ft = FieldTypes[field.type]
-            if ft then
-                field._writeValue(staging, ft.toStaging(val, field))
-            end
+        for _, root in ipairs(rootNodes) do
+            loadRootIntoStaging(root)
         end
     end
 
     local function copyStagingToConfig()
-        for _, field in ipairs(configFields) do
-            local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-            if dirtyKeys[schemaKey] then
-                local val = field._readValue(staging)
-                WriteConfigFieldValue(field, modConfig, val, configEntries)
+        for _, root in ipairs(rootNodes) do
+            if dirtyRoots[root.alias] then
+                WriteConfigValue(root, modConfig, staging[root.alias], configEntries)
             end
         end
     end
 
     local function captureDirtyConfigSnapshot()
         local snapshot = {}
-        for _, field in ipairs(configFields) do
-            local schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-            if dirtyKeys[schemaKey] then
+        for _, root in ipairs(rootNodes) do
+            if dirtyRoots[root.alias] then
                 table.insert(snapshot, {
-                    field = field,
-                    value = ClonePersistedValue(ReadConfigFieldValue(field, modConfig, configEntries)),
+                    root = root,
+                    value = ClonePersistedValue(ReadConfigValue(root, modConfig, configEntries)),
                 })
             end
         end
@@ -115,94 +114,60 @@ function shared.CreateUiState(modConfig, configBackend, schema)
 
     local function restoreConfigSnapshot(snapshot)
         for _, entry in ipairs(snapshot or {}) do
-            WriteConfigFieldValue(entry.field, modConfig, ClonePersistedValue(entry.value), configEntries)
+            WriteConfigValue(entry.root, modConfig, ClonePersistedValue(entry.value), configEntries)
         end
-    end
-
-    local function markDirty(key)
-        local schemaKey = SpecialFieldKey(key)
-        if fieldByKey[schemaKey] then
-            dirtyKeys[schemaKey] = true
-        end
-        dirty = true
     end
 
     local function clearDirty()
         dirty = false
-        dirtyKeys = {}
+        dirtyRoots = {}
     end
 
-    local function readStagingValue(key)
-        local field = getField(key)
-        if field then
-            return field._readValue(staging), field
-        end
-        return public.readPath(staging, key), nil
+    local readonlyProxy = setmetatable({}, {
+        __index = function(_, key)
+            return staging[key]
+        end,
+        __newindex = function()
+            error("uiState view is read-only; use state.set/update/toggle", 2)
+        end,
+        __pairs = function()
+            return next, staging, nil
+        end,
+    })
+
+    local function readStagingValue(alias)
+        return staging[alias], aliasNodes[alias]
     end
 
-    local function writeStagingValue(key, value)
-        local field = getField(key)
-        local normalized = normalizeValue(key, value)
-        if field then
-            field._writeValue(staging, normalized)
-        else
-            public.writePath(staging, key, normalized)
+    local function writeStagingValue(alias, value)
+        local node = aliasNodes[alias]
+        if not node then
+            if shared.libWarn then
+                shared.libWarn("uiState.set: unknown alias '%s'; value will not be persisted", tostring(alias))
+            end
+            return
         end
-        markDirty(key)
+
+        if node._isBitAlias then
+            local parent = node.parent
+            local packedValue = staging[parent.alias]
+            if packedValue == nil then
+                loadRootIntoStaging(parent)
+                packedValue = staging[parent.alias]
+            end
+            local normalized = NormalizeNodeValue(node, value)
+            local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
+            local nextPacked = public.writeBitsValue(packedValue, node.offset, node.width, encoded)
+            writeRootToStaging(parent, nextPacked)
+            staging[node.alias] = normalized
+            return
+        end
+
+        writeRootToStaging(node, value)
     end
 
     copyConfigToStaging()
-
-    local readonlyCache = setmetatable({}, { __mode = "k" })
-
-    local function makeReadonly(node)
-        if type(node) ~= "table" then
-            return node
-        end
-        if readonlyCache[node] then
-            return readonlyCache[node]
-        end
-
-        local proxy = {}
-        local mt = {
-            __index = function(_, key)
-                local value = node[key]
-                if type(value) == "table" then
-                    return makeReadonly(value)
-                end
-                return value
-            end,
-            __newindex = function()
-                error("uiState view is read-only; use state.set/update/toggle", 2)
-            end,
-            __pairs = function()
-                return function(_, lastKey)
-                    local nextKey, nextVal = next(node, lastKey)
-                    if type(nextVal) == "table" then
-                        nextVal = makeReadonly(nextVal)
-                    end
-                    return nextKey, nextVal
-                end, proxy, nil
-            end,
-            __ipairs = function()
-                local i = 0
-                return function()
-                    i = i + 1
-                    local value = node[i]
-                    if value ~= nil and type(value) == "table" then
-                        value = makeReadonly(value)
-                    end
-                    if value ~= nil then
-                        return i, value
-                    end
-                end, proxy, 0
-            end,
-        }
-
-        setmetatable(proxy, mt)
-        readonlyCache[node] = proxy
-        return proxy
-    end
+    clearDirty()
 
     local function snapshot()
         copyConfigToStaging()
@@ -215,20 +180,20 @@ function shared.CreateUiState(modConfig, configBackend, schema)
     end
 
     return {
-        view = makeReadonly(staging),
-        get = function(key)
-            return readStagingValue(key)
+        view = readonlyProxy,
+        get = function(alias)
+            return readStagingValue(alias)
         end,
-        set = function(key, value)
-            writeStagingValue(key, value)
+        set = function(alias, value)
+            writeStagingValue(alias, value)
         end,
-        update = function(key, updater)
-            local current = readStagingValue(key)
-            writeStagingValue(key, updater(current))
+        update = function(alias, updater)
+            local current = readStagingValue(alias)
+            writeStagingValue(alias, updater(current))
         end,
-        toggle = function(key)
-            local current = readStagingValue(key)
-            writeStagingValue(key, not (current == true))
+        toggle = function(alias)
+            local current = readStagingValue(alias)
+            writeStagingValue(alias, not (current == true))
         end,
         reloadFromConfig = snapshot,
         flushToConfig = sync,
@@ -239,15 +204,26 @@ function shared.CreateUiState(modConfig, configBackend, schema)
         end,
         collectConfigMismatches = function()
             local mismatches = {}
-            for _, field in ipairs(configFields) do
-                local currentValue = ReadConfigFieldValue(field, modConfig, configEntries)
-                local stagedValue = field._readValue(staging)
-                local ft = FieldTypes[field.type]
-                if ft and ft.toStaging then
-                    currentValue = ft.toStaging(currentValue, field)
+            for _, root in ipairs(rootNodes) do
+                local persistedValue = ReadConfigValue(root, modConfig, configEntries)
+                if persistedValue == nil then
+                    persistedValue = ClonePersistedValue(root.default)
                 end
-                if not public.valuesEqual(field, currentValue, stagedValue) then
-                    table.insert(mismatches, field._schemaKey or SpecialFieldKey(field.configKey))
+                persistedValue = NormalizeNodeValue(root, persistedValue)
+                if not public.valuesEqual(root, persistedValue, staging[root.alias]) then
+                    table.insert(mismatches, root.alias)
+                end
+                if root.type == "packedInt" then
+                    for _, child in ipairs(root._bitAliases or {}) do
+                        local childValue = public.readBitsValue(persistedValue, child.offset, child.width)
+                        if child.type == "bool" then
+                            childValue = childValue ~= 0
+                        end
+                        childValue = NormalizeNodeValue(child, childValue)
+                        if not public.valuesEqual(child, childValue, staging[child.alias]) then
+                            table.insert(mismatches, child.alias)
+                        end
+                    end
                 end
             end
             return mismatches
@@ -255,17 +231,6 @@ function shared.CreateUiState(modConfig, configBackend, schema)
     }
 end
 
---- Run one managed `uiState` draw pass and persist changes when the pass dirties staging.
---- @param opts table Options table containing:
----   `name`      string|nil  Human-readable label used in warnings.
----   `imgui`     table|nil   ImGui binding to pass to the draw callback.
----   `uiState`   table       Managed uiState object.
----   `theme`     table|nil   Optional theme object forwarded to the draw callback.
----   `draw`      function    Callback `(imgui, uiState, theme)` that renders controls.
----   `commit`    function|nil Optional transactional commit callback `(uiState) -> ok, err`.
----   `onFlushed` function|nil Callback invoked after a successful flush/commit.
---- @return boolean changed True when staged state was successfully flushed or committed.
---- @return string|nil err Error text when a transactional commit failed.
 function public.runUiStatePass(opts)
     local draw = opts and opts.draw
     if type(draw) ~= "function" then
@@ -308,10 +273,6 @@ function public.runUiStatePass(opts)
     return false
 end
 
---- Audit staged `uiState` for drift from persisted config, warn on mismatches, then reload.
---- @param name string Human-readable module/special name used in warnings.
---- @param uiState table Managed uiState object.
---- @return table mismatches Array of schema keys that drifted.
 function public.auditAndResyncUiState(name, uiState)
     if not uiState or type(uiState.collectConfigMismatches) ~= "function" or type(uiState.reloadFromConfig) ~= "function" then
         return {}
@@ -325,13 +286,6 @@ function public.auditAndResyncUiState(name, uiState)
     return mismatches
 end
 
---- Flush managed `uiState` transactionally and reapply runtime state when required.
---- On reapply failure, persisted config and staged state are restored to their previous values.
---- @param def table Module definition table.
---- @param store table Module store that owns persisted config and the Enabled bit.
---- @param uiState table Managed uiState object created for the module.
---- @return boolean ok True when the new staged values were committed successfully.
---- @return string|nil err Error text when commit or rollback reapply failed.
 function public.commitUiState(def, store, uiState)
     if not uiState or type(uiState.isDirty) ~= "function" or type(uiState.flushToConfig) ~= "function"
         or type(uiState.reloadFromConfig) ~= "function"
@@ -377,18 +331,6 @@ function public.commitUiState(def, store, uiState)
     return false, err
 end
 
---- Build standalone window + menu-bar callbacks for a special module outside a coordinator.
---- @param def table Special module definition table.
---- @param store table Special module store created by lib.createStore(...).
---- @param uiState table|nil Optional uiState override; defaults to `store.uiState`.
---- @param opts table|nil Optional rendering overrides:
----   `windowTitle`         string|nil
----   `theme`               table|nil
----   `drawQuickContent`    function|nil
----   `drawTab`             function|nil
----   `getDrawQuickContent` function|nil
----   `getDrawTab`          function|nil
---- @return table ui `{ renderWindow, addMenuBar }` callbacks for standalone registration.
 function public.standaloneSpecialUI(def, store, uiState, opts)
     opts = opts or {}
     uiState = uiState or (store and store.uiState) or nil
@@ -451,6 +393,11 @@ function public.standaloneSpecialUI(def, store, uiState, opts)
 
             local drawQuickContent = getDrawQuickContent()
             local drawTab = getDrawTab()
+            if not drawTab and type(def.ui) == "table" and #def.ui > 0 then
+                drawTab = function(ui)
+                    public.drawUiTree(ui, def.ui, uiState, ui.GetWindowWidth() * 0.4)
+                end
+            end
 
             if drawQuickContent or drawTab then
                 imgui.Separator()

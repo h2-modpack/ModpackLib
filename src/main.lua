@@ -14,19 +14,23 @@ local chalk = mods['SGG_Modding-Chalk']
 local libConfig = chalk.auto('config.lua')
 public.config = libConfig
 
-local FieldTypes = {}
+local StorageTypes = {}
+local WidgetTypes = {}
+local LayoutTypes = {}
 local _coordinators = {}
 AdamantModpackLib_Internal = AdamantModpackLib_Internal or {}
 local internal = AdamantModpackLib_Internal
 internal.shared = {
     libConfig = libConfig,
-    FieldTypes = FieldTypes,
+    StorageTypes = StorageTypes,
+    WidgetTypes = WidgetTypes,
+    LayoutTypes = LayoutTypes,
     coordinators = _coordinators,
     chalk = chalk,
 }
 
 import 'core.lua'
-import 'fields.lua'
+import 'field_registry.lua'
 import 'special.lua'
 
 -- Standalone framework debug toggle — hidden when Core is installed.

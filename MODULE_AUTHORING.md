@@ -1,6 +1,6 @@
 # Module Authoring
 
-This guide covers the supported module contract for `adamant-ModpackLib`.
+This guide covers the supported module contract after the storage/UI redesign.
 
 ## Shared Rules
 
@@ -12,35 +12,23 @@ public.definition = {
 }
 
 public.store = lib.createStore(config, public.definition)
-```
-
-## Module File Conventions
-
-Use this split consistently:
-- `config`, `chalk`, and `reload` stay local to `main.lua`
-- `public.store = lib.createStore(config, public.definition)` is the boundary where raw Chalk config stops
-- `store = public.store` may be shared across module files
-- `modutil` and `lib` may be shared across module files
-- imported files should read persisted state through `store.read(...)` and write through `store.write(...)`, not raw config
-- `internal` is for module-local helpers, registration tables, and cached data, not dependency forwarding
-
-Example:
-
-```lua
-local chalk = rom.mods["SGG_Modding-Chalk"]
-local reload = rom.mods["SGG_Modding-ReLoad"]
-local config = chalk.auto("config.lua")
-
-public.store = lib.createStore(config, public.definition)
 store = public.store
 ```
 
-## Required State Access Rules
+Every module now declares:
+- `definition.storage`
+- `definition.ui` when it wants Lib-managed rendering
 
-These are contract rules, not style preferences:
+There is no supported use of:
+- `definition.options`
+- `definition.stateSchema`
+
+## State Access Rules
+
+These are contract rules:
 - keep raw Chalk config local to `main.lua`
-- after `public.store = lib.createStore(config, public.definition)`, module code should use `store.read(...)` and `store.write(...)`
-- do not share raw config across imported module files
+- after `public.store = lib.createStore(config, public.definition)`, other module files should use `store.read(...)` and `store.write(...)`
+- special UI should use `store.uiState`
 
 Avoid:
 
@@ -58,59 +46,39 @@ if store.read("Strict") then
 end
 ```
 
-Recommended bootstrap:
-
-```lua
-local loader = reload.auto_single()
-
-local function init()
-    import_as_fallback(rom.game)
-
-    if internal.RegisterHooks then
-        internal.RegisterHooks()
-    end
-
-    if lib.isEnabled(public.store, public.definition.modpack) then
-        lib.applyDefinition(public.definition, public.store)
-    end
-
-    if public.definition.affectsRunData and not lib.isCoordinated(public.definition.modpack) then
-        SetupRunData()
-    end
-end
-
-modutil.once_loaded.game(function()
-    loader.load(init, init)
-end)
-```
-
 ## Regular Modules
 
-Regular modules participate in category/group rendering and can expose inline options.
+Regular modules participate in category/group rendering and may expose hosted declarative UI.
 
-Typical definition:
+Example:
 
 ```lua
 public.definition = {
-    modpack        = PACK_ID,
-    id             = "ExampleMod",
-    name           = "Example Mod",
-    category       = "Run Mods",
-    group          = "General",
-    tooltip        = "What this module does.",
-    default        = true,
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
+    category = "Run Mods",
+    group = "General",
+    tooltip = "What this module does.",
+    default = false,
     affectsRunData = false,
-    options = {
-        { type = "checkbox", configKey = "Strict", label = "Strict Mode", default = false },
-        { type = "string", configKey = "Label", label = "Label", default = "", maxLen = 64 },
+    storage = {
+        { type = "bool", alias = "Strict", configKey = "Strict", default = false },
+        { type = "string", alias = "Label", configKey = "Label", default = "", maxLen = 64 },
+    },
+    ui = {
+        { type = "checkbox", binds = { value = "Strict" }, label = "Strict Mode", quick = true },
+        { type = "separator", label = "Naming" },
+        { type = "dropdown", binds = { value = "Label" }, label = "Label", values = { "", "A", "B" } },
     },
 }
 ```
 
 Rules:
 - `definition.id` is the regular-module hash namespace
-- `definition.options` keys must be flat strings
-- inline option values are edited through `public.store.uiState`
+- storage aliases should be stable after release
+- root aliases default to `configKey` when omitted
+- widgets bind by alias
 
 Standalone helper:
 
@@ -120,47 +88,164 @@ rom.gui.add_to_menu_bar(lib.standaloneUI(public.definition, public.store))
 
 ## Special Modules
 
-Special modules get their own sidebar tab and declare state through `definition.stateSchema`.
+Special modules get their own framework tab and usually own more of their layout.
 
-Typical definition:
+Example:
 
 ```lua
 public.definition = {
-    modpack        = PACK_ID,
-    id             = "ExampleSpecial",
-    name           = "Example Special",
-    tabLabel       = "Example",
-    special        = true,
-    default        = false,
+    modpack = PACK_ID,
+    id = "ExampleSpecial",
+    name = "Example Special",
+    tabLabel = "Example",
+    special = true,
+    default = false,
     affectsRunData = true,
-    stateSchema = {
-        { type = "dropdown", configKey = "Mode", values = { "A", "B" }, default = "A" },
-        { type = "string", configKey = "TargetKey", default = "", maxLen = 128 },
-        { type = "checkbox", configKey = { "Nested", "Flag" }, default = false },
+    storage = {
+        { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
+        { type = "string", alias = "TargetKey", configKey = "TargetKey", default = "", maxLen = 128 },
+        { type = "bool", alias = "NestedFlag", configKey = { "Nested", "Flag" }, default = false },
     },
+    ui = {},
 }
 ```
 
 Rules:
 - special-module hash namespace is the module `modName`
-- `stateSchema` may use flat keys or nested path arrays
-- draw functions receive `uiState`, not raw config
+- storage may still use nested raw config paths
+- alias names are the UI and `uiState` access surface
 
 Supported public UI entrypoints:
 - `public.DrawQuickContent(ui, uiState, theme)`
 - `public.DrawTab(ui, uiState, theme)`
 
+If `public.DrawTab` is absent and `definition.ui` exists, Lib can render `definition.ui` automatically.
+
 Standalone helper:
 
 ```lua
-local specialUi = lib.standaloneSpecialUI(public.definition, public.store, public.store.uiState, {
-    getDrawQuickContent = function() return public.DrawQuickContent end,
-    getDrawTab = function() return public.DrawTab end,
-})
+local specialUi = lib.standaloneSpecialUI(
+    public.definition,
+    public.store,
+    public.store.uiState,
+    {
+        getDrawQuickContent = function() return public.DrawQuickContent end,
+        getDrawTab = function() return public.DrawTab end,
+    }
+)
 
 rom.gui.add_imgui(specialUi.renderWindow)
 rom.gui.add_to_menu_bar(specialUi.addMenuBar)
 ```
+
+## Storage Authoring
+
+### Scalar storage
+
+```lua
+{ type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false }
+{ type = "int", alias = "Count", configKey = "Count", default = 3, min = 1, max = 9 }
+{ type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 64 }
+```
+
+### Packed storage
+
+Use `packedInt` when you want alias-addressable packed children:
+
+```lua
+{
+    type = "packedInt",
+    alias = "PackedAphrodite",
+    configKey = "PackedAphrodite",
+    bits = {
+        { alias = "AttackBanned", offset = 0, width = 1, type = "bool", default = false },
+        { alias = "RarityOverride", offset = 4, width = 2, type = "int", default = 0 },
+    },
+}
+```
+
+If a module only treats a packed value as a raw mask, it can remain a plain root `int`.
+
+## UI Authoring
+
+### Widget nodes
+
+Examples:
+
+```lua
+{ type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" }
+{ type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1 }
+{ type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "Vanilla", "Chaos" } }
+```
+
+### Layout nodes
+
+Examples:
+
+```lua
+{ type = "separator", label = "Options" }
+
+{
+    type = "group",
+    label = "Advanced",
+    children = {
+        { type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" },
+    },
+}
+```
+
+### `steppedRange`
+
+This is now a pure widget bound to two aliases:
+
+```lua
+storage = {
+    { type = "int", alias = "DepthMin", configKey = "DepthMin", default = 1, min = 1, max = 10 },
+    { type = "int", alias = "DepthMax", configKey = "DepthMax", default = 10, min = 1, max = 10 },
+}
+
+ui = {
+    { type = "steppedRange", binds = { min = "DepthMin", max = "DepthMax" }, label = "Depth", min = 1, max = 10, step = 1 },
+}
+```
+
+### `visibleIf`
+
+Simple bool gate:
+
+```lua
+{ type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled", visibleIf = "GateEnabled" }
+```
+
+Equality gate:
+
+```lua
+{ type = "stepper", binds = { value = "Count" }, label = "Count", visibleIf = { alias = "Mode", value = "Forced" } }
+```
+
+Multiple allowed values:
+
+```lua
+{ type = "stepper", binds = { value = "Count" }, label = "Count", visibleIf = { alias = "Mode", anyOf = { "Forced", "Chaos" } } }
+```
+
+## Managed UI State
+
+When a module declares `definition.storage`, Lib creates `public.store.uiState`.
+
+Use:
+- `uiState.view` for rendering
+- `uiState.get(alias)` for explicit reads
+- `uiState.set(alias, value)` for edits
+- `uiState.update(alias, fn)` for derived edits
+- `uiState.toggle(alias)` for bool edits
+
+Do not write alias-backed config directly during draw.
+
+Hosted Framework UI and standalone Lib helpers already:
+- commit `uiState` transactionally
+- roll persisted state back on failed reapply
+- call `SetupRunData()` after successful commits when required
 
 ## Modules That Affect Run Data
 
@@ -172,9 +257,7 @@ public.definition.affectsRunData = true
 
 Lifecycle shape is inferred from exports.
 
-### Patch-Only
-
-Use this for deterministic reversible table edits.
+### Patch-only
 
 ```lua
 public.definition.patchPlan = function(plan, store)
@@ -183,25 +266,20 @@ public.definition.patchPlan = function(plan, store)
 end
 ```
 
-### Manual-Only
-
-Use this for procedural or engine-side mutation.
+### Manual-only
 
 ```lua
 local backup, restore = lib.createBackupSystem()
 
-local function apply()
+public.definition.apply = function()
     backup(SomeTable, "SomeKey")
     SomeTable.SomeKey = 123
 end
 
-public.definition.apply = apply
 public.definition.revert = restore
 ```
 
 ### Hybrid
-
-Use patch plans for obvious reversible edits and manual logic for the remainder.
 
 ```lua
 public.definition.patchPlan = function(plan, store)
@@ -217,37 +295,18 @@ public.definition.revert = function()
 end
 ```
 
-Stable ordering:
+Ordering:
 - apply: patch, then manual
 - revert: manual, then patch
-
-Guidance:
-- prefer patch mode when possible
-- keep patch-owned and manual-owned keys conceptually separate
-
-## Managed UI State
-
-When a module declares `options` or `stateSchema`, Lib creates `public.store.uiState`.
-
-Use:
-- `uiState.view` for rendering
-- `uiState.set/update/toggle` for edits
-
-Do not write schema-backed or option-backed config directly during draw.
-
-Hosted Framework UI and standalone Lib helpers already:
-- commit `uiState` transactionally
-- roll staged config back on failed reapply
-- call `SetupRunData()` after successful commits when required
 
 ## Hash/Profile Stability
 
 After release, treat these as compatibility-sensitive:
 - regular `definition.id`
-- regular option `configKey`
 - special `modName`
-- special schema keys
-- field defaults
-- `toHash/fromHash`
+- storage aliases
+- root `configKey` layout
+- storage defaults
+- storage type hash encodings
 
-If those change, the manual migration path is to save new profiles.
+If those change, existing hashes and saved profiles may stop mapping cleanly.

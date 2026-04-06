@@ -1,86 +1,64 @@
 local internal = AdamantModpackLib_Internal
 local shared = internal.shared
 local libConfig = shared.libConfig
+local StorageTypes = shared.StorageTypes
 local _coordinators = shared.coordinators
 local chalk = shared.chalk
 local _mutationRuntime = shared.mutationRuntime or setmetatable({}, { __mode = "k" })
 shared.mutationRuntime = _mutationRuntime
-local SpecialFieldKey
-local PrepareSchemaFieldRuntimeMetadata
-local IsSchemaConfigField
-local GetSchemaConfigFields
-local ChoiceDisplay
 
---- Register or clear the coordinator config used for pack-level enable gating.
---- Called by Framework.init on behalf of the coordinator.
---- @param packId string Stable modpack identifier shared by coordinator and modules.
---- @param config table|nil Coordinator config table, or nil to deregister during tests/reload.
+local function StorageKey(key)
+    local helper = shared.StorageKey
+    if type(helper) == "function" then
+        return helper(key)
+    end
+    if type(key) == "table" then
+        return table.concat(key, ".")
+    end
+    return tostring(key)
+end
+
 function public.registerCoordinator(packId, config)
     _coordinators[packId] = config
 end
 
---- Return whether a coordinator config is currently registered for the given pack.
---- @param packId string Stable modpack identifier.
---- @return boolean isRegistered True when a coordinator config is available.
 function public.isCoordinated(packId)
     return _coordinators[packId] ~= nil
 end
 
---- Return whether a store-backed module should currently be active.
---- Considers both the module's own Enabled bit and an optional coordinator ModEnabled gate.
---- @param store table Store created by lib.createStore(...).
---- @param packId string|nil Optional modpack identifier for coordinator gating.
---- @return boolean isEnabled True when runtime behavior should be active.
 function public.isEnabled(store, packId)
     local coord = packId and _coordinators[packId]
     if coord and not coord.ModEnabled then return false end
     return store and type(store.read) == "function" and store.read("Enabled") == true or false
 end
 
---- Lib-internal diagnostic — gated on lib's own DebugMode.
 local function FormatWarning(prefix, fmt, ...)
-    return prefix .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt)
+    return prefix .. (select("#", ...) > 0 and string.format(fmt, ...) or fmt)
 end
 
---- Lib-internal diagnostic — gated on lib's own DebugMode.
 local function libWarn(fmt, ...)
     if not libConfig.DebugMode then return end
     print(FormatWarning("[lib] ", fmt, ...))
 end
 shared.libWarn = libWarn
 
---- Lib-internal contract warning — always printed.
 local function libWarnAlways(fmt, ...)
     print(FormatWarning("[lib] ", fmt, ...))
 end
 shared.libWarnAlways = libWarnAlways
 
---- Print a framework diagnostic warning when the caller's debug flag is enabled.
---- @param packId string Pack identifier used as the warning prefix.
---- @param enabled boolean Debug gate; false suppresses output.
---- @param fmt string Message text or string.format pattern.
---- @vararg any Format arguments used with fmt.
 function public.warn(packId, enabled, fmt, ...)
     if not enabled then return end
     print(FormatWarning("[" .. packId .. "] ", fmt, ...))
 end
 
---- Print a framework contract or compatibility warning. Always printed.
---- @param packId string Pack identifier used as the warning prefix.
---- @param fmt string Message text or string.format pattern.
---- @vararg any Format arguments used with fmt.
 function public.contractWarn(packId, fmt, ...)
     print(FormatWarning("[" .. packId .. "] ", fmt, ...))
 end
 
---- Print a module-level diagnostic trace when that module's DebugMode is enabled.
---- @param name string Module display name used as the warning prefix.
---- @param enabled boolean Debug gate; false suppresses output.
---- @param fmt string Message text or string.format pattern.
---- @vararg any Format arguments used with fmt.
 function public.log(name, enabled, fmt, ...)
     if not enabled then return end
-    print("[" .. name .. "] " .. (select('#', ...) > 0 and string.format(fmt, ...) or fmt))
+    print("[" .. name .. "] " .. (select("#", ...) > 0 and string.format(fmt, ...) or fmt))
 end
 
 local function CloneMutationValue(value)
@@ -110,10 +88,6 @@ end
 
 local MutationDeepEqual = DeepValueEqual
 
---- Create an isolated backup/restore pair for manual mutation lifecycles.
---- The backup function snapshots keys on first touch; the restore function reverts all captured values.
---- @return function backup Function `(tbl, ...)` that snapshots one or more keys on a table.
---- @return function restore Function `()` that restores every captured key to its original value.
 function public.createBackupSystem()
     local NIL = {}
     local savedValues = {}
@@ -121,7 +95,7 @@ function public.createBackupSystem()
     local function backup(tbl, ...)
         savedValues[tbl] = savedValues[tbl] or {}
         local saved = savedValues[tbl]
-        for i = 1, select('#', ...) do
+        for i = 1, select("#", ...) do
             local key = select(i, ...)
             if saved[key] == nil then
                 local v = tbl[key]
@@ -147,9 +121,6 @@ function public.createBackupSystem()
     return backup, restore
 end
 
---- Create a reversible declarative mutation plan for patch-style data edits.
---- Returned plans support `set`, `setMany`, `transform`, `append`, `appendUnique`, `apply`, and `revert`.
---- @return table plan Mutation plan object.
 function public.createMutationPlan()
     local backup, restore = public.createBackupSystem()
     local operations = {}
@@ -202,6 +173,27 @@ function public.createMutationPlan()
             tbl = tbl,
             key = key,
             value = CloneMutationValue(value),
+            equivalentFn = equivalentFn or MutationDeepEqual,
+        })
+    end
+
+    function plan.removeElement(_, tbl, key, value, equivalentFn)
+        return appendOperation({
+            kind = "removeElement",
+            tbl = tbl,
+            key = key,
+            value = CloneMutationValue(value),
+            equivalentFn = equivalentFn or MutationDeepEqual,
+        })
+    end
+
+    function plan.setElement(_, tbl, key, oldValue, newValue, equivalentFn)
+        return appendOperation({
+            kind = "setElement",
+            tbl = tbl,
+            key = key,
+            oldValue = CloneMutationValue(oldValue),
+            newValue = CloneMutationValue(newValue),
             equivalentFn = equivalentFn or MutationDeepEqual,
         })
     end
@@ -260,10 +252,35 @@ function public.createMutationPlan()
                     end
                 end
                 if not exists then
-                    if tbl[key] == list then
-                        backup(tbl, key)
-                    end
+                    backup(tbl, key)
                     list[#list + 1] = CloneMutationValue(op.value)
+                end
+            elseif op.kind == "removeElement" then
+                local list = tbl[key]
+                if type(list) == "table" then
+                    for index, entry in ipairs(list) do
+                        if op.equivalentFn(entry, op.value) then
+                            backup(tbl, key)
+                            table.remove(list, index)
+                            break
+                        end
+                    end
+                elseif list ~= nil then
+                    error(("mutation plan removeElement requires table at key '%s'"):format(tostring(key)), 0)
+                end
+
+            elseif op.kind == "setElement" then
+                local list = tbl[key]
+                if type(list) == "table" then
+                    for index, entry in ipairs(list) do
+                        if op.equivalentFn(entry, op.oldValue) then
+                            backup(tbl, key)
+                            list[index] = CloneMutationValue(op.newValue)
+                            break
+                        end
+                    end
+                elseif list ~= nil then
+                    error(("mutation plan setElement requires table at key '%s'"):format(tostring(key)), 0)
                 end
             end
         end
@@ -284,10 +301,6 @@ function public.createMutationPlan()
     return plan
 end
 
---- Infer a module's mutation authoring shape from its exported lifecycle surface.
---- @param def table|nil Module definition table.
---- @return string|nil shape `"patch"`, `"manual"`, `"hybrid"`, or nil when no lifecycle is exposed.
---- @return table info Lifecycle capability flags `{ hasPatch, hasApply, hasRevert, hasManual }`.
 function public.inferMutationShape(def)
     local hasPatch = def and type(def.patchPlan) == "function" or false
     local hasApply = def and type(def.apply) == "function" or false
@@ -311,9 +324,6 @@ function public.inferMutationShape(def)
     }
 end
 
---- Return whether this module's config/lifecycle changes require run-data rebuild behavior.
---- @param def table|nil Module definition table.
---- @return boolean affectsRunData True when run-data rebuild/reapply should occur after successful changes.
 function public.affectsRunData(def)
     if not def then
         return false
@@ -321,16 +331,10 @@ function public.affectsRunData(def)
     return def.affectsRunData == true
 end
 
---- Compare two field values using field-type equality when provided, otherwise deep structural equality.
---- @param field table|nil Field definition used to resolve an optional field-type-specific equality function.
---- @param a any First value.
---- @param b any Second value.
---- @return boolean equal True when the values are semantically equal.
-function public.valuesEqual(field, a, b)
-    local fieldTypes = shared.FieldTypes
-    local fieldType = field and fieldTypes and field.type and fieldTypes[field.type] or nil
-    if fieldType and type(fieldType.equals) == "function" then
-        return fieldType.equals(field, a, b)
+function public.valuesEqual(node, a, b)
+    local storageType = node and StorageTypes and node.type and StorageTypes[node.type] or nil
+    if storageType and type(storageType.equals) == "function" then
+        return storageType.equals(node, a, b)
     end
     return DeepValueEqual(a, b)
 end
@@ -362,11 +366,6 @@ local function BuildMutationPlan(def, store)
     return plan
 end
 
---- Activate a module definition using inferred patch/manual/hybrid mutation behavior.
---- @param def table Module definition table.
---- @param store table|nil Module store used for patch-plan ownership and config reads.
---- @return boolean ok True when activation succeeded.
---- @return string|nil err Error text when activation failed.
 function public.applyDefinition(def, store)
     local inferred, info = public.inferMutationShape(def)
     if not inferred then
@@ -415,11 +414,6 @@ function public.applyDefinition(def, store)
     return true, nil
 end
 
---- Deactivate a module definition using inferred patch/manual/hybrid mutation behavior.
---- @param def table Module definition table.
---- @param store table|nil Module store used for active patch-plan lookup.
---- @return boolean ok True when deactivation succeeded.
---- @return string|nil err Error text when deactivation failed.
 function public.revertDefinition(def, store)
     local inferred, info = public.inferMutationShape(def)
     if not inferred then
@@ -454,13 +448,6 @@ function public.revertDefinition(def, store)
     return true, nil
 end
 
---- Persist a definition's Enabled state only after the corresponding lifecycle work succeeds.
---- Already-enabled `true` requests trigger a reapply; already-disabled `false` requests are no-ops.
---- @param def table Module definition table.
---- @param store table Module store that owns the persisted Enabled flag.
---- @param enabled boolean Desired persisted/runtime state.
---- @return boolean ok True when the requested state was committed successfully.
---- @return string|nil err Error text when lifecycle work failed.
 function public.setDefinitionEnabled(def, store, enabled)
     local current = store and type(store.read) == "function" and store.read("Enabled") == true or false
 
@@ -483,11 +470,6 @@ function public.setDefinitionEnabled(def, store, enabled)
     return true, nil
 end
 
---- Reapply a definition by reverting the current runtime state and applying it again.
---- @param def table Module definition table.
---- @param store table Module store used for patch-plan lookup and config reads.
---- @return boolean ok True when reapply succeeded.
---- @return string|nil err Error text when revert or apply failed.
 function public.reapplyDefinition(def, store)
     local okRevert, errRevert = public.revertDefinition(def, store)
     if not okRevert then
@@ -502,59 +484,36 @@ function public.reapplyDefinition(def, store)
     return true, nil
 end
 
-local function BuildManagedFields(definition)
+local function BuildManagedStorage(definition)
     if type(definition) ~= "table" then
         return nil
     end
 
-    if definition.stateSchema ~= nil
-        or definition.options ~= nil
+    if definition.stateSchema ~= nil or definition.options ~= nil then
+        error("legacy definition.stateSchema/options are no longer supported; use definition.storage and definition.ui", 2)
+    end
+
+    if definition.storage ~= nil
+        or definition.ui ~= nil
         or definition.special ~= nil
         or definition.id ~= nil
     then
         local label = tostring(definition.name or definition.id or _PLUGIN.guid or "module")
-
-        if type(definition.stateSchema) == "table" then
-            return definition.stateSchema
+        if type(definition.storage) == "table" then
+            return definition.storage
         end
-
-        if definition.special then
-            libWarnAlways("%s: special modules must declare definition.stateSchema; no uiState created", label)
-            return nil
-        end
-
-        if type(definition.options) == "table" then
-            local managedFields = {}
-            local hasManagedField = false
-            for _, field in ipairs(definition.options) do
-                if field.type == "separator" then
-                    table.insert(managedFields, field)
-                elseif type(field.configKey) == "table" then
-                    libWarnAlways("%s: regular definition.options configKey must be a flat string; nested option skipped",
-                        label)
-                else
-                    table.insert(managedFields, field)
-                    hasManagedField = true
-                end
-            end
-            if hasManagedField then
-                return managedFields
-            end
-            return nil
+        if type(definition.ui) == "table" and #definition.ui > 0 then
+            libWarnAlways("%s: module declares definition.ui but missing definition.storage; no uiState created", label)
         end
         return nil
     end
 
     if #definition > 0 then
-        error("createStore expects a module definition table; raw schema/options arrays are not supported", 2)
+        error("createStore expects a module definition table; raw storage/ui arrays are not supported", 2)
     end
     return nil
 end
 
---- Build a standalone menu-bar callback for a regular module outside a coordinator.
---- @param def table Module definition table.
---- @param store table Module store created by lib.createStore(...).
---- @return function renderMenu Callback suitable for `rom.gui.add_to_menu_bar(...)`.
 function public.standaloneUI(def, store)
     local function TrySetEnabled(enabled)
         local ok, err = public.setDefinitionEnabled(def, store, enabled)
@@ -573,43 +532,6 @@ function public.standaloneUI(def, store)
         if public.affectsRunData(def) and store.read("Enabled") == true then
             rom.game.SetupRunData()
         end
-    end
-
-    local function IsOptionVisible(opt)
-        if not opt.visibleIf then
-            return true
-        end
-        local uiState = store.uiState
-        if not uiState or not uiState.view then
-            return false
-        end
-        return uiState.view[opt.visibleIf] == true
-    end
-
-    local function DrawOption(imgui, opt, index)
-        if not IsOptionVisible(opt) then
-            return
-        end
-
-        local pushId = opt._pushId or opt.configKey or (opt.type .. "_" .. tostring(index))
-        imgui.PushID(pushId)
-        if opt.indent then
-            imgui.Indent()
-        end
-
-        local currentValue = nil
-        if opt.configKey ~= nil then
-            currentValue = store.uiState and store.uiState.get(opt.configKey) or nil
-        end
-        local newVal, newChg = public.drawField(imgui, opt, currentValue)
-        if newChg and opt.configKey then
-            store.uiState.set(opt.configKey, newVal)
-        end
-
-        if opt.indent then
-            imgui.Unindent()
-        end
-        imgui.PopID()
     end
 
     return function()
@@ -637,7 +559,7 @@ function public.standaloneUI(def, store)
                 public.auditAndResyncUiState(def.name or def.id or "module", store.uiState)
             end
 
-            if enabled and def.options then
+            if enabled and store.uiState and type(def.ui) == "table" and #def.ui > 0 then
                 imgui.Separator()
                 public.runUiStatePass({
                     name = def.name,
@@ -647,9 +569,7 @@ function public.standaloneUI(def, store)
                         return public.commitUiState(def, store, state)
                     end,
                     draw = function()
-                        for index, opt in ipairs(def.options) do
-                            DrawOption(imgui, opt, index)
-                        end
+                        public.drawUiTree(imgui, def.ui, store.uiState, imgui.GetWindowWidth() * 0.45)
                     end,
                     onFlushed = onUiStateFlushed,
                 })
@@ -660,12 +580,6 @@ function public.standaloneUI(def, store)
     end
 end
 
---- Read a value from a table using a flat key or nested path.
---- @param tbl table Root table to read from.
---- @param key string|table Flat config key or `{...}` path.
---- @return any value Current value, or nil when the path is missing.
---- @return table|nil parent Parent table containing the resolved key, when found.
---- @return string|nil leafKey Final key segment used for the lookup, when found.
 function public.readPath(tbl, key)
     if type(key) == "table" then
         if #key == 0 then return nil, nil, nil end
@@ -678,11 +592,6 @@ function public.readPath(tbl, key)
     return tbl[key], tbl, key
 end
 
---- Write a value to a table using a flat key or nested path.
---- Missing intermediate tables are created automatically for nested paths.
---- @param tbl table Root table to write into.
---- @param key string|table Flat config key or `{...}` path.
---- @param value any Value to persist.
 function public.writePath(tbl, key, value)
     if type(key) == "table" then
         for i = 1, #key - 1 do
@@ -695,129 +604,54 @@ function public.writePath(tbl, key, value)
     tbl[key] = value
 end
 
---- Create the module-owned store facade around persisted config.
---- Pass the module definition table to enable managed `uiState` for `options` or `stateSchema`.
---- @param modConfig table Persisted config table, usually from Chalk.
---- @param definition table|nil Module definition table, or nil for a plain store without `uiState`.
---- @return table store Store exposing `read`, `write`, and optional `uiState`.
-function public.createStore(modConfig, definition)
-    local backend = GetConfigBackend(modConfig)
-    local store = {}
-
-    function store.read(key)
-        if backend then
-            local value = backend.readValue(key)
-            if value ~= nil then
-                return value
-            end
-        end
-        return public.readPath(modConfig, key)
+local function GetBitValueMask(width)
+    local normalizedWidth = math.floor(tonumber(width) or 0)
+    if normalizedWidth <= 0 then
+        return 0
     end
-
-    function store.write(key, value)
-        if backend and backend.writeValue(key, value) then
-            return
-        end
-        public.writePath(modConfig, key, value)
+    if normalizedWidth >= 32 then
+        return 0xFFFFFFFF
     end
-
-    local managedFields = BuildManagedFields(definition)
-    if managedFields then
-        store.uiState = shared.CreateUiState(modConfig, backend, managedFields)
-    end
-
-    return store
+    return bit32.rshift(0xFFFFFFFF, 32 - normalizedWidth)
 end
 
-PrepareSchemaFieldRuntimeMetadata = function(field)
-    if not field or field.configKey == nil then
-        return
+function public.readBitsValue(packed, offset, width)
+    local normalizedPacked = math.floor(tonumber(packed) or 0)
+    local normalizedOffset = math.max(0, math.floor(tonumber(offset) or 0))
+    local mask = GetBitValueMask(width)
+    if mask == 0 then
+        return 0
     end
-    field._schemaKey = field._schemaKey or SpecialFieldKey(field.configKey)
-    if not field._readValue or not field._writeValue then
-        local configKey = field.configKey
-        if type(configKey) ~= "table" then
-            local key = configKey
-            field._readValue = function(tbl)
-                return tbl[key]
-            end
-            field._writeValue = function(tbl, value)
-                tbl[key] = value
-            end
-            return
-        end
-
-        local len = #configKey
-        if len == 0 then
-            field._readValue = function()
-                return nil
-            end
-            field._writeValue = function()
-            end
-            return
-        end
-
-        if len == 1 then
-            local key = configKey[1]
-            field._readValue = function(tbl)
-                return tbl[key]
-            end
-            field._writeValue = function(tbl, value)
-                tbl[key] = value
-            end
-            return
-        end
-
-        if len == 2 then
-            local key1, key2 = configKey[1], configKey[2]
-            field._readValue = function(tbl)
-                local child = tbl[key1]
-                return child and child[key2] or nil
-            end
-            field._writeValue = function(tbl, value)
-                local child = tbl[key1]
-                if not child then
-                    child = {}
-                    tbl[key1] = child
-                end
-                child[key2] = value
-            end
-            return
-        end
-
-        if len == 3 then
-            local key1, key2, key3 = configKey[1], configKey[2], configKey[3]
-            field._readValue = function(tbl)
-                local child1 = tbl[key1]
-                if not child1 then return nil end
-                local child2 = child1[key2]
-                return child2 and child2[key3] or nil
-            end
-            field._writeValue = function(tbl, value)
-                local child1 = tbl[key1]
-                if not child1 then
-                    child1 = {}
-                    tbl[key1] = child1
-                end
-                local child2 = child1[key2]
-                if not child2 then
-                    child2 = {}
-                    child1[key2] = child2
-                end
-                child2[key3] = value
-            end
-            return
-        end
-
-        field._readValue = function(tbl)
-            return public.readPath(tbl, configKey)
-        end
-        field._writeValue = function(tbl, value)
-            public.writePath(tbl, configKey, value)
-        end
-    end
+    return bit32.band(bit32.rshift(normalizedPacked, normalizedOffset), mask)
 end
-shared.PrepareSchemaFieldRuntimeMetadata = PrepareSchemaFieldRuntimeMetadata
+
+function public.writeBitsValue(packed, offset, width, value)
+    local normalizedPacked = math.floor(tonumber(packed) or 0)
+    local normalizedOffset = math.max(0, math.floor(tonumber(offset) or 0))
+    local mask = GetBitValueMask(width)
+    if mask == 0 then
+        return normalizedPacked
+    end
+
+    local normalizedValue = math.floor(tonumber(value) or 0)
+    if normalizedValue < 0 then
+        normalizedValue = 0
+    elseif normalizedValue > mask then
+        normalizedValue = mask
+    end
+
+    local shiftedMask = bit32.lshift(mask, normalizedOffset)
+    local cleared = bit32.band(normalizedPacked, bit32.bnot(shiftedMask))
+    return bit32.bor(cleared, bit32.lshift(normalizedValue, normalizedOffset))
+end
+
+local function NormalizeStorageValue(node, value)
+    local storageType = node and node.type and StorageTypes[node.type] or nil
+    if storageType and type(storageType.normalize) == "function" then
+        return storageType.normalize(node, value)
+    end
+    return value
+end
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })
 
@@ -835,7 +669,7 @@ local function GetChalkSectionAndKey(configKey)
     return "config", tostring(configKey)
 end
 
-function GetConfigBackend(config)
+local function GetConfigBackend(config)
     if not chalk or type(chalk.original) ~= "function" then
         return nil
     end
@@ -868,7 +702,7 @@ function GetConfigBackend(config)
     backend = {}
 
     function backend.getEntry(configKey)
-        local pathKey = SpecialFieldKey(configKey)
+        local pathKey = StorageKey(configKey)
         local cached = pathEntryCache[pathKey]
         if cached ~= nil then
             return cached or nil
@@ -908,50 +742,121 @@ function GetConfigBackend(config)
 end
 shared.GetConfigBackend = GetConfigBackend
 
-SpecialFieldKey = function(configKey)
-    if type(configKey) == "table" then
-        return table.concat(configKey, ".")
-    end
-    return tostring(configKey)
-end
-shared.SpecialFieldKey = SpecialFieldKey
+function public.createStore(modConfig, definition)
+    local backend = GetConfigBackend(modConfig)
+    local store = {}
+    local storage = BuildManagedStorage(definition)
+    local label = type(definition) == "table"
+        and tostring(definition.name or definition.id or _PLUGIN.guid or "module")
+        or tostring(_PLUGIN.guid or "module")
 
-IsSchemaConfigField = function(field)
-    return field and field.type ~= "separator" and field.configKey ~= nil
-end
-shared.IsSchemaConfigField = IsSchemaConfigField
-
-GetSchemaConfigFields = function(schema)
-    if type(schema) ~= "table" then
-        return {}
-    end
-
-    local configFields = rawget(schema, "_configFields")
-    if configFields then
-        return configFields
-    end
-
-    configFields = {}
-    for _, field in ipairs(schema) do
-        if IsSchemaConfigField(field) then
-            PrepareSchemaFieldRuntimeMetadata(field)
-            table.insert(configFields, field)
+    if storage then
+        public.validateStorage(storage, label)
+        if type(definition.ui) == "table" then
+            public.validateUi(definition.ui, label, storage)
         end
+    elseif type(definition) == "table" and type(definition.ui) == "table" and #definition.ui > 0 then
+        libWarnAlways("%s: definition.ui declared without definition.storage; UI state disabled", label)
     end
-    schema._configFields = configFields
-    return configFields
-end
-shared.GetSchemaConfigFields = GetSchemaConfigFields
---- Return the config-backed fields in a validated schema, excluding separators.
---- Runtime metadata is prepared lazily and cached on the schema table.
---- @param schema table|nil Validated schema or options list.
---- @return table configFields Array of config-backed field definitions.
-public.getSchemaConfigFields = GetSchemaConfigFields
 
-ChoiceDisplay = function(field, value)
-    if field.displayValues and field.displayValues[value] ~= nil then
-        return tostring(field.displayValues[value])
+    local aliasNodes = storage and public.getStorageAliases(storage) or {}
+    local rootByKey = storage and (rawget(storage, "_rootByKey") or {}) or {}
+
+    local function readRaw(configKey)
+        local raw
+        if backend then
+            raw = backend.readValue(configKey)
+        end
+        if raw == nil then
+            raw = public.readPath(modConfig, configKey)
+        end
+        return raw
     end
-    return tostring(value)
+
+    local function writeRaw(configKey, value)
+        if backend and backend.writeValue(configKey, value) then
+            return
+        end
+        public.writePath(modConfig, configKey, value)
+    end
+
+    local function readRootNode(root)
+        local raw = readRaw(root.configKey)
+        if raw == nil then
+            raw = CloneMutationValue(root.default)
+        end
+        return NormalizeStorageValue(root, raw)
+    end
+
+    local function writeRootNode(root, value)
+        writeRaw(root.configKey, NormalizeStorageValue(root, value))
+    end
+
+    function store.read(keyOrAlias)
+        if type(keyOrAlias) == "string" then
+            local node = aliasNodes[keyOrAlias]
+            if node then
+                if node._isBitAlias then
+                    local packed = readRootNode(node.parent)
+                    local rawValue = public.readBitsValue(packed, node.offset, node.width)
+                    if node.type == "bool" then
+                        rawValue = rawValue ~= 0
+                    end
+                    return NormalizeStorageValue(node, rawValue)
+                end
+                return readRootNode(node)
+            end
+
+            local root = rootByKey[StorageKey(keyOrAlias)]
+            if root then
+                return readRootNode(root)
+            end
+        end
+        return readRaw(keyOrAlias)
+    end
+
+    function store.write(keyOrAlias, value)
+        if type(keyOrAlias) == "string" then
+            local node = aliasNodes[keyOrAlias]
+            if node then
+                if node._isBitAlias then
+                    local parent = node.parent
+                    local currentPacked = readRootNode(parent)
+                    local normalized = NormalizeStorageValue(node, value)
+                    local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
+                    local nextPacked = public.writeBitsValue(currentPacked, node.offset, node.width, encoded)
+                    writeRootNode(parent, nextPacked)
+                    return
+                end
+                writeRootNode(node, value)
+                return
+            end
+
+            local root = rootByKey[StorageKey(keyOrAlias)]
+            if root then
+                writeRootNode(root, value)
+                return
+            end
+        end
+        writeRaw(keyOrAlias, value)
+    end
+
+    function store.readBits(configKey, offset, width)
+        return public.readBitsValue(readRaw(configKey), offset, width)
+    end
+
+    function store.writeBits(configKey, offset, width, value)
+        local current = math.floor(tonumber(readRaw(configKey)) or 0)
+        local nextPacked = public.writeBitsValue(current, offset, width, value)
+        writeRaw(configKey, nextPacked)
+    end
+
+    store.storage = storage
+    store.ui = type(definition) == "table" and definition.ui or nil
+
+    if storage then
+        store.uiState = shared.CreateUiState(modConfig, backend, storage)
+    end
+
+    return store
 end
-shared.ChoiceDisplay = ChoiceDisplay

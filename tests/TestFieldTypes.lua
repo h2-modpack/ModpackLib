@@ -1,428 +1,257 @@
 local lu = require('luaunit')
 
--- =============================================================================
--- CHECKBOX
--- =============================================================================
-
-TestCheckbox = {}
-
-function TestCheckbox:testToHashTrue()
-    local field = { type = "checkbox", configKey = "X" }
-    lu.assertEquals(lib.FieldTypes.checkbox.toHash(field, true), "1")
+local function makeStore(definition, config)
+    config = config or {}
+    return lib.createStore(config, definition), config
 end
 
-function TestCheckbox:testToHashFalse()
-    local field = { type = "checkbox", configKey = "X" }
-    lu.assertEquals(lib.FieldTypes.checkbox.toHash(field, false), "0")
-end
+local function makeBasicImgui()
+    local state = { buttonResponses = {}, checkboxResponses = {}, selectables = {}, pushIds = {} }
 
-function TestCheckbox:testFromHashOne()
-    local field = { type = "checkbox", configKey = "X" }
-    lu.assertEquals(lib.FieldTypes.checkbox.fromHash(field, "1"), true)
-end
-
-function TestCheckbox:testFromHashZero()
-    local field = { type = "checkbox", configKey = "X" }
-    lu.assertEquals(lib.FieldTypes.checkbox.fromHash(field, "0"), false)
-end
-
-function TestCheckbox:testToStagingTrue()
-    lu.assertEquals(lib.FieldTypes.checkbox.toStaging(true), true)
-end
-
-function TestCheckbox:testToStagingFalse()
-    lu.assertEquals(lib.FieldTypes.checkbox.toStaging(false), false)
-end
-
-function TestCheckbox:testToStagingNil()
-    lu.assertEquals(lib.FieldTypes.checkbox.toStaging(nil), false)
-end
-
--- =============================================================================
--- DROPDOWN
--- =============================================================================
-
-TestString = {}
-
-local stringField = {
-    type = "string",
-    configKey = "Label",
-    default = "Default",
-    maxLen = 64,
-}
-
-function TestString:testToHash()
-    lu.assertEquals(lib.FieldTypes.string.toHash(stringField, "BridalGlow"), "BridalGlow")
-end
-
-function TestString:testFromHash()
-    lu.assertEquals(lib.FieldTypes.string.fromHash(stringField, "BridalGlow"), "BridalGlow")
-end
-
-function TestString:testFromHashNilFallsBackToDefault()
-    lu.assertEquals(lib.FieldTypes.string.fromHash(stringField, nil), "Default")
-end
-
-function TestString:testToStaging()
-    lu.assertEquals(lib.FieldTypes.string.toStaging("Apollo", stringField), "Apollo")
-end
-
-function TestString:testToStagingNilFallsBackToDefault()
-    lu.assertEquals(lib.FieldTypes.string.toStaging(nil, stringField), "Default")
-end
-
-function TestString:testValidateWarnsOnBadDefault()
-    local field = { type = "string", configKey = "X", default = false }
-    CaptureWarnings()
-    lib.FieldTypes.string.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
-function TestString:testValidateWarnsOnBadMaxLen()
-    local field = { type = "string", configKey = "X", default = "", maxLen = 0 }
-    CaptureWarnings()
-    lib.FieldTypes.string.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
-function TestString:testDrawIsNoOp()
-    local field = {
-        type = "string",
-        configKey = "Label",
-        label = "Label",
-        default = "",
-        maxLen = 32,
-        _imguiId = "##Label",
-        _maxLen = 32,
-    }
-
-    local nextValue, changed = lib.FieldTypes.string.draw({}, field, "Current", 220)
-
-    lu.assertEquals(nextValue, "Current")
-    lu.assertFalse(changed)
-end
-
-TestDropdown = {}
-
-local dropdownField = {
-    type = "dropdown",
-    configKey = "Mode",
-    values = { "Vanilla", "Always", "Never" },
-    default = "Vanilla",
-}
-
-function TestDropdown:testToHash()
-    lu.assertEquals(lib.FieldTypes.dropdown.toHash(dropdownField, "Always"), "Always")
-end
-
-function TestDropdown:testFromHash()
-    lu.assertEquals(lib.FieldTypes.dropdown.fromHash(dropdownField, "Always"), "Always")
-end
-
-function TestDropdown:testRoundTrip()
-    for _, v in ipairs(dropdownField.values) do
-        lu.assertEquals(lib.FieldTypes.dropdown.fromHash(dropdownField,
-            lib.FieldTypes.dropdown.toHash(dropdownField, v)), v)
-    end
-end
-
-function TestDropdown:testToStaging()
-    lu.assertEquals(lib.FieldTypes.dropdown.toStaging("Always"), "Always")
-end
-
-function TestDropdown:testFromHashUnknownValueFallsBackToDefault()
-    lu.assertEquals(lib.FieldTypes.dropdown.fromHash(dropdownField, "OldRemovedValue"), "Vanilla")
-end
-
-function TestDropdown:testValidateWarnsPipeInValue()
-    local field = { type = "dropdown", configKey = "X", values = { "Good", "Bad|Value" } }
-    CaptureWarnings()
-    lib.FieldTypes.dropdown.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
-function TestDropdown:testValidateWarnsBadDisplayValues()
-    local field = { type = "dropdown", configKey = "X", values = { "A" }, displayValues = "bad" }
-    CaptureWarnings()
-    lib.FieldTypes.dropdown.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
--- =============================================================================
--- RADIO
--- =============================================================================
-
-TestRadio = {}
-
-local radioField = {
-    type = "radio",
-    configKey = "Speed",
-    values = { "Slow", "Normal", "Fast" },
-    default = "Normal",
-}
-
-function TestRadio:testToHash()
-    lu.assertEquals(lib.FieldTypes.radio.toHash(radioField, "Fast"), "Fast")
-end
-
-function TestRadio:testFromHash()
-    lu.assertEquals(lib.FieldTypes.radio.fromHash(radioField, "Fast"), "Fast")
-end
-
-function TestRadio:testRoundTrip()
-    for _, v in ipairs(radioField.values) do
-        lu.assertEquals(lib.FieldTypes.radio.fromHash(radioField,
-            lib.FieldTypes.radio.toHash(radioField, v)), v)
-    end
-end
-
-function TestRadio:testFromHashUnknownValueFallsBackToDefault()
-    lu.assertEquals(lib.FieldTypes.radio.fromHash(radioField, "OldRemovedValue"), "Normal")
-end
-
-function TestRadio:testValidateWarnsPipeInValue()
-    local field = { type = "radio", configKey = "X", values = { "Good", "Bad|Value" } }
-    CaptureWarnings()
-    lib.FieldTypes.radio.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
-function TestRadio:testValidateWarnsBadDisplayValues()
-    local field = { type = "radio", configKey = "X", values = { "A" }, displayValues = "bad" }
-    CaptureWarnings()
-    lib.FieldTypes.radio.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
-TestChoiceDisplay = {}
-
-function TestChoiceDisplay:testDropdownUsesDisplayValuesForPreviewAndOptions()
-    local field = {
-        type = "dropdown",
-        configKey = "Mode",
-        values = { "", "ZeusUpgrade" },
-        displayValues = { [""] = "None", ZeusUpgrade = "Zeus" },
-        _imguiId = "##Mode",
-    }
-    local seen = {}
     local imgui = {
-        Text = function() end,
-        IsItemHovered = function() return false end,
-        SameLine = function() end,
-        PushItemWidth = function() end,
-        PopItemWidth = function() end,
-        BeginCombo = function(_, preview)
-            seen.preview = preview
-            return true
+        _state = state,
+        Checkbox = function(_, _, current)
+            local nextResponse = table.remove(state.checkboxResponses, 1)
+            if nextResponse ~= nil then
+                return nextResponse, nextResponse ~= current
+            end
+            return current, false
         end,
-        Selectable = function(label)
-            table.insert(seen, label)
+        BeginCombo = function()
             return false
         end,
         EndCombo = function() end,
-    }
-
-    lib.FieldTypes.dropdown.draw(imgui, field, "ZeusUpgrade")
-
-    lu.assertEquals(seen.preview, "Zeus")
-    lu.assertEquals(seen[1], "None")
-    lu.assertEquals(seen[2], "Zeus")
-end
-
-function TestChoiceDisplay:testRadioUsesDisplayValuesForLabels()
-    local field = {
-        type = "radio",
-        configKey = "Mode",
-        values = { "", "ZeusUpgrade" },
-        displayValues = { [""] = "None", ZeusUpgrade = "Zeus" },
-    }
-    local seen = {}
-    local imgui = {
-        Text = function() end,
-        IsItemHovered = function() return false end,
-        RadioButton = function(label)
-            table.insert(seen, label)
-            return false
+        Selectable = function()
+            local nextResponse = table.remove(state.selectables, 1)
+            return nextResponse == true
         end,
+        RadioButton = function()
+            local nextResponse = table.remove(state.selectables, 1)
+            return nextResponse == true
+        end,
+        Text = function() end,
+        TextColored = function() end,
         SameLine = function() end,
         NewLine = function() end,
+        IsItemHovered = function() return false end,
+        SetTooltip = function() end,
+        PushItemWidth = function() end,
+        PopItemWidth = function() end,
+        PushID = function(_, value)
+            table.insert(state.pushIds, value)
+        end,
+        PopID = function() end,
+        Indent = function() end,
+        Unindent = function() end,
+        Separator = function() end,
+        CollapsingHeader = function()
+            return true
+        end,
+        GetCursorPosX = function()
+            return 0
+        end,
+        SetCursorPosX = function() end,
+        Button = function()
+            local nextResponse = table.remove(state.buttonResponses, 1)
+            return nextResponse == true
+        end,
     }
 
-    lib.FieldTypes.radio.draw(imgui, field, "ZeusUpgrade")
-
-    lu.assertEquals(seen[1], "None")
-    lu.assertEquals(seen[2], "Zeus")
+    return imgui
 end
 
--- =============================================================================
--- INT32
--- =============================================================================
+TestStorageTypes = {}
 
-TestInt32 = {}
+function TestStorageTypes:testBoolStorageRoundTripsHash()
+    local node = { type = "bool", alias = "Enabled", configKey = "Enabled", default = false }
+    lib.validateStorage({ node }, "Test")
 
-local int32Field = {
-    type = "int32",
-    configKey = "PackedValue",
-    default = 0,
-}
-
-function TestInt32:testToHash()
-    lu.assertEquals(lib.FieldTypes.int32.toHash(int32Field, 17), "17")
+    lu.assertEquals(lib.StorageTypes.bool.toHash(node, true), "1")
+    lu.assertEquals(lib.StorageTypes.bool.toHash(node, false), "0")
+    lu.assertTrue(lib.StorageTypes.bool.fromHash(node, "1"))
+    lu.assertFalse(lib.StorageTypes.bool.fromHash(node, "0"))
 end
 
-function TestInt32:testFromHash()
-    lu.assertEquals(lib.FieldTypes.int32.fromHash(int32Field, "17"), 17)
-end
-
-function TestInt32:testFromHashBadInputFallsBackToDefault()
-    lu.assertEquals(lib.FieldTypes.int32.fromHash(int32Field, "bad"), 0)
-end
-
-function TestInt32:testToStaging()
-    lu.assertEquals(lib.FieldTypes.int32.toStaging("42", int32Field), 42)
-end
-
--- =============================================================================
--- STEPPER
--- =============================================================================
-
-TestStepper = {}
-
-local stepperField = {
-    type = "stepper",
-    configKey = "Count",
-    default = 4,
-    min = 1,
-    max = 9,
-    step = 1,
-}
-
-function TestStepper:testToHash()
-    lu.assertEquals(lib.FieldTypes.stepper.toHash(stepperField, 6), "6")
-end
-
-function TestStepper:testFromHash()
-    lu.assertEquals(lib.FieldTypes.stepper.fromHash(stepperField, "6"), 6)
-end
-
-function TestStepper:testFromHashClampsBelowMin()
-    lu.assertEquals(lib.FieldTypes.stepper.fromHash(stepperField, "0"), 1)
-end
-
-function TestStepper:testFromHashClampsAboveMax()
-    lu.assertEquals(lib.FieldTypes.stepper.fromHash(stepperField, "99"), 9)
-end
-
-function TestStepper:testToStagingClamps()
-    lu.assertEquals(lib.FieldTypes.stepper.toStaging("99", stepperField), 9)
-end
-
-function TestStepper:testValidateWarnsWhenMinExceedsMax()
-    local field = {
-        type = "stepper",
-        configKey = "Bad",
-        default = 3,
-        min = 10,
-        max = 1,
-    }
-    CaptureWarnings()
-    lib.FieldTypes.stepper.validate(field, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
--- =============================================================================
--- FIELD VISIBILITY
--- =============================================================================
-
-TestFieldVisibility = {}
-
-function TestFieldVisibility:testVisibleWithoutGate()
-    lu.assertTrue(lib.isFieldVisible({ configKey = "X" }, { X = false }))
-end
-
-function TestFieldVisibility:testVisibleWhenGateTrue()
-    lu.assertTrue(lib.isFieldVisible({ configKey = "X", visibleIf = "Enabled" }, { Enabled = true }))
-end
-
-function TestFieldVisibility:testHiddenWhenGateFalse()
-    lu.assertFalse(lib.isFieldVisible({ configKey = "X", visibleIf = "Enabled" }, { Enabled = false }))
-end
-
-function TestFieldVisibility:testHiddenWhenGateMissing()
-    lu.assertFalse(lib.isFieldVisible({ configKey = "X", visibleIf = "Enabled" }, {}))
-end
-
--- =============================================================================
--- SEPARATOR / LAYOUT
--- =============================================================================
-
-TestLayoutFields = {}
-
-function TestLayoutFields:testSeparatorAllowsMissingConfigKey()
-    CaptureWarnings()
-    lib.validateSchema({
-        { type = "separator", label = "Group" },
-    }, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertFalse(warned)
-end
-
-function TestLayoutFields:testIndentWarnsWhenNotBoolean()
-    CaptureWarnings()
-    lib.validateSchema({
-        { type = "checkbox", configKey = "Enabled", default = false, indent = 1 },
-    }, "test")
-    local warned = #Warnings > 0
-    RestoreWarnings()
-    lu.assertTrue(warned)
-end
-
-TestFieldTypeValidation = {}
-
-function TestFieldTypeValidation:testValidateFieldTypesErrorsOnMissingRequiredMethods()
-    local original = lib.FieldTypes.customBroken
-    lib.FieldTypes.customBroken = {
-        validate = function() end,
-        draw = function() end,
+function TestStorageTypes:testPackedIntDerivesChildAliasesAndDefault()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "Packed",
+            configKey = "Packed",
+            bits = {
+                { alias = "Flag", offset = 0, width = 1, type = "bool", default = true },
+                { alias = "Mode", offset = 1, width = 2, type = "int", default = 2 },
+            },
+        },
     }
 
-    local ok, err = pcall(lib.validateFieldTypes)
-    lib.FieldTypes.customBroken = original
+    lib.validateStorage(storage, "PackedTest")
 
-    lu.assertFalse(ok)
-    lu.assertStrContains(tostring(err), "field type 'customBroken' is missing required method 'toHash'")
+    local aliases = lib.getStorageAliases(storage)
+    lu.assertNotNil(aliases.Packed)
+    lu.assertNotNil(aliases.Flag)
+    lu.assertNotNil(aliases.Mode)
+    lu.assertEquals(aliases.Packed.default, 5)
+    lu.assertTrue(aliases.Flag.default)
+    lu.assertEquals(aliases.Mode.default, 2)
+    lu.assertEquals(aliases.Flag.parent.alias, "Packed")
 end
 
-function TestFieldTypeValidation:testValidateSchemaErrorsOnBrokenRegisteredFieldType()
-    local original = lib.FieldTypes.customBroken
-    lib.FieldTypes.customBroken = {
-        validate = function() end,
-        draw = function() end,
+TestUiNodes = {}
+
+function TestUiNodes:testDrawCheckboxNodeWritesAliasBackIntoUiState()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
+        },
+    }
+    local store = makeStore(definition, { Enabled = true })
+    local imgui = makeBasicImgui()
+    imgui._state.checkboxResponses = { false }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertFalse(store.uiState.get("Enabled"))
+end
+
+function TestUiNodes:testDrawUiNodeRespectsVisibleIfAlias()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "Gate", configKey = "Gate", default = false },
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", visibleIf = "Gate" },
+        },
+    }
+    local store = makeStore(definition, { Gate = false, Enabled = true })
+    local imgui = makeBasicImgui()
+    local checkboxCalls = 0
+    imgui.Checkbox = function(_, _, current)
+        checkboxCalls = checkboxCalls + 1
+        return current, false
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(checkboxCalls, 0)
+end
+
+function TestUiNodes:testDrawUiNodeRespectsVisibleIfValue()
+    local definition = {
+        storage = {
+            { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla" },
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", visibleIf = { alias = "Mode", value = "Forced" } },
+        },
+    }
+    local store = makeStore(definition, { Mode = "Forced", Enabled = true })
+    local imgui = makeBasicImgui()
+    imgui._state.checkboxResponses = { false }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertFalse(store.uiState.get("Enabled"))
+end
+
+function TestUiNodes:testDrawUiNodeRespectsVisibleIfAnyOf()
+    local definition = {
+        storage = {
+            { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla" },
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", visibleIf = { alias = "Mode", anyOf = { "Forced", "Charybdis" } } },
+        },
+    }
+    local store = makeStore(definition, { Mode = "Charybdis", Enabled = true })
+    local imgui = makeBasicImgui()
+    imgui._state.checkboxResponses = { false }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertFalse(store.uiState.get("Enabled"))
+end
+
+function TestUiNodes:testDrawSteppedRangeNodeWritesBothAliases()
+    local definition = {
+        storage = {
+            { type = "int", alias = "MinDepth", configKey = "MinDepth", default = 2, min = 1, max = 10 },
+            { type = "int", alias = "MaxDepth", configKey = "MaxDepth", default = 8, min = 1, max = 10 },
+        },
+        ui = {
+            { type = "steppedRange", binds = { min = "MinDepth", max = "MaxDepth" }, label = "Depth", min = 1, max = 10, step = 1 },
+        },
+    }
+    local store = makeStore(definition, { MinDepth = 2, MaxDepth = 8 })
+    local imgui = makeBasicImgui()
+    imgui._state.buttonResponses = {
+        false, true,   -- min: "-" then "+"
+        true, false,   -- max: "-" then "+"
     }
 
-    local schema = {
-        { type = "customBroken", configKey = "Broken", default = false },
-        { type = "checkbox", configKey = "Good", default = false },
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertEquals(store.uiState.get("MinDepth"), 3)
+    lu.assertEquals(store.uiState.get("MaxDepth"), 7)
+end
+
+function TestUiNodes:testCollectQuickUiNodesRecursesThroughLayoutChildren()
+    local nodes = {
+        {
+            type = "group",
+            label = "Outer",
+            children = {
+                { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", quick = true },
+                {
+                    type = "group",
+                    label = "Inner",
+                    children = {
+                        { type = "stepper", binds = { value = "Count" }, label = "Count", quick = true, min = 1, max = 9, step = 1 },
+                    },
+                },
+            },
+        },
     }
 
-    local ok, err = pcall(lib.validateSchema, schema, "BrokenTypeMod")
-    lib.FieldTypes.customBroken = original
+    local quick = lib.collectQuickUiNodes(nodes)
 
-    lu.assertFalse(ok)
-    lu.assertStrContains(tostring(err), "field type 'customBroken' is missing required method 'toHash'")
+    lu.assertEquals(#quick, 2)
+    lu.assertEquals(quick[1].binds and quick[1].binds.value, "Enabled")
+    lu.assertEquals(quick[2].binds and quick[2].binds.value, "Count")
+end
+
+function TestUiNodes:testDrawUiNodeReturnsChangedWhenLayoutChildChanges()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            {
+                type = "group",
+                label = "Outer",
+                children = {
+                    { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Enabled = true })
+    local imgui = makeBasicImgui()
+    imgui._state.checkboxResponses = { false }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertFalse(store.uiState.get("Enabled"))
 end

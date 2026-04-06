@@ -7,7 +7,7 @@
 - [README.md](README.md) for package overview
 - [API.md](API.md) for the supported public API
 - [MODULE_AUTHORING.md](MODULE_AUTHORING.md) for regular/special module authoring and the `affectsRunData` lifecycle paths
-- [FIELD_TYPES.md](FIELD_TYPES.md) for the field-type contract
+- [FIELD_REGISTRY.md](FIELD_REGISTRY.md) for the field type registry, primitives, widgets, and layout types
 
 ## Contribution Rules
 

@@ -137,6 +137,76 @@ function TestDefinitionLifecycle:testAppendUniqueDoesNotAliasInsertedTable()
     lu.assertEquals(tbl.Values[1].Meta.Count, 1)
 end
 
+function TestDefinitionLifecycle:testRemoveElementApplyAndRevert()
+    local plan = lib.createMutationPlan()
+    local tbl = { Values = { "A", "B", "C" } }
+
+    plan:removeElement(tbl, "Values", "B")
+    plan:apply()
+
+    lu.assertEquals(tbl.Values, { "A", "C" })
+
+    plan:revert()
+    lu.assertEquals(tbl.Values, { "A", "B", "C" })
+end
+
+function TestDefinitionLifecycle:testRemoveElementCanUseCustomComparator()
+    local plan = lib.createMutationPlan()
+    local tbl = { Values = { { Name = "A", Count = 1 }, { Name = "B", Count = 2 } } }
+
+    plan:removeElement(tbl, "Values", { Name = "A", Count = 999 }, function(a, b)
+        return a.Name == b.Name
+    end)
+    plan:apply()
+
+    lu.assertEquals(#tbl.Values, 1)
+    lu.assertEquals(tbl.Values[1].Name, "B")
+end
+
+function TestDefinitionLifecycle:testSetElementApplyAndRevert()
+    local plan = lib.createMutationPlan()
+    local tbl = { Values = { "A", "B", "C" } }
+
+    plan:setElement(tbl, "Values", "B", "Z")
+    plan:apply()
+
+    lu.assertEquals(tbl.Values, { "A", "Z", "C" })
+
+    plan:revert()
+    lu.assertEquals(tbl.Values, { "A", "B", "C" })
+end
+
+function TestDefinitionLifecycle:testSetElementClonesReplacementTable()
+    local plan = lib.createMutationPlan()
+    local replacement = { Name = "Z", Meta = { Count = 10 } }
+    local tbl = { Values = { { Name = "A" }, { Name = "B" } } }
+
+    plan:setElement(tbl, "Values", { Name = "B" }, replacement, function(a, b)
+        return a.Name == b.Name
+    end)
+    plan:apply()
+    replacement.Meta.Count = 999
+
+    lu.assertEquals(tbl.Values[2].Name, "Z")
+    lu.assertEquals(tbl.Values[2].Meta.Count, 10)
+end
+
+function TestDefinitionLifecycle:testRemoveElementErrorsOnNonTableTarget()
+    local plan = lib.createMutationPlan()
+    local tbl = { Values = 5 }
+
+    plan:removeElement(tbl, "Values", "A")
+    lu.assertError(plan.apply)
+end
+
+function TestDefinitionLifecycle:testSetElementErrorsOnNonTableTarget()
+    local plan = lib.createMutationPlan()
+    local tbl = { Values = 5 }
+
+    plan:setElement(tbl, "Values", "A", "B")
+    lu.assertError(plan.apply)
+end
+
 function TestDefinitionLifecycle:testInferMutationShapeManual()
     local mode, info = lib.inferMutationShape({
         apply = function() end,
