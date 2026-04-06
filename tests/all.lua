@@ -11,6 +11,7 @@ require('tests/TestBackupSystem')
 require('tests/TestDefinitionLifecycle')
 require('tests/TestUiState')
 require('tests/TestIsEnabled')
+require('tests/TestDataDefaults')
 
 local lu = require('luaunit')
 os.exit(lu.LuaUnit.run())

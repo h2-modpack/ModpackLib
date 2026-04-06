@@ -839,6 +839,19 @@ function public.prepareUiNode(node, label, storage)
     ValidateUiNode(node, prefix, EnsurePreparedStorage(storage, prefix .. " storage"))
 end
 
+function public.prepareUiNodes(nodes, label, storage)
+    local prefix = label or "prepareUiNodes"
+    local preparedStorage = EnsurePreparedStorage(storage, prefix .. " storage")
+    local registry = {}
+    for _, node in ipairs(nodes) do
+        ValidateUiNode(node, prefix, preparedStorage)
+        for _, alias in pairs(node.binds or {}) do
+            registry[alias] = node
+        end
+    end
+    return registry
+end
+
 function public.isUiNodeVisible(node, view)
     if not node.visibleIf then
         return true

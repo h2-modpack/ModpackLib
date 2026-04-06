@@ -742,10 +742,21 @@ local function GetConfigBackend(config)
 end
 shared.GetConfigBackend = GetConfigBackend
 
-function public.createStore(modConfig, definition)
+function public.createStore(modConfig, definition, dataDefaults)
     local backend = GetConfigBackend(modConfig)
     local store = {}
     local storage = BuildManagedStorage(definition)
+
+    if storage and type(dataDefaults) == "table" then
+        for _, node in ipairs(storage) do
+            if node.default == nil then
+                local key = node.configKey or node.alias
+                if key ~= nil then
+                    node.default = dataDefaults[key]
+                end
+            end
+        end
+    end
     local label = type(definition) == "table"
         and tostring(definition.name or definition.id or _PLUGIN.guid or "module")
         or tostring(_PLUGIN.guid or "module")
