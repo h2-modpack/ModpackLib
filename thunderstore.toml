@@ -7,7 +7,7 @@ namespace = "adamant"
 name = "ModpackLib"
 versionNumber = "1.0.0"
 description = "Shared utilities for adamant modpack standalone mods."
-websiteUrl = "https://github.com/h2-modpack/ModpackLib"
+websiteUrl = "https://github.com/h2-modpack/adamant-ModpackLib"
 containsNsfwContent = false
 
 [package.dependencies]
