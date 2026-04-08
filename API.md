@@ -165,7 +165,7 @@ Validates and prepares an ordered UI node list.
 
 Evaluates `visibleIf` against the current alias-value table.
 
-### `lib.drawUiNode(imgui, node, uiState, width?, customTypes?)`
+### `lib.drawUiNode(imgui, node, uiState, width?, customTypes?, runtimeGeometry?)`
 
 Draws one prepared UI node against alias-backed `uiState`.
 
@@ -175,6 +175,14 @@ Supports:
 - `packedCheckboxList` through packed child alias expansion
 - layout recursion through `children`
 - module-local custom widget/layout registries through `customTypes`
+
+`runtimeGeometry` uses the same `{ slots = { ... } }` shape as declared `node.geometry`, but is validated at draw time against the node's fixed slot schema.
+Runtime geometry may override:
+- `line`
+- `start`
+- `width`
+- `align`
+- `hidden`
 
 ### `lib.drawUiTree(imgui, nodes, uiState, width?, customTypes?)`
 
@@ -215,7 +223,8 @@ definition.customTypes = {
     widgets = {
         myWidget = {
             binds = { value = { storageType = "int" } },
-            geometry = { "controlStart", "controlWidth" }, -- optional supported geometry keys
+            slots = { "label", "control" }, -- optional supported geometry slot names
+            dynamicSlots = function(node, slotName) ... end, -- optional declaration-time slot validator
             validate = function(node, prefix) ... end,
             draw = function(imgui, node, bound, width) ... end,
         },
@@ -232,8 +241,12 @@ definition.customTypes = {
 Rules:
 - custom widget and layout type names may not collide with built-in names
 - custom widgets must declare `binds`
-- custom widgets may optionally declare `geometry = { ... }` to whitelist supported `node.geometry` keys
+- custom widgets must declare `draw(...)`
+- custom widgets may optionally declare `slots = { ... }` to whitelist supported `node.geometry.slots[*].name` values
+- custom widgets may optionally declare `dynamicSlots(node, slotName) -> ok, err` for declaration-time-dependent slot names
 - all UI helpers that accept `customTypes` merge them with built-ins for validation and draw
+
+Today, `slots` is a validation surface. Custom widget `draw(...)` logic still reads `node.geometry` itself when it wants custom placement.
 
 ## Widget Geometry
 
@@ -246,27 +259,36 @@ Certain widgets support a widget-local `geometry` bag for manual horizontal plac
     label = "Mode",
     values = { "Vanilla", "Forced" },
     geometry = {
-        controlStart = 220,
-        controlWidth = 180,
+        slots = {
+            { name = "control", start = 220, width = 180 },
+        },
     },
 }
 ```
 
 Current built-in support:
-- `dropdown`: `controlStart`, `controlWidth`
-- `stepper`: `controlStart`, `decrementStart`, `valueStart`, `valueWidth`, `valueAlign`, `incrementStart`
-- `steppedRange`: `controlStart`, `control2Start`, `separatorStart`, plus the shared stepper keys above
+- `dropdown`: `label`, `control`
+- `radio`: `label`, dynamic `option:N`
+- `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
+- `steppedRange`: `label`, `min.*`, `separator`, `max.*`
+- `packedCheckboxList`: dynamic `item:N` when `slotCount` is declared
 
 Behavior:
-- `controlStart`, `control2Start`, and `separatorStart` are relative to the current row origin after any `indent`
-- `decrementStart`, `valueStart`, `valueWidth`, and `incrementStart` are relative to the enclosing stepper control start
-- `valueStart` is the absolute value-text position
-- `valueAlign` may be `center` or `right` and aligns the value text inside an explicit `valueWidth` slot derived after the decrement button
-- start positions must be non-negative
-- `valueAlign` requires an explicit `valueWidth`
-- `valueStart` cannot be combined with `valueWidth` or `valueAlign`
-- if a geometry key is omitted, the widget falls back to its default rendering
-- unknown geometry keys warn during validation
+- `geometry.slots` is a list of slot descriptors
+- each slot descriptor may declare `name`, `line`, `start`, `width`, and `align`
+- `line` defaults to `1` and must be a positive integer when present
+- `start` is relative to the current row origin after any `indent`
+- `width` must be positive when present
+- `align` may be `center` or `right` and requires an explicit `width`
+- slots are rendered in ascending `line`
+- within the same line, slots with explicit `start` values are ordered by `start`
+- otherwise declaration order breaks ties and preserves slots without explicit `start`
+- `radio` supports `option:N` slot names for each entry in `node.values`
+- `packedCheckboxList` supports `item:N` slot names when `slotCount` is declared
+- `slotCount` is the declaration-time slot capacity for `packedCheckboxList`; packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity
+- runtime geometry overrides may additionally set `hidden = true` on a slot to skip rendering it without reflow
+- if a slot is omitted, the widget falls back to its default rendering for that slot
+- unknown top-level geometry keys and unsupported slot names warn during validation
 
 ## Managed UI State
 

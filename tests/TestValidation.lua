@@ -241,11 +241,16 @@ function TestUiValidation:testWidgetGeometryRejectsUnknownKeys()
             binds = { value = "Mode" },
             label = "Mode",
             values = { "A", "B" },
-            geometry = { controlStart = 120, separatorStart = 200 },
+            geometry = {
+                controlStart = 120,
+                slots = {
+                    { name = "control", start = 120 },
+                },
+            },
         },
     }, "Geometry", storage)
 
-    assertWarningContains("geometry key 'separatorStart' is not supported by widget type 'dropdown'")
+    assertWarningContains("geometry key 'controlStart' is not supported; geometry only supports 'slots'")
 end
 
 function TestUiValidation:testCustomWidgetGeometryIsValidated()
@@ -258,13 +263,17 @@ function TestUiValidation:testCustomWidgetGeometryIsValidated()
         {
             type = "fancyStepper",
             binds = { value = "Count" },
-            geometry = { controlStart = 120 },
+            geometry = {
+                slots = {
+                    { name = "control", start = 120 },
+                },
+            },
         },
     }, "CustomGeometry", storage, {
         widgets = {
             fancyStepper = {
                 binds = { value = { storageType = "int" } },
-                geometry = { "controlStart" },
+                slots = { "control" },
                 validate = function() end,
                 draw = function() end,
             },
@@ -287,11 +296,15 @@ function TestUiValidation:testValueAlignRequiresKnownAlignment()
             label = "Count",
             min = 1,
             max = 5,
-            geometry = { valueAlign = "middle" },
+            geometry = {
+                slots = {
+                    { name = "value", align = "middle" },
+                },
+            },
         },
     }, "ValueAlign", storage)
 
-    assertWarningContains("geometry.valueAlign must be one of 'center' or 'right'")
+    assertWarningContains("geometry.slots[1].align must be one of 'center' or 'right'")
 end
 
 function TestUiValidation:testValueAlignRequiresValueWidth()
@@ -307,18 +320,22 @@ function TestUiValidation:testValueAlignRequiresValueWidth()
             label = "Count",
             min = 1,
             max = 5,
-            geometry = { valueAlign = "center" },
+            geometry = {
+                slots = {
+                    { name = "value", align = "center" },
+                },
+            },
         },
     }, "ValueWidthRequired", storage)
 
-    assertWarningContains("geometry.valueAlign requires geometry.valueWidth")
+    assertWarningContains("geometry.slots[1].align requires width on the same slot")
 end
 
-function TestUiValidation:testValueStartCannotBeCombinedWithAlignedValueGeometry()
+function TestUiValidation:testDuplicateSlotGeometryWarns()
     local storage = {
         { type = "int", alias = "Count", configKey = "Count", default = 2, min = 1, max = 5 },
     }
-    lib.validateStorage(storage, "ValueGeometryConflict")
+    lib.validateStorage(storage, "DuplicateSlotGeometry")
 
     lib.validateUi({
         {
@@ -327,12 +344,16 @@ function TestUiValidation:testValueStartCannotBeCombinedWithAlignedValueGeometry
             label = "Count",
             min = 1,
             max = 5,
-            geometry = { valueStart = 20, valueWidth = 24, valueAlign = "center" },
+            geometry = {
+                slots = {
+                    { name = "value", start = 20, width = 24, align = "center" },
+                    { name = "value", start = 40, width = 24, align = "center" },
+                },
+            },
         },
-    }, "ValueGeometryConflict", storage)
+    }, "DuplicateSlotGeometry", storage)
 
-    assertWarningContains("geometry.valueStart cannot be combined with geometry.valueAlign")
-    assertWarningContains("geometry.valueStart cannot be combined with geometry.valueWidth")
+    assertWarningContains("geometry slot 'value' is declared more than once")
 end
 
 function TestUiValidation:testNegativeGeometryStartWarns()
@@ -348,9 +369,153 @@ function TestUiValidation:testNegativeGeometryStartWarns()
             label = "Count",
             min = 1,
             max = 5,
-            geometry = { decrementStart = -10 },
+            geometry = {
+                slots = {
+                    { name = "decrement", start = -10 },
+                },
+            },
         },
     }, "NegativeGeometry", storage)
 
-    assertWarningContains("geometry.decrementStart must be a non-negative number")
+    assertWarningContains("geometry.slots[1].start must be a non-negative number")
+end
+
+function TestUiValidation:testSlotLineMustBePositiveInteger()
+    local storage = {
+        { type = "int", alias = "Count", configKey = "Count", default = 2, min = 1, max = 5 },
+    }
+    lib.validateStorage(storage, "SlotLine")
+
+    lib.validateUi({
+        {
+            type = "stepper",
+            binds = { value = "Count" },
+            label = "Count",
+            min = 1,
+            max = 5,
+            geometry = {
+                slots = {
+                    { name = "value", line = 1.5, width = 24, align = "center" },
+                },
+            },
+        },
+    }, "SlotLine", storage)
+
+    assertWarningContains("geometry.slots[1].line must be a positive integer")
+end
+
+function TestUiValidation:testRadioOptionSlotMustBeInRange()
+    local storage = {
+        { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
+    }
+    lib.validateStorage(storage, "RadioOptionSlot")
+
+    lib.validateUi({
+        {
+            type = "radio",
+            binds = { value = "Mode" },
+            label = "Mode",
+            values = { "A", "B" },
+            geometry = {
+                slots = {
+                    { name = "option:3", line = 1, start = 0 },
+                },
+            },
+        },
+    }, "RadioOptionSlot", storage)
+
+    assertWarningContains("geometry slot 'option:3' is out of range for 2 radio options")
+end
+
+function TestUiValidation:testCustomWidgetDynamicSlotsCanValidateNames()
+    local storage = {
+        { type = "int", alias = "Count", configKey = "Count", default = 2, min = 1, max = 5 },
+    }
+    lib.validateStorage(storage, "CustomDynamicSlots")
+
+    lib.validateUi({
+        {
+            type = "fancyWidget",
+            binds = { value = "Count" },
+            geometry = {
+                slots = {
+                    { name = "item:3", line = 1, start = 0 },
+                },
+            },
+        },
+    }, "CustomDynamicSlots", storage, {
+        widgets = {
+            fancyWidget = {
+                binds = { value = { storageType = "int" } },
+                slots = { "label" },
+                dynamicSlots = function(_, slotName)
+                    local idx = type(slotName) == "string" and tonumber(string.match(slotName, "^item:(%d+)$")) or nil
+                    if idx == nil then
+                        return false, nil
+                    end
+                    if idx > 2 then
+                        return false, ("geometry slot '%s' exceeds declared item count"):format(slotName)
+                    end
+                    return true, nil
+                end,
+                validate = function() end,
+                draw = function() end,
+            },
+        },
+    })
+
+    assertWarningContains("geometry slot 'item:3' exceeds declared item count")
+end
+
+function TestUiValidation:testPackedCheckboxListSlotCountMustBePositiveInteger()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+            },
+        },
+    }
+    lib.validateStorage(storage, "PackedSlotCount")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags" },
+            slotCount = 1.5,
+        },
+    }, "PackedSlotCount", storage)
+
+    assertWarningContains("packedCheckboxList slotCount must be a positive integer")
+end
+
+function TestUiValidation:testPackedCheckboxListItemSlotMustBeWithinDeclaredSlotCount()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+            },
+        },
+    }
+    lib.validateStorage(storage, "PackedItemSlot")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags" },
+            slotCount = 2,
+            geometry = {
+                slots = {
+                    { name = "item:3", line = 1, start = 0 },
+                },
+            },
+        },
+    }, "PackedItemSlot", storage)
+
+    assertWarningContains("geometry slot 'item:3' is out of range for packedCheckboxList slotCount 2")
 end

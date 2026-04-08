@@ -187,6 +187,7 @@ Examples:
 { type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1 }
 { type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "Vanilla", "Chaos" } }
 { type = "packedCheckboxList", binds = { value = "PackedFlags" } }
+{ type = "packedCheckboxList", binds = { value = "PackedFlags" }, slotCount = 8 }
 ```
 
 ### Layout nodes
@@ -214,7 +215,8 @@ public.definition.customTypes = {
     widgets = {
         myWidget = {
             binds = { value = { storageType = "int" } },
-            geometry = { "controlStart", "controlWidth" }, -- optional supported geometry keys
+            slots = { "label", "control" }, -- optional supported geometry slot names
+            dynamicSlots = function(node, slotName) end, -- optional declaration-time slot validator
             validate = function(node, prefix) end,
             draw = function(imgui, node, bound, width) end,
         },
@@ -234,14 +236,28 @@ These custom types can be used by:
 - Framework rendering
 - special-module calls to `lib.drawUiNode(...)` / `lib.drawUiTree(...)`
 
+Today, `slots` is a validation surface. Custom widget `draw(...)` logic still reads `node.geometry` itself when it wants custom placement.
+`dynamicSlots(...)` is the optional escape hatch for declaration-time-dependent slot names like `option:N`.
+
 Built-in widgets may also accept a widget-local `geometry` bag for manual horizontal placement.
-`controlStart`, `control2Start`, and `separatorStart` are relative to the current row origin after any `indent`.
-`decrementStart`, `valueStart`, `valueWidth`, and `incrementStart` are relative to the enclosing stepper control start.
-`valueStart` is the absolute value-text position.
-`valueAlign` may be `center` or `right` and aligns the value text inside an explicit `valueWidth` slot derived after the decrement button.
-Start positions must be non-negative.
-`valueAlign` requires an explicit `valueWidth`.
-`valueStart` cannot be combined with `valueWidth` or `valueAlign`.
+Geometry is now expressed through `geometry.slots`, where each slot descriptor may declare:
+- `name`
+- `line`
+- `start`
+- `width`
+- `align`
+
+`line` defaults to `1` and must be a positive integer when present.
+`start` is relative to the current row origin after any `indent`.
+`width` must be positive when present.
+`align` may be `center` or `right` and requires an explicit `width`.
+Slots are rendered in ascending `line`.
+Within the same line, slots with explicit `start` values are ordered by `start`.
+Otherwise declaration order breaks ties and preserves slots without explicit `start`.
+`radio` supports `option:N` slot names for each entry in `node.values`.
+`packedCheckboxList` supports `item:N` slot names when `slotCount` is declared.
+
+`slotCount` is the declaration-time slot capacity for `packedCheckboxList`. Packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity.
 
 ### `steppedRange`
 
@@ -259,11 +275,15 @@ ui = {
         binds = { min = "DepthMin", max = "DepthMax" },
         label = "Depth",
         geometry = {
-            separatorStart = 260,
-            control2Start = 300,
-            valueWidth = 14,
-            valueAlign = "center",
-            incrementStart = 42,
+            slots = {
+                { name = "min.decrement", start = 0 },
+                { name = "min.value", start = 24, width = 14, align = "center" },
+                { name = "min.increment", start = 42 },
+                { name = "separator", start = 260 },
+                { name = "max.decrement", start = 300 },
+                { name = "max.value", start = 324, width = 14, align = "center" },
+                { name = "max.increment", start = 342 },
+            },
         },
         min = 1,
         max = 10,

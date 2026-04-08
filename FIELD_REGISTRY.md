@@ -126,17 +126,37 @@ which is how `packedCheckboxList` receives packed child rows.
 Some widgets also support a widget-local `geometry` bag for manual horizontal placement.
 
 First-pass built-in support:
-- `dropdown`: `controlStart`, `controlWidth`
-- `stepper`: `controlStart`, `decrementStart`, `valueStart`, `valueWidth`, `valueAlign`, `incrementStart`
-- `steppedRange`: `controlStart`, `control2Start`, `separatorStart`, plus the shared stepper keys above
+- `dropdown`: `label`, `control`
+- `radio`: `label`, dynamic `option:N`
+- `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
+- `steppedRange`: `label`, `min.*`, `separator`, `max.*`
+- `packedCheckboxList`: dynamic `item:N` when `slotCount` is declared
 
-`controlStart`, `control2Start`, and `separatorStart` are relative to the current row origin after any `indent`.
-`decrementStart`, `valueStart`, `valueWidth`, and `incrementStart` are relative to the enclosing stepper control start.
-`valueStart` is the absolute value-text position.
-`valueAlign` may be `center` or `right` and aligns the value text inside an explicit `valueWidth` slot derived after the decrement button.
-Start positions must be non-negative.
-`valueAlign` requires an explicit `valueWidth`.
-`valueStart` cannot be combined with `valueWidth` or `valueAlign`.
+Geometry is expressed through `geometry.slots`, a list of slot descriptors.
+Each slot descriptor may declare:
+- `name`
+- `line`
+- `start`
+- `width`
+- `align`
+
+`line` defaults to `1` and must be a positive integer when present.
+`start` is relative to the current row origin after any `indent`.
+`width` must be positive when present.
+`align` may be `center` or `right` and requires an explicit `width`.
+Slots are rendered in ascending `line`.
+Within the same line, slots with explicit `start` values are ordered by `start`.
+Otherwise declaration order breaks ties and preserves slots without explicit `start`.
+`radio` supports `option:N` slot names for each entry in `node.values`.
+`packedCheckboxList` supports `item:N` slot names when `slotCount` is declared.
+
+`slotCount` is the declaration-time slot capacity for `packedCheckboxList`. Packed children may be omitted at runtime, but the widget does not invent new slots beyond the declared count.
+
+At draw time, `lib.drawUiNode(...)` may also receive a runtime geometry override using the same `geometry.slots` shape.
+Runtime overrides are validated against the already-declared slot schema and may additionally set:
+- `hidden`
+
+`hidden = true` skips rendering that slot without reflowing the remaining slots.
 
 ### `steppedRange`
 
@@ -153,11 +173,15 @@ Example:
   label = "Depth",
   binds = { min = "DepthMin", max = "DepthMax" },
   geometry = {
-    separatorStart = 260,
-    control2Start = 300,
-    valueWidth = 14,
-    valueAlign = "center",
-    incrementStart = 42,
+    slots = {
+      { name = "min.decrement", start = 0 },
+      { name = "min.value", start = 24, width = 14, align = "center" },
+      { name = "min.increment", start = 42 },
+      { name = "separator", start = 260 },
+      { name = "max.decrement", start = 300 },
+      { name = "max.value", start = 324, width = 14, align = "center" },
+      { name = "max.increment", start = 342 },
+    },
   },
   min = 1,
   max = 10,
@@ -282,13 +306,19 @@ Modules may extend the built-in registries with:
 
 - `definition.customTypes.widgets`
 - `definition.customTypes.layouts`
+- custom widgets must declare `binds`
+- custom widgets must declare `draw(...)`
 
 Rules:
 - custom widget names may not collide with built-in widget or layout names
 - custom layout names may not collide with built-in widget or layout names
 - custom widgets must declare `binds`
 - custom widgets must implement `validate(...)` and `draw(...)`
+- custom widgets may optionally declare `slots = { ... }` to whitelist supported `node.geometry.slots[*].name` values
+- custom widgets may optionally declare `dynamicSlots(node, slotName) -> ok, err` for declaration-time-dependent slot names
 - custom layouts must implement `validate(...)` and `render(...)`
+
+Today, `slots` is a validation surface. Custom widget `draw(...)` logic still reads `node.geometry` itself when it wants custom placement.
 
 Custom types are merged into the registry surface for:
 - `lib.validateUi(...)`

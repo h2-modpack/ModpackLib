@@ -15,6 +15,7 @@ local function makeBasicImgui()
         setCursorPosXCalls = {},
         pushItemWidths = {},
         sameLineCalls = 0,
+        newLineCalls = 0,
     }
 
     local imgui = {
@@ -46,7 +47,9 @@ local function makeBasicImgui()
         SameLine = function()
             state.sameLineCalls = state.sameLineCalls + 1
         end,
-        NewLine = function() end,
+        NewLine = function()
+            state.newLineCalls = state.newLineCalls + 1
+        end,
         IsItemHovered = function() return false end,
         SetTooltip = function() end,
         PushItemWidth = function(a, b)
@@ -287,6 +290,42 @@ function TestUiNodes:testCollectQuickUiNodesSupportsCustomTypes()
     lu.assertEquals(quick[1].type, "fancyToggle")
 end
 
+function TestUiNodes:testCustomWidgetCanRenderThroughDraw()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        customTypes = {
+            widgets = {
+                fancyToggle = {
+                    binds = { value = { storageType = "bool" } },
+                    validate = function() end,
+                    draw = function(imgui, _, bound)
+                        local current = bound.value:get()
+                        local nextValue, changed = imgui.Checkbox("Fancy", current == true)
+                        if changed then
+                            bound.value:set(nextValue)
+                            return true
+                        end
+                        return false
+                    end,
+                },
+            },
+        },
+        ui = {
+            { type = "fancyToggle", binds = { value = "Enabled" } },
+        },
+    }
+    local store = makeStore(definition, { Enabled = true })
+    local imgui = makeBasicImgui()
+    imgui._state.checkboxResponses = { false }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, definition.customTypes)
+
+    lu.assertTrue(changed)
+    lu.assertFalse(store.uiState.get("Enabled"))
+end
+
 function TestUiNodes:testGetQuickUiNodeIdFallsBackToBinds()
     local node = {
         type = "checkbox",
@@ -346,7 +385,11 @@ function TestUiNodes:testDropdownGeometryControlsStartAndWidth()
                 binds = { value = "Mode" },
                 label = "Mode",
                 values = { "A", "B" },
-                geometry = { controlStart = 220, controlWidth = 180 },
+                geometry = {
+                    slots = {
+                        { name = "control", start = 220, width = 180 },
+                    },
+                },
             },
         },
     }
@@ -376,12 +419,15 @@ function TestUiNodes:testSteppedRangeGeometryAppliesWithoutLabel()
                 min = 1,
                 max = 10,
                 geometry = {
-                    separatorStart = 180,
-                    control2Start = 220,
-                    decrementStart = 0,
-                    valueWidth = 24,
-                    valueAlign = "center",
-                    incrementStart = 42,
+                    slots = {
+                        { name = "min.decrement", start = 0 },
+                        { name = "min.value", start = 24, width = 24, align = "center" },
+                        { name = "min.increment", start = 42 },
+                        { name = "separator", start = 180 },
+                        { name = "max.decrement", start = 220 },
+                        { name = "max.value", start = 244, width = 24, align = "center" },
+                        { name = "max.increment", start = 262 },
+                    },
                 },
             },
         },
@@ -453,10 +499,11 @@ function TestUiNodes:testStepperCentersValueWithinExplicitValueWidth()
                 min = 1,
                 max = 10,
                 geometry = {
-                    decrementStart = 0,
-                    valueWidth = 28,
-                    incrementStart = 60,
-                    valueAlign = "center",
+                    slots = {
+                        { name = "decrement", start = 0 },
+                        { name = "value", start = 24, width = 28, align = "center" },
+                        { name = "increment", start = 60 },
+                    },
                 },
             },
         },
@@ -467,16 +514,222 @@ function TestUiNodes:testStepperCentersValueWithinExplicitValueWidth()
     local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
 
     lu.assertFalse(changed)
+    local sawValueStart = false
     local sawCenteredValue = false
     local sawIncrementStart = false
     for _, x in ipairs(imgui._state.setCursorPosXCalls) do
         if x == 24 then
+            sawValueStart = true
+        end
+        if x == 34 then
             sawCenteredValue = true
         end
         if x == 60 then
             sawIncrementStart = true
         end
     end
+    lu.assertTrue(sawValueStart)
     lu.assertTrue(sawCenteredValue)
     lu.assertTrue(sawIncrementStart)
+end
+
+function TestUiNodes:testStepperGeometrySortsSlotsByLineThenStart()
+    local definition = {
+        storage = {
+            { type = "int", alias = "Count", configKey = "Count", default = 7, min = 1, max = 10 },
+        },
+        ui = {
+            {
+                type = "stepper",
+                binds = { value = "Count" },
+                label = "",
+                min = 1,
+                max = 10,
+                geometry = {
+                    slots = {
+                        { name = "decrement", line = 1, start = 0 },
+                        { name = "value", line = 2, start = 60 },
+                        { name = "increment", line = 2, start = 24 },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Count = 7 })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertTrue(imgui._state.newLineCalls >= 1)
+
+    local first24 = nil
+    local first60 = nil
+    for index, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 24 and first24 == nil then
+            first24 = index
+        elseif x == 60 and first60 == nil then
+            first60 = index
+        end
+    end
+    lu.assertNotNil(first24)
+    lu.assertNotNil(first60)
+    lu.assertTrue(first24 < first60)
+end
+
+function TestUiNodes:testRadioGeometryCanLayOutOptionsAcrossLines()
+    local definition = {
+        storage = {
+            { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
+        },
+        ui = {
+            {
+                type = "radio",
+                binds = { value = "Mode" },
+                label = "",
+                values = { "A", "B", "C", "D" },
+                geometry = {
+                    slots = {
+                        { name = "option:1", line = 1, start = 0 },
+                        { name = "option:2", line = 1, start = 80 },
+                        { name = "option:3", line = 2, start = 0 },
+                        { name = "option:4", line = 2, start = 80 },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Mode = "A" })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertTrue(imgui._state.newLineCalls >= 2)
+
+    local first0 = nil
+    local first80 = nil
+    local second0 = nil
+    local second80 = nil
+    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 0 then
+            if first0 == nil then
+                first0 = true
+            else
+                second0 = true
+            end
+        elseif x == 80 then
+            if first80 == nil then
+                first80 = true
+            else
+                second80 = true
+            end
+        end
+    end
+    lu.assertTrue(first0)
+    lu.assertTrue(first80)
+    lu.assertTrue(second0)
+    lu.assertTrue(second80)
+end
+
+function TestUiNodes:testPackedCheckboxListCanUseDeclaredItemSlots()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "PackedFlags",
+                configKey = "PackedFlags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false },
+                },
+            },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "PackedFlags" },
+                slotCount = 4,
+                geometry = {
+                    slots = {
+                        { name = "item:1", line = 1, start = 0 },
+                        { name = "item:2", line = 1, start = 80 },
+                        { name = "item:3", line = 2, start = 0 },
+                        { name = "item:4", line = 2, start = 80 },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { PackedFlags = 0 })
+    local imgui = makeBasicImgui()
+    local checkboxCalls = 0
+    imgui.Checkbox = function(_, _, current)
+        checkboxCalls = checkboxCalls + 1
+        return current, false
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(imgui._state.newLineCalls, 0)
+    lu.assertEquals(checkboxCalls, 2)
+
+    local first0 = nil
+    local first80 = nil
+    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 0 then
+            first0 = true
+        elseif x == 80 then
+            first80 = true
+        end
+    end
+    lu.assertTrue(first0)
+    lu.assertTrue(first80)
+end
+
+function TestUiNodes:testDrawUiNodeCanApplyRuntimeSlotGeometryOverrides()
+    local definition = {
+        storage = {
+            { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
+        },
+        ui = {
+            {
+                type = "radio",
+                binds = { value = "Mode" },
+                values = { "A", "B", "C" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Mode = "A" })
+    local imgui = makeBasicImgui()
+    local radioCalls = 0
+    imgui.RadioButton = function()
+        radioCalls = radioCalls + 1
+        return false
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, nil, {
+        slots = {
+            { name = "option:1", line = 1, start = 0 },
+            { name = "option:2", hidden = true },
+            { name = "option:3", line = 1, start = 80 },
+        },
+    })
+
+    lu.assertFalse(changed)
+    lu.assertEquals(radioCalls, 2)
+    lu.assertEquals(imgui._state.newLineCalls, 0)
+
+    local saw0 = false
+    local saw80 = false
+    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 0 then
+            saw0 = true
+        elseif x == 80 then
+            saw80 = true
+        end
+    end
+    lu.assertTrue(saw0)
+    lu.assertTrue(saw80)
 end
