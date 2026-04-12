@@ -116,13 +116,13 @@ Required methods:
 
 Built-ins:
 - `text`
-- `dynamicText`
 - `button`
 - `confirmButton`
 - `checkbox`
 - `inputText`
 - `dropdown`
 - `mappedDropdown`
+- `mappedRadio`
 - `radio`
 - `stepper`
 - `steppedRange`
@@ -149,13 +149,13 @@ Some widgets also support a widget-local `geometry` bag for manual horizontal pl
 
 First-pass built-in support:
 - `text`: `value`
-- `dynamicText`: `value`
 - `button`: `control`
 - `confirmButton`: `control`
 - `checkbox`: `control`
 - `inputText`: `label`, `control`
 - `dropdown`: `label`, `control`
 - `mappedDropdown`: `label`, `control`
+- `mappedRadio`: `label`
 - `radio`: `label`, dynamic `option:N`
 - `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
 - `steppedRange`: `label`, `min.*`, `separator`, `max.*`
@@ -181,7 +181,7 @@ Otherwise declaration order breaks ties and preserves slots without explicit `st
 
 `slotCount` is the declaration-time slot capacity for `packedCheckboxList`. Packed children may be omitted at runtime, but the widget does not invent new slots beyond the declared count.
 
-`radio` option slots and `packedCheckboxList` item slots currently use `line` and
+`radio` option slots and packed list `item:N` slots currently use `line` and
 `start` meaningfully. `width` and `align` are accepted by the generic geometry
 parser but warn because those widgets do not consume them.
 
@@ -192,9 +192,6 @@ widgets do not all consume every key the same way. Authors should treat the
 following as the meaningful geometry surface:
 
 - `text.value`
-  - use `line` / `start` to place the text block
-  - `width` + `align` are meaningful when you want centered/right-aligned text inside a fixed slot
-- `dynamicText.value`
   - use `line` / `start` to place the text block
   - `width` + `align` are meaningful when you want centered/right-aligned text inside a fixed slot
 - `button.control`
@@ -227,6 +224,9 @@ following as the meaningful geometry surface:
   - use `line` / `start` to place the combo box
   - `width` is meaningful and sets the combo width
   - `align` is not meaningful
+- `mappedRadio.label`
+  - use `line` / `start` to place the label text
+  - `width` / `align` are not meaningful
 - `radio.label`
   - use `line` / `start` to place the label text
   - `width` / `align` are not meaningful
@@ -259,29 +259,8 @@ following as the meaningful geometry surface:
   - `width` + `align` are meaningful when you want the separator aligned inside a fixed slot
 - `packedCheckboxList.item:N`
   - use `line` / `start` to place each packed child row
+  - when `binds.filterText` is provided, item slots target the visible filtered rows after compaction
   - `width` / `align` are not meaningful and currently warn
-
-At draw time, `lib.drawUiNode(...)` may also receive a runtime geometry override using the same `geometry.slots` shape.
-Runtime overrides are validated against the already-declared slot schema and may additionally set:
-- `hidden`
-
-`hidden = true` skips rendering that slot without reflowing the remaining slots.
-
-`lib.drawUiNode(...)` may separately receive a layout-side `runtimeLayout` override.
-In v1, `panel` and `verticalTabs` consume it:
-
-```lua
-{
-    children = {
-        rowA = { hidden = true },
-        [7] = { line = 3 },
-    },
-}
-```
-
-This is separate from widget slot geometry on purpose:
-- widget geometry controls slot placement inside a widget
-- runtime layout controls child visibility and row placement inside a layout
 
 ### `steppedRange`
 
@@ -319,7 +298,7 @@ Layout types never store data.
 
 Required methods:
 - `validate(node, prefix)`
-- `render(imgui, node, drawChild, runtimeLayout?)`
+- `render(imgui, node, drawChild)`
 
 Built-ins:
 - `separator`
@@ -356,7 +335,7 @@ Example:
             type = "dropdown",
             binds = { value = "Mode" },
             values = { "A", "B" },
-            panel = { column = "control", line = 1, slots = { "control" } },
+            panel = { column = "control", line = 1 },
         },
     },
 }
@@ -367,25 +346,9 @@ Rules:
 - each column may declare `name`, `start`, `width`, and `align`
 - child `panel.column` may be a column name or 1-based index
 - child `panel.line` defaults to `1`
-- child `panel.key` may provide a stable runtime override target
-- child `panel.slots` may list child widget slot names that should inherit the column's `width`/`align`
+- child `panel.key` provides a stable identity for the child within the panel
 
-`panel` positions children row-by-row and passes runtime geometry overrides into child widgets without mutating their nodes.
-`panel` also supports layout-side runtime child overrides for:
-- `hidden`
-- `line`
-
-Runtime child overrides may target:
-- `child.panel.key`
-- or the 1-based child index as a fallback
-
-`verticalTabs` runtime child overrides support:
-- `hidden`
-
-Targets may use:
-- child `tabId`
-- otherwise child `tabLabel`
-- or the 1-based child index as a fallback
+`panel` positions children row-by-row.
 
 `horizontalTabs` is a thin layout wrapper over ImGui tab bars:
 
@@ -446,9 +409,6 @@ Rules:
 - child `tabId` is optional and, when present, is used as the stable internal active-tab key
 - `verticalTabs` keeps its current active child on the prepared node and defaults to the first child when no active tab has been chosen yet
 - `verticalTabs` owns child rendering and only draws the active child in the detail pane
-- `verticalTabs` supports runtime child hiding through `runtimeLayout.children[*].hidden`
-- if the active child is hidden at draw time, `verticalTabs` falls back to the first visible child
-- child ordering remains declaration-order in v1; `runtimeLayout.children[*].order` is reserved for future support and currently warns
 
 ## Binding Rules
 
@@ -503,12 +463,6 @@ Lib hard-validates registry contracts through:
 - renders `node.text` or `node.label`
 - supports optional `color = { r, g, b }` or `{ r, g, b, a }`
 
-### `dynamicText`
-- presentational computed widget with no binds
-- requires `getText(node, uiState)`
-- optional `getColor(node, uiState)` may return `{ r, g, b }` or `{ r, g, b, a }`
-- optional `getTooltip(node, uiState)` may return tooltip text
-
 ### `button`
 - presentational action widget with no binds
 - renders `node.label` as a push button
@@ -525,33 +479,39 @@ Lib hard-validates registry contracts through:
 ### `checkbox`
 - expects bool storage
 
-### `inputText`, `dropdown`, `mappedDropdown`, and `radio`
+### `inputText`, `dropdown`, `mappedDropdown`, `mappedRadio`, and `radio`
 - `inputText` expects string storage
 - `inputText` supports optional `geometry`
 - `inputText.control` is the meaningful width-bearing slot
 - `inputText.control` does not consume `align`
-- `dropdown` and `radio` expect string storage
+- `dropdown` and `radio` expect direct choice storage backed by either `string` or `int`
 - `mappedDropdown` accepts any bound storage type and delegates preview/option semantics to callbacks
-- `dropdown` and `radio` validate value lists
+- `mappedRadio` accepts any bound storage type and delegates option semantics to callbacks
+- `dropdown` and `radio` validate value lists and expect `node.values` entries to be strings or integers
 - `dropdown` supports optional `geometry`
 - `dropdown.control` is the meaningful width-bearing slot
 - `mappedDropdown` supports optional `geometry`
 - `mappedDropdown.control` is the meaningful width-bearing slot
 - `mappedDropdown.label` does not consume `width` / `align`
 - `mappedDropdown.control` does not consume `align`
+- `mappedRadio` supports optional label placement only; option layout is internal
 - `radio` is mainly a `line` / `start` placement widget; option slots do not consume `width` / `align`
 
 ### `stepper`
 - expects int storage
 - supports `step`, `fastStep`, and optional `geometry`
+- optional `displayValues[value]` overrides the rendered value label without changing storage
+- optional `valueColors[value]` colors the rendered value label
 - `value` is the meaningful aligned slot
 - button slots are best treated as explicit `line` / `start` positions
 
 ### `packedCheckboxList`
-- expects a packed root bind
+- expects `binds.value` to be an `int`-kind alias whose root type is explicitly `packedInt`
 - renders checkbox rows for the packed child aliases under that root
+- optionally accepts a string bind at `binds.filterText`; when present, only matching child labels are rendered
 - useful when a module wants a generic packed-flag checklist without hand-writing the child loop
-- item slots are best treated as explicit `line` / `start` positions
+- visible children are those whose `label` contains the current filter text (case-insensitive substring match)
+- `item:N` geometry targets the visible filtered rows after compaction when filtering is active
 
 ### `separator`
 - layout only
@@ -586,36 +546,23 @@ Modules may extend the built-in registries with:
 `lib.WidgetHelpers` is currently reserved and intentionally empty.
 It exists as the future home for widget-specific authoring/tooling helpers without mixing those helpers into the runtime `WidgetTypes` contract table.
 
-Lib may also expose planner-side UI helpers outside the runtime widget contract when the concern is generic enough to span multiple indexed widgets.
-Current example:
-- `lib.buildIndexedHiddenSlotGeometry(...)` for `item:N` / `option:N` runtime hiding plans
-
 Rules:
 - custom widget names may not collide with built-in widget or layout names
 - custom layout names may not collide with built-in widget or layout names
 - custom widgets must declare `binds`
 - custom widgets must implement `validate(...)` and `draw(...)`
+- widget bind specs may declare `storageType` for value-kind matching, optional `rootType` for exact storage node matching, and optional `optional = true` for non-required binds
 - custom widgets may optionally declare `slots = { ... }` to whitelist supported `node.geometry.slots[*].name` values
 - custom widgets may optionally declare `defaultGeometry = { slots = { ... } }` as their baseline slot layout
 - custom widgets may optionally declare `dynamicSlots(node, slotName) -> ok, err` for declaration-time-dependent slot names
-- custom widgets may optionally declare `summary(node, bound, runtimeGeometry, uiState)` for query-time widget summaries
 - custom layouts must implement `validate(...)` and `render(...)`
 - custom layouts may declare `handlesChildren = true` when they own child placement
-- custom layout `render(...)` receives `(imgui, node, drawChild, runtimeLayout?)`
+- custom layout `render(...)` receives `(imgui, node, drawChild)`
 - simple layouts may ignore `drawChild` and return just `open`
 - layouts with `handlesChildren = true` should return `open, changed`
-- layouts with `handlesChildren = true` should call `drawChild(child, runtimeGeometry?, runtimeLayout?)` themselves and report child changes through `changed`
+- layouts with `handlesChildren = true` should call `drawChild(child)` themselves and report child changes through `changed`
 
 Custom widgets may stay fully imperative, but widgets that declare `slots` and `defaultGeometry` can call `lib.drawWidgetSlots(...)` from inside `draw(...)` to reuse Lib-managed slot ordering and geometry merging.
-
-`summary(...)` is not a render hook. Prepared nodes retain their resolved widget type, and `lib.getWidgetSummary(...)` is the public wrapper that calls that prepared widget capability for both built-in and custom widgets.
-It requires a prepared node from `lib.prepareUiNode(...)` or `lib.prepareWidgetNode(...)`.
-
-`lib.getWidgetSummary(...)` returns a fixed outer table:
-- `type`: widget type name
-- `data`: widget-specific summary payload
-
-`data` is intentionally widget-specific rather than normalized across all widgets.
 
 Custom types are merged into the registry surface for:
 - `lib.validateUi(...)`

@@ -28,7 +28,7 @@ local function makePackedDefinition()
         },
         ui = {
             { type = "checkbox", binds = { value = "EnabledBit" }, label = "Enabled" },
-            { type = "dropdown", binds = { value = "ModeBits" }, label = "Mode", values = { "0", "1", "2", "3" } },
+            { type = "dropdown", binds = { value = "ModeBits" }, label = "Mode", values = { 0, 1, 2, 3 } },
         },
     }
 end

@@ -115,121 +115,6 @@ local function FindTabbedChildByKey(children, activeKey)
     return children[1], 1
 end
 
-local function PrepareRuntimeTabbedLayout(node, prefix, runtimeLayout, keyResolver)
-    local parsed = {
-        byIndex = {},
-        byKey = {},
-        usedIndex = {},
-        usedKey = {},
-    }
-
-    if runtimeLayout == nil then
-        return parsed
-    end
-    if type(runtimeLayout) ~= "table" then
-        libWarn("%s must be a table", prefix)
-        return parsed
-    end
-    for key in pairs(runtimeLayout) do
-        if key ~= "children" then
-            libWarn("%s: unknown runtime layout key '%s'", prefix, tostring(key))
-        end
-    end
-
-    local children = runtimeLayout.children
-    if children == nil then
-        return parsed
-    end
-    if type(children) ~= "table" then
-        libWarn("%s.children must be a table", prefix)
-        return parsed
-    end
-
-    for target, override in pairs(children) do
-        local targetPrefix = ("%s.children[%s]"):format(prefix, tostring(target))
-        local targetKind = nil
-        if type(target) == "number" then
-            if target < 1 or math.floor(target) ~= target then
-                libWarn("%s target must be a positive integer child index", targetPrefix)
-            else
-                targetKind = "index"
-            end
-        elseif type(target) == "string" then
-            if target == "" then
-                libWarn("%s target must not be empty", targetPrefix)
-            else
-                targetKind = "key"
-            end
-        else
-            libWarn("%s target must be a child index or tab child key", targetPrefix)
-        end
-
-        if targetKind ~= nil then
-            if type(override) ~= "table" then
-                libWarn("%s override must be a table", targetPrefix)
-            else
-                local normalized = {}
-                for overrideKey, value in pairs(override) do
-                    if overrideKey == "hidden" then
-                        if type(value) ~= "boolean" then
-                            libWarn("%s.hidden must be boolean", targetPrefix)
-                        elseif value == true then
-                            normalized.hidden = true
-                        end
-                    elseif overrideKey == "order" then
-                        libWarn("%s.order is reserved for future vertical/horizontal tab ordering support", targetPrefix)
-                    else
-                        libWarn("%s: unknown child override key '%s'", targetPrefix, tostring(overrideKey))
-                    end
-                end
-
-                if targetKind == "index" then
-                    parsed.byIndex[target] = normalized
-                else
-                    parsed.byKey[target] = normalized
-                end
-            end
-        end
-    end
-
-    local childCount = type(node.children) == "table" and #node.children or 0
-    for index in pairs(parsed.byIndex) do
-        if index > childCount then
-            libWarn("%s.children[%s] does not match any child index", prefix, tostring(index))
-        end
-    end
-
-    local knownKeys = {}
-    if type(node.children) == "table" then
-        for index, child in ipairs(node.children) do
-            knownKeys[keyResolver(child, index)] = true
-        end
-    end
-    for childKey in pairs(parsed.byKey) do
-        if not knownKeys[childKey] then
-            libWarn("%s.children[%s] does not match any tab child key", prefix, tostring(childKey))
-        end
-    end
-
-    return parsed
-end
-
-local function ResolveRuntimeTabbedChildOverride(parsed, child, index, keyResolver)
-    if type(parsed) ~= "table" then
-        return nil
-    end
-    local childKey = keyResolver(child, index)
-    if childKey ~= nil and parsed.byKey[childKey] ~= nil then
-        parsed.usedKey[childKey] = true
-        return parsed.byKey[childKey]
-    end
-    if parsed.byIndex[index] ~= nil then
-        parsed.usedIndex[index] = true
-        return parsed.byIndex[index]
-    end
-    return nil
-end
-
 LayoutTypes.horizontalTabs = {
     handlesChildren = true,
     validate = function(node, prefix)
@@ -273,29 +158,13 @@ LayoutTypes.verticalTabs = {
         end
         ValidateTabbedChildren(node, prefix, "verticalTabs")
     end,
-    render = function(imgui, node, drawChild, runtimeLayout)
+    render = function(imgui, node, drawChild)
         if not imgui.BeginChild or not imgui.EndChild or not imgui.Selectable or not imgui.SameLine then
             libWarn("drawUiNode: verticalTabs requires BeginChild/EndChild/Selectable/SameLine support")
             return true, false
         end
 
-        local allChildren = type(node.children) == "table" and node.children or {}
-        if #allChildren == 0 then
-            return true, false
-        end
-
-        local runtimeOverrides = runtimeLayout ~= nil
-            and PrepareRuntimeTabbedLayout(node, "drawUiNode runtime layout for 'verticalTabs'", runtimeLayout, GetTabbedChildKey)
-            or nil
-        local children = {}
-        for index, child in ipairs(allChildren) do
-            local runtimeOverride = runtimeOverrides ~= nil
-                and ResolveRuntimeTabbedChildOverride(runtimeOverrides, child, index, GetTabbedChildKey)
-                or nil
-            if not (type(runtimeOverride) == "table" and runtimeOverride.hidden == true) then
-                children[#children + 1] = child
-            end
-        end
+        local children = type(node.children) == "table" and node.children or {}
         if #children == 0 then
             return true, false
         end
@@ -415,203 +284,46 @@ local function ValidatePanelChild(node, prefix, childIndex, child, seenKeys)
             seenKeys[placement.key] = true
         end
     end
-    if placement.slots ~= nil then
-        if type(placement.slots) ~= "table" then
-            libWarn("%s.slots must be a list of slot names", placementPrefix)
-        else
-            for slotIndex, slotName in ipairs(placement.slots) do
-                if type(slotName) ~= "string" or slotName == "" then
-                    libWarn("%s.slots[%d] must be a non-empty string", placementPrefix, slotIndex)
-                end
-            end
-        end
-    end
 end
 
-local function PrepareRuntimePanelLayout(node, prefix, runtimeLayout)
-    local parsed = {
-        byIndex = {},
-        byKey = {},
-        usedIndex = {},
-        usedKey = {},
-    }
-
-    if runtimeLayout == nil then
-        return parsed
-    end
-    if type(runtimeLayout) ~= "table" then
-        libWarn("%s must be a table", prefix)
-        return parsed
-    end
-    for key in pairs(runtimeLayout) do
-        if key ~= "children" then
-            libWarn("%s: unknown runtime layout key '%s'", prefix, tostring(key))
-        end
-    end
-
-    local children = runtimeLayout.children
-    if children == nil then
-        return parsed
-    end
-    if type(children) ~= "table" then
-        libWarn("%s.children must be a table", prefix)
-        return parsed
-    end
-
-    for target, override in pairs(children) do
-        local targetPrefix = ("%s.children[%s]"):format(prefix, tostring(target))
-        local targetKind = nil
-        if type(target) == "number" then
-            if target < 1 or math.floor(target) ~= target then
-                libWarn("%s target must be a positive integer child index", targetPrefix)
-            else
-                targetKind = "index"
-            end
-        elseif type(target) == "string" then
-            if target == "" then
-                libWarn("%s target must not be empty", targetPrefix)
-            else
-                targetKind = "key"
-            end
-        else
-            libWarn("%s target must be a child index or panel child key", targetPrefix)
-        end
-
-        if targetKind ~= nil then
-            if type(override) ~= "table" then
-                libWarn("%s override must be a table", targetPrefix)
-            else
-                local normalized = {}
-                for key, value in pairs(override) do
-                    if key == "hidden" then
-                        if type(value) ~= "boolean" then
-                            libWarn("%s.hidden must be boolean", targetPrefix)
-                        elseif value == true then
-                            normalized.hidden = true
-                        end
-                    elseif key == "line" then
-                        if type(value) ~= "number" or value < 1 or math.floor(value) ~= value then
-                            libWarn("%s.line must be a positive integer", targetPrefix)
-                        else
-                            normalized.line = value
-                        end
-                    else
-                        libWarn("%s: unknown child override key '%s'", targetPrefix, tostring(key))
-                    end
-                end
-
-                if targetKind == "index" then
-                    parsed.byIndex[target] = normalized
-                else
-                    parsed.byKey[target] = normalized
-                end
-            end
-        end
-    end
-
-    local childCount = type(node.children) == "table" and #node.children or 0
-    for index in pairs(parsed.byIndex) do
-        if index > childCount then
-            libWarn("%s.children[%s] does not match any child index", prefix, tostring(index))
-        end
-    end
-
-    local knownKeys = {}
-    if type(node.children) == "table" then
-        for _, child in ipairs(node.children) do
-            local childKey = GetPanelChildKey(child)
-            if childKey then
-                knownKeys[childKey] = true
-            end
-        end
-    end
-    for childKey in pairs(parsed.byKey) do
-        if not knownKeys[childKey] then
-            libWarn("%s.children[%s] does not match any child.panel.key", prefix, tostring(childKey))
-        end
-    end
-
-    return parsed
-end
-
-local function ResolveRuntimePanelChildOverride(parsed, child, index)
-    if type(parsed) ~= "table" then
-        return nil
-    end
-    local childKey = GetPanelChildKey(child)
-    if childKey ~= nil and parsed.byKey[childKey] ~= nil then
-        parsed.usedKey[childKey] = true
-        return parsed.byKey[childKey], childKey
-    end
-    if parsed.byIndex[index] ~= nil then
-        parsed.usedIndex[index] = true
-        return parsed.byIndex[index], childKey
-    end
-    return nil, childKey
-end
-
-local function ResolvePanelChildPlacement(node, child, index, runtimeOverride)
+local function ResolvePanelChildPlacement(node, child, index)
     local placement = type(child) == "table" and child.panel or nil
     local column = type(placement) == "table" and ResolvePanelColumn(node, placement.column) or nil
     return {
         child = child,
         index = index,
         key = GetPanelChildKey(child),
-        hidden = type(runtimeOverride) == "table" and runtimeOverride.hidden == true or false,
-        line = type(runtimeOverride) == "table" and runtimeOverride.line
-            or type(placement) == "table" and placement.line
-            or 1,
+        line = type(placement) == "table" and placement.line or 1,
         start = type(column) == "table" and column.start or nil,
         width = type(column) == "table" and column.width or nil,
         align = type(column) == "table" and column.align or nil,
-        slots = type(placement) == "table" and placement.slots or nil,
     }
 end
 
-local function BuildPanelEntries(node, prefix, runtimeLayout)
-    if runtimeLayout == nil and type(node) == "table" and type(node._staticPanelEntries) == "table" then
+local function BuildPanelEntries(node)
+    if type(node) == "table" and type(node._staticPanelEntries) == "table" then
         return node._staticPanelEntries
     end
 
     local children = type(node.children) == "table" and node.children or {}
-    local runtimeOverrides = runtimeLayout ~= nil and PrepareRuntimePanelLayout(node, prefix, runtimeLayout) or nil
-    local entries = type(node) == "table" and node._panelEntryCache or nil
-    if type(entries) ~= "table" then
-        entries = {}
-        if type(node) == "table" then
-            node._panelEntryCache = entries
-        end
-    end
+    local entries = {}
     local entryCount = 0
 
     for index, child in ipairs(children) do
-        local runtimeOverride = runtimeOverrides ~= nil
-            and select(1, ResolveRuntimePanelChildOverride(runtimeOverrides, child, index))
-            or nil
-        local entry = ResolvePanelChildPlacement(node, child, index, runtimeOverride)
-        if not entry.hidden then
-            entryCount = entryCount + 1
-            local cachedEntry = entries[entryCount]
-            if type(cachedEntry) ~= "table" then
-                cachedEntry = {}
-                entries[entryCount] = cachedEntry
-            end
-            cachedEntry.child = entry.child
-            cachedEntry.index = entry.index
-            cachedEntry.key = entry.key
-            cachedEntry.hidden = entry.hidden
-            cachedEntry.line = entry.line
-            cachedEntry.start = entry.start
-            cachedEntry.width = entry.width
-            cachedEntry.align = entry.align
-            cachedEntry.slots = entry.slots
-        end
-    end
-    for index = entryCount + 1, #entries do
-        entries[index] = nil
+        local entry = ResolvePanelChildPlacement(node, child, index)
+        entryCount = entryCount + 1
+        entries[entryCount] = {
+            child = entry.child,
+            index = entry.index,
+            key = entry.key,
+            line = entry.line,
+            start = entry.start,
+            width = entry.width,
+            align = entry.align,
+        }
     end
 
-    if runtimeLayout == nil and type(node) == "table" then
+    if type(node) == "table" then
         node._staticPanelEntries = entries
     end
 
@@ -662,38 +374,6 @@ local function GetOrderedPanelEntries(node, entries)
     return orderedPositions
 end
 
-local function BuildPanelChildRuntimeGeometry(entry)
-    if type(entry.slots) ~= "table" or #entry.slots == 0 then
-        return nil
-    end
-
-    local child = type(entry) == "table" and entry.child or nil
-    if type(child) == "table"
-        and child._panelRuntimeGeometryCacheSlots == entry.slots
-        and child._panelRuntimeGeometryCacheWidth == entry.width
-        and child._panelRuntimeGeometryCacheAlign == entry.align
-        and type(child._panelRuntimeGeometryCache) == "table" then
-        return child._panelRuntimeGeometryCache
-    end
-
-    local runtimeGeometry = { slots = {} }
-    for _, slotName in ipairs(entry.slots) do
-        runtimeGeometry.slots[#runtimeGeometry.slots + 1] = {
-            name = slotName,
-            start = 0,
-            width = entry.width,
-            align = entry.align,
-        }
-    end
-    if type(child) == "table" then
-        child._panelRuntimeGeometryCacheSlots = entry.slots
-        child._panelRuntimeGeometryCacheWidth = entry.width
-        child._panelRuntimeGeometryCacheAlign = entry.align
-        child._panelRuntimeGeometryCache = runtimeGeometry
-    end
-    return runtimeGeometry
-end
-
 LayoutTypes.panel = {
     handlesChildren = true,
     validate = function(node, prefix)
@@ -714,9 +394,9 @@ LayoutTypes.panel = {
             end
         end
     end,
-    render = function(imgui, node, drawChild, runtimeLayout)
+    render = function(imgui, node, drawChild)
         local rowStart = GetCursorPosXSafe(imgui)
-        local entries = BuildPanelEntries(node, "drawUiNode runtime layout for 'panel'", runtimeLayout)
+        local entries = BuildPanelEntries(node)
         local orderedPositions = GetOrderedPanelEntries(node, entries)
 
         local changed = false
@@ -734,9 +414,7 @@ LayoutTypes.panel = {
                 imgui.SetCursorPosX(rowStart + entry.start)
             end
 
-            local runtimeGeometry = BuildPanelChildRuntimeGeometry(entry)
-
-            if drawChild(entry.child, runtimeGeometry) then
+            if drawChild(entry.child) then
                 changed = true
             end
         end
@@ -745,18 +423,18 @@ LayoutTypes.panel = {
     end,
 }
 
-local function DrawLayoutNode(imgui, node, drawChild, layoutTypes, runtimeLayout)
+local function DrawLayoutNode(imgui, node, drawChild, layoutTypes)
     local layoutType = layoutTypes[node.type]
     if not layoutType then
         return false, false
     end
     -- Layout render contract:
-    --   open = render(imgui, node, drawChild, runtimeLayout)
+    --   open = render(imgui, node, drawChild)
     --   or, when layoutType.handlesChildren == true:
-    --   open, changed = render(imgui, node, drawChild, runtimeLayout)
+    --   open, changed = render(imgui, node, drawChild)
     -- Layouts with handlesChildren = true fully own child rendering and must
     -- report any child-driven change via the second return value.
-    local open, layoutChanged = layoutType.render(imgui, node, drawChild, runtimeLayout)
+    local open, layoutChanged = layoutType.render(imgui, node, drawChild)
     if layoutType.handlesChildren == true then
         return true, layoutChanged == true
     end

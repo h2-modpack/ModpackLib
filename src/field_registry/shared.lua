@@ -35,15 +35,28 @@ shared.NormalizeInteger = NormalizeInteger
 registry.NormalizeInteger = NormalizeInteger
 
 local function NormalizeChoiceValue(node, value)
-    local normalized = value ~= nil and tostring(value) or tostring(node.default or "")
-    if type(node.values) == "table" then
-        for _, candidate in ipairs(node.values) do
-            if candidate == normalized then
-                return normalized
+    local values = node.values
+    if type(values) ~= "table" or #values == 0 then
+        return value ~= nil and value or node.default
+    end
+
+    if value ~= nil then
+        for _, candidate in ipairs(values) do
+            if candidate == value then
+                return candidate
             end
         end
     end
-    return node.default or ""
+
+    if node.default ~= nil then
+        for _, candidate in ipairs(values) do
+            if candidate == node.default then
+                return candidate
+            end
+        end
+    end
+
+    return values[1]
 end
 
 registry.NormalizeChoiceValue = NormalizeChoiceValue
@@ -116,8 +129,7 @@ local function ValidateDynamicSlot(widgetType, node, slotName)
     return false, nil
 end
 
-local function ParseWidgetGeometry(node, prefix, widgetType, geometry, opts)
-    opts = opts or {}
+local function ParseWidgetGeometry(node, prefix, widgetType, geometry)
     if geometry == nil then
         return {}
     end
@@ -167,8 +179,7 @@ local function ParseWidgetGeometry(node, prefix, widgetType, geometry, opts)
                 seen[slotName] = true
 
                 for key, value in pairs(slotSpec) do
-                    if key ~= "name" and key ~= "line" and key ~= "start" and key ~= "width" and key ~= "align"
-                        and not (opts.allowHidden == true and key == "hidden") then
+                    if key ~= "name" and key ~= "line" and key ~= "start" and key ~= "width" and key ~= "align" then
                         libWarn("%s: unknown slot geometry key '%s'", slotPrefix, tostring(key))
                     elseif key == "line" then
                         if type(value) ~= "number" then
@@ -190,10 +201,6 @@ local function ParseWidgetGeometry(node, prefix, widgetType, geometry, opts)
                         if value ~= "center" and value ~= "right" then
                             libWarn("%s.align must be one of 'center' or 'right'", slotPrefix)
                         end
-                    elseif key == "hidden" then
-                        if type(value) ~= "boolean" then
-                            libWarn("%s.hidden must be boolean", slotPrefix)
-                        end
                     end
                 end
 
@@ -207,7 +214,6 @@ local function ParseWidgetGeometry(node, prefix, widgetType, geometry, opts)
                     start = type(slotSpec.start) == "number" and slotSpec.start or nil,
                     width = type(slotSpec.width) == "number" and slotSpec.width > 0 and slotSpec.width or nil,
                     align = (slotSpec.align == "center" or slotSpec.align == "right") and slotSpec.align or nil,
-                    hidden = opts.allowHidden == true and slotSpec.hidden == true or nil,
                 }
             end
         end
@@ -230,83 +236,31 @@ end
 
 registry.ValidateWidgetGeometry = ValidateWidgetGeometry
 
-local function PrepareRuntimeWidgetGeometry(node, prefix, widgetType, geometry)
-    return ParseWidgetGeometry(node, prefix, widgetType, geometry, { allowHidden = true })
-end
-
-registry.PrepareRuntimeWidgetGeometry = PrepareRuntimeWidgetGeometry
-
-local function PrepareLooseWidgetGeometry(geometry)
-    if type(geometry) ~= "table" or type(geometry.slots) ~= "table" then
-        return nil
-    end
-    local parsed = {}
-    for _, slotSpec in ipairs(geometry.slots) do
-        if type(slotSpec) == "table" and type(slotSpec.name) == "string" and slotSpec.name ~= "" then
-            parsed[slotSpec.name] = {
-                line = type(slotSpec.line) == "number" and slotSpec.line >= 1 and math.floor(slotSpec.line) == slotSpec.line
-                    and slotSpec.line or nil,
-                start = type(slotSpec.start) == "number" and slotSpec.start or nil,
-                width = type(slotSpec.width) == "number" and slotSpec.width > 0 and slotSpec.width or nil,
-                align = (slotSpec.align == "center" or slotSpec.align == "right") and slotSpec.align or nil,
-                hidden = slotSpec.hidden == true or nil,
-            }
-        end
-    end
-    return parsed
-end
-
-registry.PrepareLooseWidgetGeometry = PrepareLooseWidgetGeometry
-
-local function ResolveSlotGeometry(node, slotName, runtimeGeometryOverride)
+local function GetSlotGeometry(node, slotName)
     if type(node) ~= "table" then
         return nil
     end
-    local defaultGeometry = node._defaultSlotGeometry
-    local runtimeGeometry = runtimeGeometryOverride ~= nil and runtimeGeometryOverride or node._runtimeSlotGeometry
-    local staticGeometry = node._slotGeometry
-    local defaultSlot = type(defaultGeometry) == "table" and defaultGeometry[slotName] or nil
-    local runtimeSlot = type(runtimeGeometry) == "table" and runtimeGeometry[slotName] or nil
-    local staticSlot = type(staticGeometry) == "table" and staticGeometry[slotName] or nil
+    local defaultSlot = type(node._defaultSlotGeometry) == "table" and node._defaultSlotGeometry[slotName] or nil
+    local staticSlot = type(node._slotGeometry) == "table" and node._slotGeometry[slotName] or nil
 
-    if type(defaultSlot) ~= "table" and type(staticSlot) ~= "table" then
-        return type(runtimeSlot) == "table" and runtimeSlot or nil
+    if type(defaultSlot) ~= "table" then
+        return staticSlot
     end
-    if type(defaultSlot) ~= "table" and type(runtimeSlot) ~= "table" then
-        return type(staticSlot) == "table" and staticSlot or nil
-    end
-    if type(staticSlot) ~= "table" and type(runtimeSlot) ~= "table" then
-        return type(defaultSlot) == "table" and defaultSlot or nil
+    if type(staticSlot) ~= "table" then
+        return defaultSlot
     end
 
     local merged = {}
-    if type(defaultSlot) == "table" then
-        for key, value in pairs(defaultSlot) do
-            merged[key] = value
-        end
+    for key, value in pairs(defaultSlot) do
+        merged[key] = value
     end
-    if type(staticSlot) == "table" then
-        for key, value in pairs(staticSlot) do
-            merged[key] = value
-        end
-    end
-    if type(runtimeSlot) == "table" then
-        for key, value in pairs(runtimeSlot) do
-            if value ~= nil then
-                merged[key] = value
-            end
-        end
+    for key, value in pairs(staticSlot) do
+        merged[key] = value
     end
     if next(merged) == nil then
         return nil
     end
     return merged
-end
-
-registry.ResolveSlotGeometry = ResolveSlotGeometry
-
-local function GetSlotGeometry(node, slotName)
-    return ResolveSlotGeometry(node, slotName, nil)
 end
 
 registry.GetSlotGeometry = GetSlotGeometry
@@ -431,10 +385,9 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart)
                 renderSlots[renderCount] = entry
             end
             local geometry = type(slot.name) == "string" and GetSlotGeometry(node, slot.name) or nil
-            local hidden = slot.hidden == true or (type(geometry) == "table" and geometry.hidden == true)
             entry.slot = slot
             entry.index = index
-            entry.hidden = hidden
+            entry.hidden = slot.hidden == true
             entry.line = (geometry and geometry.line) or slot.line or 1
             entry.start = (geometry and geometry.start) or slot.start
             entry.width = (geometry and geometry.width) or slot.width
@@ -459,7 +412,6 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart)
                 entry.merged = merged
             end
             merged.name = slot.name
-            merged.hidden = slot.hidden == true
             merged.start = entry.start
             merged.width = entry.width
             merged.align = entry.align

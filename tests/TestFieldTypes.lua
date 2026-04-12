@@ -263,35 +263,6 @@ function TestUiNodes:testTextWidgetCanUseValueSlotGeometryAndColor()
     lu.assertEquals(imgui._state.setCursorPosXCalls[2], 54)
 end
 
-function TestUiNodes:testDynamicTextCanRenderComputedTextAndColor()
-    local imgui = makeBasicImgui()
-    local coloredCalls = {}
-    imgui.TextColored = function(r, g, b, a, text)
-        table.insert(coloredCalls, { r = r, g = g, b = b, a = a, text = text })
-    end
-    local node = {
-        type = "dynamicText",
-        getText = function(_, uiState)
-            return "Count: " .. tostring(uiState.view.Count or 0)
-        end,
-        getColor = function(_, uiState)
-            return (uiState.view.Count or 0) > 2 and { 0.2, 1.0, 0.2, 1.0 } or nil
-        end,
-        geometry = {
-            slots = {
-                { name = "value", start = 12, width = 120, align = "center" },
-            },
-        },
-    }
-
-    lib.prepareWidgetNode(node, "DynamicTextWidget")
-    local changed = lib.drawUiNode(imgui, node, { view = { Count = 3 } })
-
-    lu.assertFalse(changed)
-    lu.assertEquals(#coloredCalls, 1)
-    lu.assertEquals(coloredCalls[1].text, "Count: 3")
-    lu.assertEquals(imgui._state.setCursorPosXCalls[1], 12)
-end
 
 function TestUiNodes:testButtonWidgetInvokesOnClickWithUiState()
     local definition = {
@@ -496,6 +467,75 @@ function TestUiNodes:testDrawUiNodeRespectsVisibleIfAnyOf()
     lu.assertFalse(store.uiState.get("Enabled"))
 end
 
+function TestUiNodes:testDrawUiNodeRespectsVisibleIfOnGroupLayout()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "ShowGroup", configKey = "ShowGroup", default = false },
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            {
+                type = "group",
+                visibleIf = "ShowGroup",
+                children = {
+                    { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { ShowGroup = false, Enabled = true })
+    local imgui = makeBasicImgui()
+    local checkboxCalls = 0
+    imgui.Checkbox = function(_, _, current)
+        checkboxCalls = checkboxCalls + 1
+        return current, false
+    end
+
+    local changedHidden = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+    store.uiState.set("ShowGroup", true)
+    local changedShown = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changedHidden)
+    lu.assertFalse(changedShown)
+    lu.assertEquals(checkboxCalls, 1)
+end
+
+function TestUiNodes:testDrawUiNodeRespectsVisibleIfOnPanelLayout()
+    local definition = {
+        storage = {
+            { type = "bool", alias = "ShowPanel", configKey = "ShowPanel", default = false },
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = true },
+        },
+        ui = {
+            {
+                type = "panel",
+                visibleIf = "ShowPanel",
+                columns = {
+                    { name = "content", start = 0, width = 120 },
+                },
+                children = {
+                    { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", panel = { column = "content", line = 1 } },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { ShowPanel = false, Enabled = true })
+    local imgui = makeBasicImgui()
+    local checkboxCalls = 0
+    imgui.Checkbox = function(_, _, current)
+        checkboxCalls = checkboxCalls + 1
+        return current, false
+    end
+
+    local changedHidden = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+    store.uiState.set("ShowPanel", true)
+    local changedShown = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changedHidden)
+    lu.assertFalse(changedShown)
+    lu.assertEquals(checkboxCalls, 1)
+end
+
 function TestUiNodes:testDrawSteppedRangeNodeWritesBothAliases()
     local definition = {
         storage = {
@@ -689,50 +729,6 @@ function TestUiNodes:testCustomWidgetCanUsePublicDrawWidgetSlotsHelper()
     lu.assertEquals(store.uiState.get("Count"), 3)
 end
 
-function TestUiNodes:testDrawWidgetSlotsHelperCanUseLooseGeometryFromDirectNodeStub()
-    local imgui = makeBasicImgui()
-    local node = {
-        geometry = {
-            slots = {
-                { name = "left", start = 0 },
-                { name = "right", start = 80 },
-            },
-        },
-    }
-
-    local changed = lib.drawWidgetSlots(imgui, node, {
-        {
-            name = "left",
-            draw = function()
-                imgui.Text("L")
-                return false
-            end,
-        },
-        {
-            name = "right",
-            draw = function()
-                imgui.Text("R")
-                return false
-            end,
-        },
-    })
-
-    lu.assertFalse(changed)
-    lu.assertNil(node._slotGeometry)
-
-    local saw0 = false
-    local saw80 = false
-    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
-        if x == 0 then
-            saw0 = true
-        elseif x == 80 then
-            saw80 = true
-        end
-    end
-    lu.assertTrue(saw0)
-    lu.assertTrue(saw80)
-end
-
 function TestUiNodes:testPrepareWidgetNodeCachesSlotGeometryForDirectCustomWidget()
     local customTypes = {
         widgets = {
@@ -763,111 +759,6 @@ function TestUiNodes:testPrepareWidgetNodeCachesSlotGeometryForDirectCustomWidge
     lu.assertEquals(node._defaultSlotGeometry.value.width, 60)
     lu.assertEquals(node._defaultSlotGeometry.value.align, "center")
     lu.assertTrue(type(node._imguiId) == "string" and node._imguiId ~= "")
-end
-
-function TestUiNodes:testGetWidgetSummaryReturnsRadioSelectionAndHiddenCounts()
-    local definition = {
-        storage = {
-            { type = "string", alias = "Mode", configKey = "Mode", default = "B" },
-        },
-        ui = {
-            {
-                type = "radio",
-                binds = { value = "Mode" },
-                values = { "A", "B", "C" },
-                displayValues = { A = "Alpha", B = "Beta", C = "Gamma" },
-            },
-        },
-    }
-    local store = makeStore(definition, { Mode = "B" })
-
-    local summary = lib.getWidgetSummary(definition.ui[1], store.uiState, {
-        slots = {
-            { name = "option:3", hidden = true },
-        },
-    })
-
-    lu.assertEquals(summary.type, "radio")
-    lu.assertEquals(summary.data.totalCount, 3)
-    lu.assertEquals(summary.data.visibleCount, 2)
-    lu.assertEquals(summary.data.hiddenCount, 1)
-    lu.assertEquals(summary.data.selectedValue, "B")
-    lu.assertEquals(summary.data.selectedIndex, 2)
-    lu.assertEquals(summary.data.selectedLabel, "Beta")
-end
-
-function TestUiNodes:testGetWidgetSummaryReturnsPackedCheckboxCounts()
-    local definition = {
-        storage = {
-            {
-                type = "packedInt",
-                alias = "Packed",
-                configKey = "Packed",
-                bits = {
-                    { alias = "EnabledA", offset = 0, width = 1, type = "bool", default = true, label = "A" },
-                    { alias = "EnabledB", offset = 1, width = 1, type = "bool", default = false, label = "B" },
-                    { alias = "EnabledC", offset = 2, width = 1, type = "bool", default = true, label = "C" },
-                },
-            },
-        },
-        ui = {
-            {
-                type = "packedCheckboxList",
-                binds = { value = "Packed" },
-                slotCount = 3,
-            },
-        },
-    }
-    local store = makeStore(definition, { Packed = 5 })
-
-    local summary = lib.getWidgetSummary(definition.ui[1], store.uiState, {
-        slots = {
-            { name = "item:2", hidden = true },
-        },
-    })
-
-    lu.assertEquals(summary.type, "packedCheckboxList")
-    lu.assertEquals(summary.data.totalCount, 3)
-    lu.assertEquals(summary.data.visibleCount, 2)
-    lu.assertEquals(summary.data.hiddenCount, 1)
-    lu.assertEquals(summary.data.checkedCount, 2)
-    lu.assertEquals(summary.data.uncheckedCount, 1)
-    lu.assertEquals(summary.data.visibleCheckedCount, 2)
-    lu.assertEquals(summary.data.visibleUncheckedCount, 0)
-end
-
-function TestUiNodes:testGetWidgetSummaryDispatchesToCustomWidgetSummary()
-    local definition = {
-        storage = {
-            { type = "int", alias = "Count", configKey = "Count", default = 4 },
-        },
-        customTypes = {
-            widgets = {
-                summaryProbe = {
-                    binds = { value = { storageType = "int" } },
-                    slots = {},
-                    validate = function(_, _) end,
-                    draw = function() return false end,
-                    summary = function(_, bound)
-                        return {
-                            value = bound.value:get(),
-                            doubled = (bound.value:get() or 0) * 2,
-                        }
-                    end,
-                },
-            },
-        },
-        ui = {
-            { type = "summaryProbe", binds = { value = "Count" } },
-        },
-    }
-    local store = makeStore(definition, { Count = 7 })
-
-    local summary = lib.getWidgetSummary(definition.ui[1], store.uiState, nil, definition.customTypes)
-
-    lu.assertEquals(summary.type, "summaryProbe")
-    lu.assertEquals(summary.data.value, 7)
-    lu.assertEquals(summary.data.doubled, 14)
 end
 
 function TestUiNodes:testNodeGeometryOverridesWidgetDefaultGeometry()
@@ -997,19 +888,19 @@ function TestUiNodes:testPanelLayoutCanPlaceChildrenIntoColumnsAndLines()
                         type = "dropdown",
                         binds = { value = "ModeA" },
                         values = { "A", "B" },
-                        panel = { column = "left", line = 1, slots = { "control" } },
+                        panel = { column = "left", line = 1 },
                     },
                     {
                         type = "dropdown",
                         binds = { value = "ModeB" },
                         values = { "A", "B" },
-                        panel = { column = "right", line = 1, slots = { "control" } },
+                        panel = { column = "right", line = 1 },
                     },
                     {
                         type = "dropdown",
                         binds = { value = "ModeC" },
                         values = { "A", "B" },
-                        panel = { column = "left", line = 2, slots = { "control" } },
+                        panel = { column = "left", line = 2 },
                     },
                 },
             },
@@ -1038,111 +929,6 @@ function TestUiNodes:testPanelLayoutCanPlaceChildrenIntoColumnsAndLines()
     end
     lu.assertTrue(saw0)
     lu.assertTrue(saw120)
-
-    lu.assertEquals(#imgui._state.pushItemWidths, 3)
-    lu.assertEquals(imgui._state.pushItemWidths[1], 100)
-    lu.assertEquals(imgui._state.pushItemWidths[2], 140)
-    lu.assertEquals(imgui._state.pushItemWidths[3], 100)
-end
-
-function TestUiNodes:testPanelRuntimeLayoutCanOverrideChildLineByIndex()
-    local definition = {
-        storage = {},
-        ui = {
-            {
-                type = "panel",
-                columns = {
-                    { name = "left", start = 0 },
-                    { name = "right", start = 80 },
-                },
-                children = {
-                    {
-                        type = "text",
-                        text = "A",
-                        panel = { column = "left", line = 1, slots = { "value" } },
-                    },
-                    {
-                        type = "text",
-                        text = "B",
-                        panel = { column = "right", line = 2, slots = { "value" } },
-                    },
-                },
-            },
-        },
-    }
-    local store = makeStore(definition, {})
-    local imgui = makeBasicImgui()
-    local texts = {}
-    imgui.Text = function(text)
-        texts[#texts + 1] = text
-    end
-
-    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, nil, nil, {
-        children = {
-            [2] = { line = 1 },
-        },
-    })
-
-    lu.assertFalse(changed)
-    lu.assertEquals(imgui._state.sameLineCalls, 1)
-    lu.assertEquals(#texts, 2)
-    lu.assertEquals(texts[1], "A")
-    lu.assertEquals(texts[2], "B")
-end
-
-function TestUiNodes:testPanelRuntimeLayoutCanHideAndRelineChildrenByKey()
-    local definition = {
-        ui = {
-            {
-                type = "panel",
-                columns = {
-                    { name = "left", start = 0 },
-                    { name = "right", start = 120, width = 140 },
-                },
-                children = {
-                    {
-                        type = "text",
-                        text = "A",
-                        panel = { key = "rowA", column = "left", line = 1, slots = { "value" } },
-                    },
-                    {
-                        type = "text",
-                        text = "B",
-                        panel = { key = "rowB", column = "left", line = 2, slots = { "value" } },
-                    },
-                    {
-                        type = "dropdown",
-                        binds = { value = "ModeC" },
-                        label = "",
-                        values = { "A", "B" },
-                        panel = { key = "rowC", column = "right", line = 3, slots = { "control" } },
-                    },
-                },
-            },
-        },
-        storage = {
-            { type = "string", alias = "ModeC", configKey = "ModeC", default = "A" },
-        },
-    }
-    local store = makeStore(definition, { ModeC = "A" })
-    local imgui = makeBasicImgui()
-    local texts = {}
-    imgui.Text = function(text)
-        texts[#texts + 1] = text
-    end
-
-    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, nil, nil, {
-        children = {
-            rowB = { hidden = true },
-            rowC = { line = 1 },
-        },
-    })
-
-    lu.assertFalse(changed)
-    lu.assertEquals(imgui._state.sameLineCalls, 1)
-    lu.assertEquals(#texts, 1)
-    lu.assertEquals(texts[1], "A")
-    lu.assertEquals(#imgui._state.pushItemWidths, 1)
 end
 
 function TestUiNodes:testCustomLayoutCanDelegateChildRenderingThroughDrawChild()
@@ -1156,7 +942,7 @@ function TestUiNodes:testCustomLayoutCanDelegateChildRenderingThroughDrawChild()
                 delegatingLayout = {
                     handlesChildren = true,
                     validate = function() end,
-                    render = function(imgui, node, drawChild)
+                    render = function(_, node, drawChild)
                         sawDrawChild = type(drawChild) == "function"
                         local changed = false
                         for _, child in ipairs(node.children or {}) do
@@ -1187,72 +973,6 @@ function TestUiNodes:testCustomLayoutCanDelegateChildRenderingThroughDrawChild()
     lu.assertTrue(sawDrawChild)
     lu.assertTrue(changed)
     lu.assertFalse(store.uiState.get("Enabled"))
-end
-
-function TestUiNodes:testCustomLayoutCanForwardRuntimeLayoutThroughDrawChild()
-    local sawRuntimeLayout = false
-    local checkboxCalls = 0
-    local definition = {
-        storage = {
-            { type = "bool", alias = "EnabledA", configKey = "EnabledA", default = true },
-            { type = "bool", alias = "EnabledB", configKey = "EnabledB", default = true },
-        },
-        customTypes = {
-            layouts = {
-                delegatingLayout = {
-                    handlesChildren = true,
-                    validate = function() end,
-                    render = function(imgui, node, drawChild, runtimeLayout)
-                        sawRuntimeLayout = runtimeLayout ~= nil
-                        return true, drawChild(node.children[1], nil, runtimeLayout)
-                    end,
-                },
-            },
-        },
-        ui = {
-            {
-                type = "delegatingLayout",
-                children = {
-                    {
-                        type = "panel",
-                        columns = {
-                            { name = "left", start = 0 },
-                        },
-                        children = {
-                            {
-                                type = "checkbox",
-                                binds = { value = "EnabledA" },
-                                label = "A",
-                                panel = { key = "rowA", column = "left", line = 1, slots = { "control" } },
-                            },
-                            {
-                                type = "checkbox",
-                                binds = { value = "EnabledB" },
-                                label = "B",
-                                panel = { key = "rowB", column = "left", line = 2, slots = { "control" } },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    }
-    local store = makeStore(definition, { EnabledA = true, EnabledB = true })
-    local imgui = makeBasicImgui()
-    imgui.Checkbox = function(_, _, current)
-        checkboxCalls = checkboxCalls + 1
-        return current, false
-    end
-
-    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, definition.customTypes, nil, {
-        children = {
-            rowB = { hidden = true },
-        },
-    })
-
-    lu.assertFalse(changed)
-    lu.assertTrue(sawRuntimeLayout)
-    lu.assertEquals(checkboxCalls, 1)
 end
 
 function TestUiNodes:testHorizontalTabsLayoutRendersOnlyActiveTabChild()
@@ -1348,47 +1068,6 @@ function TestUiNodes:testVerticalTabsLayoutSelectsAndRendersActiveChild()
     lu.assertFalse(store.uiState.get("EnabledB"))
 end
 
-function TestUiNodes:testVerticalTabsRuntimeLayoutCanHideChildrenAndFallbackActiveTab()
-    local definition = {
-        storage = {
-            { type = "bool", alias = "EnabledA", configKey = "EnabledA", default = true },
-            { type = "bool", alias = "EnabledB", configKey = "EnabledB", default = true },
-            { type = "bool", alias = "EnabledC", configKey = "EnabledC", default = true },
-        },
-        ui = {
-            {
-                type = "verticalTabs",
-                id = "RuntimeVerticalTabs",
-                children = {
-                    { type = "checkbox", binds = { value = "EnabledA" }, label = "Enabled A", tabLabel = "First", tabId = "a" },
-                    { type = "checkbox", binds = { value = "EnabledB" }, label = "Enabled B", tabLabel = "Second", tabId = "b" },
-                    { type = "checkbox", binds = { value = "EnabledC" }, label = "Enabled C", tabLabel = "Third", tabId = "c" },
-                },
-            },
-        },
-    }
-    local store = makeStore(definition, { EnabledA = true, EnabledB = true, EnabledC = true })
-    local imgui = makeBasicImgui()
-    local node = definition.ui[1]
-    node._activeTabKey = "b"
-    imgui._state.checkboxResponses = { false }
-
-    local changed = lib.drawUiNode(imgui, node, store.uiState, nil, nil, nil, {
-        children = {
-            b = { hidden = true },
-        },
-    })
-
-    lu.assertTrue(changed)
-    lu.assertEquals(node._activeTabKey, "a")
-    lu.assertEquals(#imgui._state.selectableCalls, 2)
-    lu.assertEquals(imgui._state.selectableCalls[1].label, "First")
-    lu.assertEquals(imgui._state.selectableCalls[2].label, "Third")
-    lu.assertFalse(store.uiState.get("EnabledA"))
-    lu.assertTrue(store.uiState.get("EnabledB"))
-    lu.assertTrue(store.uiState.get("EnabledC"))
-end
-
 function TestUiNodes:testDropdownGeometryControlsStartAndWidth()
     local definition = {
         storage = {
@@ -1418,6 +1097,44 @@ function TestUiNodes:testDropdownGeometryControlsStartAndWidth()
     lu.assertEquals(imgui._state.sameLineCalls, 1)
     lu.assertEquals(imgui._state.setCursorPosXCalls[1], 232)
     lu.assertEquals(imgui._state.pushItemWidths[1], 180)
+end
+
+function TestUiNodes:testDropdownCanBindIntChoiceValues()
+    local definition = {
+        storage = {
+            { type = "int", alias = "Mode", configKey = "Mode", default = 1, min = 0, max = 3 },
+        },
+        ui = {
+            {
+                type = "dropdown",
+                binds = { value = "Mode" },
+                label = "Mode",
+                values = { 0, 1, 2, 3 },
+                displayValues = {
+                    [0] = "Off",
+                    [1] = "One",
+                    [2] = "Two",
+                    [3] = "Three",
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Mode = 1 })
+    local imgui = makeBasicImgui()
+    local seenPreview = nil
+    imgui.BeginCombo = function(_, preview)
+        seenPreview = preview
+        return true
+    end
+    imgui.Selectable = function(label)
+        return label == "Two"
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertEquals(seenPreview, "One")
+    lu.assertEquals(store.uiState.get("Mode"), 2)
 end
 
 function TestUiNodes:testSteppedRangeGeometryAppliesWithoutLabel()
@@ -1677,6 +1394,36 @@ function TestUiNodes:testRadioGeometryCanLayOutOptionsAcrossLines()
     lu.assertTrue(second80)
 end
 
+function TestUiNodes:testRadioCanBindIntChoiceValues()
+    local definition = {
+        storage = {
+            { type = "int", alias = "Mode", configKey = "Mode", default = 1, min = 0, max = 3 },
+        },
+        ui = {
+            {
+                type = "radio",
+                binds = { value = "Mode" },
+                label = "Mode",
+                values = { 0, 1, 2, 3 },
+                displayValues = {
+                    [0] = "Off",
+                    [1] = "One",
+                    [2] = "Two",
+                    [3] = "Three",
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Mode = 1 })
+    local imgui = makeBasicImgui()
+    imgui._state.selectables = { false, false, true, false }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertEquals(store.uiState.get("Mode"), 2)
+end
+
 function TestUiNodes:testPackedCheckboxListCanUseDeclaredItemSlots()
     local definition = {
         storage = {
@@ -1731,52 +1478,6 @@ function TestUiNodes:testPackedCheckboxListCanUseDeclaredItemSlots()
     end
     lu.assertTrue(first0)
     lu.assertTrue(first80)
-end
-
-function TestUiNodes:testDrawUiNodeCanApplyRuntimeSlotGeometryOverrides()
-    local definition = {
-        storage = {
-            { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
-        },
-        ui = {
-            {
-                type = "radio",
-                binds = { value = "Mode" },
-                values = { "A", "B", "C" },
-            },
-        },
-    }
-    local store = makeStore(definition, { Mode = "A" })
-    local imgui = makeBasicImgui()
-    local radioCalls = 0
-    imgui.RadioButton = function()
-        radioCalls = radioCalls + 1
-        return false
-    end
-
-    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState, nil, nil, {
-        slots = {
-            { name = "option:1", line = 1, start = 0 },
-            { name = "option:2", hidden = true },
-            { name = "option:3", line = 1, start = 80 },
-        },
-    })
-
-    lu.assertFalse(changed)
-    lu.assertEquals(radioCalls, 2)
-    lu.assertEquals(imgui._state.newLineCalls, 0)
-
-    local saw0 = false
-    local saw80 = false
-    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
-        if x == 0 then
-            saw0 = true
-        elseif x == 80 then
-            saw80 = true
-        end
-    end
-    lu.assertTrue(saw0)
-    lu.assertTrue(saw80)
 end
 
 function TestUiNodes:testMappedDropdownCanUseCustomPreviewAndSelectionMapping()
@@ -1840,28 +1541,319 @@ function TestUiNodes:testMappedDropdownCanUseCustomPreviewAndSelectionMapping()
     lu.assertEquals(store.uiState.view.Mask, 3)
 end
 
-function TestUiNodes:testBuildIndexedHiddenSlotGeometryBuildsHiddenIndexedSlots()
-    local geometry, visibleCount = lib.buildIndexedHiddenSlotGeometry({
-        { hidden = false },
-        { hidden = true },
-        { hidden = false },
-    }, "item:", {
-        line = function(_, _, visibleIndex, hidden)
-            if hidden then
-                return nil
-            end
-            return visibleIndex
-        end,
-    })
+function TestUiNodes:testMappedRadioCanUseCustomSelectionMapping()
+    local definition = {
+        storage = {
+            { type = "int", alias = "Mask", configKey = "Mask", default = 0, min = 0, max = 7 },
+        },
+        ui = {
+            {
+                type = "mappedRadio",
+                binds = { value = "Mask" },
+                label = "",
+                getOptions = function(_, bound)
+                    local current = bound.value:get() or 0
+                    return {
+                        {
+                            label = "None",
+                            selected = current == 0,
+                            onSelect = function(_, boundValue)
+                                if current ~= 0 then
+                                    boundValue:set(0)
+                                    return true
+                                end
+                                return false
+                            end,
+                        },
+                        {
+                            label = "Force",
+                            selected = current == 3,
+                            onSelect = function(_, boundValue)
+                                if current ~= 3 then
+                                    boundValue:set(3)
+                                    return true
+                                end
+                                return false
+                            end,
+                        },
+                    }
+                end,
+            },
+        },
+    }
+    local store = makeStore(definition, { Mask = 0 })
+    local imgui = makeBasicImgui()
+    imgui._state.selectables = { false, true }
 
-    lu.assertEquals(visibleCount, 2)
-    lu.assertEquals(geometry.slots[1].name, "item:1")
-    lu.assertNil(geometry.slots[1].hidden)
-    lu.assertEquals(geometry.slots[1].line, 1)
-    lu.assertEquals(geometry.slots[2].name, "item:2")
-    lu.assertTrue(geometry.slots[2].hidden)
-    lu.assertNil(geometry.slots[2].line)
-    lu.assertEquals(geometry.slots[3].name, "item:3")
-    lu.assertNil(geometry.slots[3].hidden)
-    lu.assertEquals(geometry.slots[3].line, 2)
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertEquals(store.uiState.view.Mask, 3)
+end
+
+function TestUiNodes:testStepperCanDisplayEnumLabelsAndColors()
+    local definition = {
+        storage = {
+            { type = "int", alias = "Rarity", configKey = "Rarity", default = 2, min = 0, max = 3 },
+        },
+        ui = {
+            {
+                type = "stepper",
+                binds = { value = "Rarity" },
+                label = "Rarity",
+                min = 0,
+                max = 3,
+                displayValues = {
+                    [0] = "Common",
+                    [1] = "Rare",
+                    [2] = "Epic",
+                    [3] = "Heroic",
+                },
+                valueColors = {
+                    [2] = { 0.7, 0.2, 0.9, 1 },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Rarity = 2 })
+    local imgui = makeBasicImgui()
+    local seenColored = nil
+    imgui.TextColored = function(r, g, b, a, text)
+        seenColored = { r, g, b, a, text }
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertNotNil(seenColored)
+    lu.assertEquals(seenColored[5], "Epic")
+    lu.assertAlmostEquals(seenColored[1], 0.7)
+    lu.assertAlmostEquals(seenColored[2], 0.2)
+    lu.assertAlmostEquals(seenColored[3], 0.9)
+    lu.assertAlmostEquals(seenColored[4], 1)
+end
+
+function TestUiNodes:testPackedCheckboxListRendersAllItemsWithEmptyFilter()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false, label = "Beta" },
+                    { alias = "FlagC", offset = 2, width = 1, type = "bool", default = false, label = "Gamma" },
+                },
+            },
+            { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags", filterText = "Filter" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0, Filter = "" })
+    local imgui = makeBasicImgui()
+    local checkboxLabels = {}
+    imgui.Checkbox = function(label, current)
+        checkboxLabels[#checkboxLabels + 1] = label
+        return current, false
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(#checkboxLabels, 3)
+    lu.assertEquals(checkboxLabels[1], "Alpha")
+    lu.assertEquals(checkboxLabels[2], "Beta")
+    lu.assertEquals(checkboxLabels[3], "Gamma")
+end
+
+function TestUiNodes:testPackedCheckboxListFiltersItemsByLabelSubstring()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false, label = "Citrus" },
+                    { alias = "FlagC", offset = 2, width = 1, type = "bool", default = false, label = "Gamma" },
+                },
+            },
+            { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags", filterText = "Filter" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0, Filter = "a" })
+    local imgui = makeBasicImgui()
+    local checkboxLabels = {}
+    imgui.Checkbox = function(label, current)
+        checkboxLabels[#checkboxLabels + 1] = label
+        return current, false
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(#checkboxLabels, 2)
+    lu.assertEquals(checkboxLabels[1], "Alpha")
+    lu.assertEquals(checkboxLabels[2], "Gamma")
+end
+
+function TestUiNodes:testPackedCheckboxListRendersAllItemsWhenFilterBindIsOmitted()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false, label = "Beta" },
+                    { alias = "FlagC", offset = 2, width = 1, type = "bool", default = false, label = "Gamma" },
+                },
+            },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0 })
+    local imgui = makeBasicImgui()
+    local checkboxLabels = {}
+    imgui.Checkbox = function(label, current)
+        checkboxLabels[#checkboxLabels + 1] = label
+        return current, false
+    end
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(#checkboxLabels, 3)
+    lu.assertEquals(checkboxLabels[1], "Alpha")
+    lu.assertEquals(checkboxLabels[2], "Beta")
+    lu.assertEquals(checkboxLabels[3], "Gamma")
+end
+
+function TestUiNodes:testPackedCheckboxListDoesNotRenderItsOwnFilterInput()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                },
+            },
+            { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags", filterText = "Filter" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0, Filter = "" })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    lu.assertEquals(#imgui._state.inputTextCalls, 0)
+end
+
+function TestUiNodes:testPackedCheckboxListCheckboxChangeMarksChanged()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false, label = "Beta" },
+                },
+            },
+            { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags", filterText = "Filter" },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0, Filter = "" })
+    local imgui = makeBasicImgui()
+    imgui._state.checkboxResponses = { true }
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertTrue(changed)
+    lu.assertTrue(store.uiState.get("FlagA"))
+    lu.assertFalse(store.uiState.get("FlagB"))
+end
+
+function TestUiNodes:testPackedCheckboxListGeometryCompactsVisibleItemsIntoItemSlots()
+    local definition = {
+        storage = {
+            {
+                type = "packedInt",
+                alias = "Flags",
+                configKey = "Flags",
+                bits = {
+                    { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false, label = "Alpha" },
+                    { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false, label = "Beta" },
+                    { alias = "FlagC", offset = 2, width = 1, type = "bool", default = false, label = "Gamma" },
+                },
+            },
+            { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+        },
+        ui = {
+            {
+                type = "packedCheckboxList",
+                binds = { value = "Flags", filterText = "Filter" },
+                slotCount = 2,
+                geometry = {
+                    slots = {
+                        { name = "item:1", line = 1, start = 24 },
+                        { name = "item:2", line = 2, start = 60 },
+                    },
+                },
+            },
+        },
+    }
+    local store = makeStore(definition, { Flags = 0, Filter = "a" })
+    local imgui = makeBasicImgui()
+
+    local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
+
+    lu.assertFalse(changed)
+    local first24 = nil
+    local first60 = nil
+    for index, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 24 and first24 == nil then
+            first24 = index
+        elseif x == 60 and first60 == nil then
+            first60 = index
+        end
+    end
+    lu.assertNotNil(first24)
+    lu.assertNotNil(first60)
+    lu.assertTrue(first24 < first60)
 end

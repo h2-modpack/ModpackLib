@@ -16,7 +16,6 @@ local CalcTextWidth = registry.CalcTextWidth
 local EstimateButtonWidth = registry.EstimateButtonWidth
 local DrawWidgetSlots = registry.DrawWidgetSlots
 local GetSlotGeometry = registry.GetSlotGeometry
-local ResolveSlotGeometry = registry.ResolveSlotGeometry
 local ShowPreparedTooltip = registry.ShowPreparedTooltip
 local AlignSlotContent = registry.AlignSlotContent
 
@@ -138,13 +137,19 @@ local function CreateStepperSlotTemplate(node, options)
             local renderedValue = ctx and ctx.renderedValue or NormalizeInteger(node, node.default)
             ctx.valueSlotStart = GetCursorPosXSafe(imgui)
             ctx.valueSlotWidth = slot.width
-            if node._lastStepperVal ~= renderedValue then
-                node._lastStepperStr = tostring(renderedValue)
+            if node._lastStepperVal ~= renderedValue or node._lastStepperStr == nil then
+                local displayValue = node.displayValues and node.displayValues[renderedValue]
+                node._lastStepperStr = tostring(displayValue ~= nil and displayValue or renderedValue)
                 node._lastStepperVal = renderedValue
             end
             local valueText = node._lastStepperStr
             AlignSlotContent(imgui, slot, CalcTextWidth(imgui, valueText))
-            imgui.Text(valueText)
+            local color = node._valueColors and node._valueColors[renderedValue] or nil
+            if type(color) == "table" then
+                imgui.TextColored(color[1], color[2], color[3], color[4], valueText)
+            else
+                imgui.Text(valueText)
+            end
             return false
         end,
     })
@@ -294,57 +299,6 @@ WidgetTypes.text = {
     end,
     draw = function(imgui, node)
         return DrawWidgetSlots(imgui, node, node._textSlots, GetCursorPosXSafe(imgui))
-    end,
-}
-
-WidgetTypes.dynamicText = {
-    binds = {},
-    slots = { "value" },
-    validate = function(node, prefix)
-        if type(node.getText) ~= "function" then
-            libWarn("%s: dynamicText getText must be function", prefix)
-        end
-        if node.getColor ~= nil and type(node.getColor) ~= "function" then
-            libWarn("%s: dynamicText getColor must be function", prefix)
-        end
-        if node.getTooltip ~= nil and type(node.getTooltip) ~= "function" then
-            libWarn("%s: dynamicText getTooltip must be function", prefix)
-        end
-        PrepareWidgetText(node)
-        node._dynamicTextSlots = {
-            {
-                name = "value",
-                draw = function(imgui, slot)
-                    local ctx = node._dynamicTextCtx or {}
-                    local text = tostring(ctx.text or "")
-                    local color = ctx.color
-                    AlignSlotContent(imgui, slot, CalcTextWidth(imgui, text))
-                    if type(color) == "table" then
-                        imgui.TextColored(color[1], color[2], color[3], color[4], text)
-                    else
-                        imgui.Text(text)
-                    end
-                    if ctx.hasTooltip == true and imgui.IsItemHovered() then
-                        imgui.SetTooltip(ctx.tooltipText)
-                    else
-                        ShowPreparedTooltip(imgui, node)
-                    end
-                    return false
-                end,
-            },
-        }
-    end,
-    draw = function(imgui, node, _, _, uiState)
-        local ctx = node._dynamicTextCtx or {}
-        local text = type(node.getText) == "function" and node.getText(node, uiState) or ""
-        local color = type(node.getColor) == "function" and node.getColor(node, uiState) or nil
-        local tooltipText = type(node.getTooltip) == "function" and node.getTooltip(node, uiState) or nil
-        ctx.text = tostring(text or "")
-        ctx.color = NormalizeColor(color)
-        ctx.tooltipText = tooltipText ~= nil and tostring(tooltipText) or ""
-        ctx.hasTooltip = ctx.tooltipText ~= ""
-        node._dynamicTextCtx = ctx
-        return DrawWidgetSlots(imgui, node, node._dynamicTextSlots, GetCursorPosXSafe(imgui))
     end,
 }
 
@@ -529,7 +483,7 @@ WidgetTypes.inputText = {
 }
 
 WidgetTypes.dropdown = {
-    binds = { value = { storageType = "string" } },
+    binds = { value = { storageType = { "string", "int" } } },
     slots = { "label", "control" },
     validate = function(node, prefix)
         if not node.values then
@@ -540,6 +494,8 @@ WidgetTypes.dropdown = {
             for _, value in ipairs(node.values) do
                 if type(value) == "string" and string.find(value, "|", 1, true) then
                     libWarn("%s: value '%s' contains reserved separator '|'", prefix, value)
+                elseif type(value) ~= "string" and (type(value) ~= "number" or value ~= math.floor(value)) then
+                    libWarn("%s: dropdown values must contain only strings or integers", prefix)
                 end
             end
         end
@@ -682,7 +638,7 @@ WidgetTypes.mappedDropdown = {
 }
 
 WidgetTypes.radio = {
-    binds = { value = { storageType = "string" } },
+    binds = { value = { storageType = { "string", "int" } } },
     slots = { "label" },
     dynamicSlots = function(node, slotName)
         local optionIndex = type(slotName) == "string" and tonumber(string.match(slotName, "^option:(%d+)$")) or nil
@@ -705,6 +661,8 @@ WidgetTypes.radio = {
             for _, value in ipairs(node.values) do
                 if type(value) == "string" and string.find(value, "|", 1, true) then
                     libWarn("%s: value '%s' contains reserved separator '|'", prefix, value)
+                elseif type(value) ~= "string" and (type(value) ~= "number" or value ~= math.floor(value)) then
+                    libWarn("%s: radio values must contain only strings or integers", prefix)
                 end
             end
         end
@@ -763,41 +721,109 @@ WidgetTypes.radio = {
         end
         return changed
     end,
-    summary = function(node, bound, runtimeGeometry)
-        local values = node.values or {}
-        local current = bound.value and NormalizeChoiceValue(node, bound.value:get()) or nil
-        local summary = {
-            totalCount = #values,
-            visibleCount = 0,
-            hiddenCount = 0,
-            selectedValue = current,
-            selectedLabel = nil,
-            selectedIndex = nil,
-        }
-        for index, candidate in ipairs(values) do
-            local slot = ResolveSlotGeometry(node, "option:" .. tostring(index), runtimeGeometry)
-            local hidden = type(slot) == "table" and slot.hidden == true or false
-            if hidden then
-                summary.hiddenCount = summary.hiddenCount + 1
+}
+
+WidgetTypes.mappedRadio = {
+    binds = { value = {} },
+    slots = { "label" },
+    validate = function(node, prefix)
+        if type(node.getOptions) ~= "function" then
+            libWarn("%s: mappedRadio getOptions must be function", prefix)
+        end
+        PrepareWidgetText(node, node.binds and node.binds.value)
+        node._mappedRadioSlots = {}
+        local label = node._label or ""
+        if label ~= "" then
+            table.insert(node._mappedRadioSlots, {
+                name = "label",
+                draw = function(imgui)
+                    imgui.Text(label)
+                    ShowPreparedTooltip(imgui, node)
+                    return false
+                end,
+            })
+        end
+    end,
+    validateGeometry = function(node, prefix, geometry)
+        local _ = node
+        WarnIgnoredSlotKeys(prefix, geometry, "label", { "width", "align" }, "mappedRadio")
+    end,
+    draw = function(imgui, node, bound, _, uiState)
+        local ctx = node._mappedRadioCtx or {}
+        ctx.boundValue = bound.value
+        ctx.current = bound.value and bound.value.get and bound.value:get() or nil
+        ctx.uiState = uiState
+        ctx.options = type(node.getOptions) == "function"
+            and node.getOptions(node, bound, uiState)
+            or {}
+        node._mappedRadioCtx = ctx
+
+        local changed = DrawWidgetSlots(imgui, node, node._mappedRadioSlots, GetCursorPosXSafe(imgui))
+        local hasLabel = (node._label or "") ~= ""
+        for index, option in ipairs(ctx.options or {}) do
+            local label
+            local selected
+            if type(option) == "table" then
+                label = tostring(option.label or option.value or "")
+                selected = option.selected == true
             else
-                summary.visibleCount = summary.visibleCount + 1
+                label = tostring(option or "")
+                selected = ctx.current ~= nil and option == ctx.current or false
             end
-            if candidate == current then
-                summary.selectedIndex = index
-                summary.selectedLabel = ChoiceDisplay(node, candidate)
+
+            if hasLabel or index > 1 then
+                imgui.SameLine()
+            end
+
+            if imgui.RadioButton(label, selected) then
+                if type(option) == "table" and type(option.onSelect) == "function" then
+                    changed = option.onSelect(option, ctx.boundValue, ctx.uiState, node) == true or changed
+                else
+                    local nextValue = type(option) == "table" and option.value or option
+                    if nextValue ~= ctx.current then
+                        ctx.boundValue:set(nextValue)
+                        ctx.current = nextValue
+                        changed = true
+                    end
+                end
             end
         end
-        return summary
+
+        if not hasLabel and #(ctx.options or {}) > 0 then
+            imgui.NewLine()
+        end
+
+        return changed
     end,
 }
 
 local function ValidateStepper(node, prefix)
     StorageTypes.int.validate(node, prefix)
+    node._valueColors = nil
     if node.step ~= nil and (type(node.step) ~= "number" or node.step <= 0) then
         libWarn("%s: stepper step must be a positive number", prefix)
     end
     if node.fastStep ~= nil and (type(node.fastStep) ~= "number" or node.fastStep <= 0) then
         libWarn("%s: stepper fastStep must be a positive number", prefix)
+    end
+    if node.displayValues ~= nil and type(node.displayValues) ~= "table" then
+        libWarn("%s: stepper displayValues must be a table", prefix)
+    end
+    if node.valueColors ~= nil then
+        if type(node.valueColors) ~= "table" then
+            libWarn("%s: stepper valueColors must be a table", prefix)
+        else
+            local normalizedColors = {}
+            for key, color in pairs(node.valueColors) do
+                local normalized = NormalizeColor(color)
+                if normalized == nil then
+                    libWarn("%s: stepper valueColors[%s] must be a 3- or 4-number color table", prefix, tostring(key))
+                else
+                    normalizedColors[key] = normalized
+                end
+            end
+            node._valueColors = normalizedColors
+        end
     end
     node._step = math.floor(tonumber(node.step) or 1)
     node._fastStep = node.fastStep and math.floor(node.fastStep) or nil
@@ -902,7 +928,10 @@ WidgetTypes.steppedRange = {
 }
 
 WidgetTypes.packedCheckboxList = {
-    binds = { value = { storageType = "int" } },
+    binds = {
+        value = { storageType = "int", rootType = "packedInt" },
+        filterText = { storageType = "string", optional = true },
+    },
     dynamicSlots = function(node, slotName)
         local itemIndex = type(slotName) == "string" and tonumber(string.match(slotName, "^item:(%d+)$")) or nil
         if itemIndex == nil then
@@ -930,13 +959,12 @@ WidgetTypes.packedCheckboxList = {
         end
 
         -- packedCheckboxList renders items directly in draw(), but it still needs
-        -- stable per-item slot descriptors so static/runtime geometry can target
+        -- stable per-item slot descriptors so static geometry can target
         -- item:N consistently without rebuilding slot metadata every frame.
         node._packedSlots = BuildIndexedSlots(node.slotCount, function(index)
             return {
                 name = "item:" .. tostring(index),
                 line = index,
-                hidden = false,
             }
         end)
     end,
@@ -949,28 +977,28 @@ WidgetTypes.packedCheckboxList = {
         if not children or #children == 0 then
             libWarn("packedCheckboxList: no packed children for alias '%s'; bind to a packedInt root",
                 tostring(node.binds and node.binds.value or "?"))
-            return
-        end
-
-        node._packedCtx = node._packedCtx or {}
-        node._packedCtx.children = children
-        for index = 1, node.slotCount do
-            local child = children[index]
-            node._packedSlots[index].hidden = child == nil
+            return false
         end
 
         local changed = false
+        local filterBind = bound.filterText
+        local filterText = filterBind and filterBind.get() or ""
+        if type(filterText) ~= "string" then filterText = "" end
+        local lowerFilter = filterText:lower()
+        local hasFilter = lowerFilter ~= ""
         local rowStart = GetCursorPosXSafe(imgui)
         local currentLine = nil
+        local visibleIndex = 0
 
-        for index = 1, node.slotCount do
-            local child = children[index]
+        for _, child in ipairs(children) do
             if child ~= nil then
-                local slot = node._packedSlots[index]
-                local slotName = slot.name
-                local geometry = GetSlotGeometry(node, slotName)
-                local hidden = slot.hidden == true or (type(geometry) == "table" and geometry.hidden == true)
-                if not hidden then
+                local label = child.label or ""
+                local visible = not hasFilter or label:lower():find(lowerFilter, 1, true) ~= nil
+                if visible and visibleIndex < node.slotCount then
+                    visibleIndex = visibleIndex + 1
+                    local slot = node._packedSlots[visibleIndex]
+                    local slotName = slot.name
+                    local geometry = GetSlotGeometry(node, slotName)
                     local line = (geometry and geometry.line) or slot.line or 1
                     local start = (geometry and geometry.start) or slot.start
                     if currentLine ~= line then
@@ -983,10 +1011,10 @@ WidgetTypes.packedCheckboxList = {
                         imgui.SetCursorPosX(rowStart + start)
                     end
 
-                    imgui.PushID((slotName or "item") .. "_" .. tostring(index))
+                    imgui.PushID((slotName or "item") .. "_" .. tostring(visibleIndex))
                     local val = child.get()
                     if val == nil then val = false end
-                    local newVal, childChanged = imgui.Checkbox(child.label, val == true)
+                    local newVal, childChanged = imgui.Checkbox(label, val == true)
                     if childChanged then
                         child.set(newVal)
                         changed = true
@@ -997,40 +1025,5 @@ WidgetTypes.packedCheckboxList = {
         end
 
         return changed
-    end,
-    summary = function(node, bound, runtimeGeometry)
-        local children = bound.value and bound.value.children or {}
-        local summary = {
-            totalCount = #children,
-            visibleCount = 0,
-            hiddenCount = 0,
-            checkedCount = 0,
-            uncheckedCount = 0,
-            visibleCheckedCount = 0,
-            visibleUncheckedCount = 0,
-        }
-
-        for index, child in ipairs(children) do
-            local slot = ResolveSlotGeometry(node, "item:" .. tostring(index), runtimeGeometry)
-            local hidden = type(slot) == "table" and slot.hidden == true or false
-            local checked = child.get() == true
-            if checked then
-                summary.checkedCount = summary.checkedCount + 1
-            else
-                summary.uncheckedCount = summary.uncheckedCount + 1
-            end
-            if hidden then
-                summary.hiddenCount = summary.hiddenCount + 1
-            else
-                summary.visibleCount = summary.visibleCount + 1
-                if checked then
-                    summary.visibleCheckedCount = summary.visibleCheckedCount + 1
-                else
-                    summary.visibleUncheckedCount = summary.visibleUncheckedCount + 1
-                end
-            end
-        end
-
-        return summary
     end,
 }

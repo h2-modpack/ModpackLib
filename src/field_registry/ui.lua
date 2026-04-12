@@ -8,7 +8,6 @@ local registry = shared.fieldRegistry
 local ValidateCustomTypes = registry.ValidateCustomTypes
 local MergeCustomTypes = registry.MergeCustomTypes
 local ValidateWidgetGeometry = registry.ValidateWidgetGeometry
-local PrepareRuntimeWidgetGeometry = registry.PrepareRuntimeWidgetGeometry
 local EnsurePreparedStorage = registry.EnsurePreparedStorage
 local DrawLayoutNode = registry.DrawLayoutNode
 local nextAnonymousImguiId = 0
@@ -53,10 +52,13 @@ end
 
 registry.BuildBoundEntries = BuildBoundEntries
 
-local function AssertUiBind(prefix, node, storageNodes, bindName, expectedKind)
+local function AssertUiBind(prefix, node, storageNodes, bindName, bindSpec)
     local alias = node.binds and node.binds[bindName]
+    local optional = type(bindSpec) == "table" and bindSpec.optional == true
     if type(alias) ~= "string" or alias == "" then
-        libWarn("%s: missing binds.%s", prefix, bindName)
+        if not optional then
+            libWarn("%s: missing binds.%s", prefix, bindName)
+        end
         return
     end
     local storageNode = storageNodes and storageNodes[alias] or nil
@@ -64,9 +66,36 @@ local function AssertUiBind(prefix, node, storageNodes, bindName, expectedKind)
         libWarn("%s: binds.%s unknown alias '%s'", prefix, bindName, tostring(alias))
         return
     end
-    if expectedKind ~= nil and storageNode._valueKind ~= expectedKind then
-        libWarn("%s: bound alias '%s' is %s, expected %s (binds.%s)",
-            prefix, tostring(alias), tostring(storageNode._valueKind), tostring(expectedKind), bindName)
+    local expectedKind = type(bindSpec) == "table" and bindSpec.storageType or bindSpec
+    if expectedKind ~= nil then
+        local expectedKinds = type(expectedKind) == "table" and expectedKind or { expectedKind }
+
+        local matchedKind = false
+        for _, kind in ipairs(expectedKinds) do
+            if storageNode._valueKind == kind then
+                matchedKind = true
+                break
+            end
+        end
+
+        if not matchedKind then
+            libWarn("%s: bound alias '%s' is %s, expected %s (binds.%s)",
+                prefix,
+                tostring(alias),
+                tostring(storageNode._valueKind),
+                table.concat(expectedKinds, " or "),
+                bindName)
+        end
+    end
+
+    local expectedRootType = type(bindSpec) == "table" and bindSpec.rootType or nil
+    if expectedRootType ~= nil and storageNode.type ~= expectedRootType then
+        libWarn("%s: bound alias '%s' is root type %s, expected %s (binds.%s)",
+            prefix,
+            tostring(alias),
+            tostring(storageNode.type),
+            tostring(expectedRootType),
+            bindName)
     end
 end
 
@@ -211,7 +240,7 @@ local function ValidateUiNode(node, prefix, storageNodes, widgetTypes, layoutTyp
             libWarn("%s: quickId must be a non-empty string", prefix)
         end
         for bindName, bindSpec in pairs(widgetType.binds) do
-            AssertUiBind(prefix, node, storageNodes, bindName, bindSpec.storageType)
+            AssertUiBind(prefix, node, storageNodes, bindName, bindSpec)
         end
         EnsureNodeImguiId(node, prefix, widgetType)
         node._quickId = DeriveQuickUiNodeId(node)
@@ -323,18 +352,18 @@ function public.isUiNodeVisible(node, view)
     return value == true
 end
 
-function public.drawUiNode(imgui, node, uiState, width, customTypes, runtimeGeometry, runtimeLayout)
+function public.drawUiNode(imgui, node, uiState, width, customTypes)
     if not public.isUiNodeVisible(node, uiState and uiState.view) then
         return false
     end
 
     local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
 
-    local function drawChild(child, childRuntimeGeometry, childRuntimeLayout)
-        return public.drawUiNode(imgui, child, uiState, width, customTypes, childRuntimeGeometry, childRuntimeLayout)
+    local function drawChild(child)
+        return public.drawUiNode(imgui, child, uiState, width, customTypes)
     end
 
-    local wasLayout, layoutChanged = DrawLayoutNode(imgui, node, drawChild, layoutTypes, runtimeLayout)
+    local wasLayout, layoutChanged = DrawLayoutNode(imgui, node, drawChild, layoutTypes)
     if wasLayout then return layoutChanged end
 
     local widgetType = widgetTypes[node.type]
@@ -354,28 +383,11 @@ function public.drawUiNode(imgui, node, uiState, width, customTypes, runtimeGeom
 
     local drawChanged = false
     if type(widgetType.draw) == "function" then
-        local previousRuntimeGeometry = node._runtimeSlotGeometry
-        if runtimeGeometry ~= nil then
-            if node._runtimeSlotGeometrySource == runtimeGeometry and type(node._runtimeSlotGeometryCache) == "table" then
-                node._runtimeSlotGeometry = node._runtimeSlotGeometryCache
-            else
-                node._runtimeSlotGeometry = PrepareRuntimeWidgetGeometry(
-                    node,
-                    "drawUiNode runtime geometry for '" .. tostring(node.type) .. "'",
-                    widgetType,
-                    runtimeGeometry)
-                node._runtimeSlotGeometrySource = runtimeGeometry
-                node._runtimeSlotGeometryCache = node._runtimeSlotGeometry
-            end
-        else
-            node._runtimeSlotGeometry = nil
-        end
         local ok, result = xpcall(function()
             return widgetType.draw(imgui, node, bound, width, uiState) == true
         end, function(err)
             return debug.traceback(err, 2)
         end)
-        node._runtimeSlotGeometry = previousRuntimeGeometry
         if not ok then
             error(result, 0)
         end
@@ -402,61 +414,6 @@ function public.drawUiTree(imgui, nodes, uiState, width, customTypes)
     return changed
 end
 
-function public.getWidgetSummary(node, uiState, runtimeGeometry, customTypes)
-    local _ = customTypes
-    if type(node) ~= "table" then
-        return nil
-    end
-    if not public.isUiNodeVisible(node, uiState and uiState.view) then
-        return nil
-    end
-
-    local widgetType = node._widgetType
-    if not widgetType then
-        libWarn("getWidgetSummary: node '%s' is not prepared; call lib.prepareUiNode(...) or lib.prepareWidgetNode(...) first",
-            tostring(node.type))
-        return nil
-    end
-    if type(widgetType.summary) ~= "function" then
-        return nil
-    end
-
-    local bound = node._boundCache
-    if bound == nil or node._boundCacheUiState ~= uiState or node._boundCacheWidgetType ~= widgetType then
-        bound = BuildBoundEntries(node, widgetType, uiState)
-    end
-
-    local preparedRuntimeGeometry = nil
-    if runtimeGeometry ~= nil then
-        if node._runtimeSlotGeometrySource == runtimeGeometry and type(node._runtimeSlotGeometryCache) == "table" then
-            preparedRuntimeGeometry = node._runtimeSlotGeometryCache
-        else
-            preparedRuntimeGeometry = PrepareRuntimeWidgetGeometry(
-                node,
-                "getWidgetSummary runtime geometry for '" .. tostring(node.type) .. "'",
-                widgetType,
-                runtimeGeometry)
-            node._runtimeSlotGeometrySource = runtimeGeometry
-            node._runtimeSlotGeometryCache = preparedRuntimeGeometry
-        end
-    end
-
-    local ok, result = xpcall(function()
-        return widgetType.summary(node, bound, preparedRuntimeGeometry, uiState)
-    end, function(err)
-        return debug.traceback(err, 2)
-    end)
-    if not ok then
-        error(result, 0)
-    end
-    if result == nil then
-        return nil
-    end
-    return {
-        type = tostring(node.type),
-        data = result,
-    }
-end
 
 function public.collectQuickUiNodes(nodes, out, customTypes)
     out = out or {}

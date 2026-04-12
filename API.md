@@ -199,7 +199,7 @@ Validates and prepares an ordered UI node list.
 
 Evaluates `visibleIf` against the current alias-value table.
 
-### `lib.drawUiNode(imgui, node, uiState, width?, customTypes?, runtimeGeometry?, runtimeLayout?)`
+### `lib.drawUiNode(imgui, node, uiState, width?, customTypes?)`
 
 Draws one prepared UI node against alias-backed `uiState`.
 
@@ -207,41 +207,9 @@ Supports:
 - scalar widgets through `binds`
 - `steppedRange` through `binds.min` / `binds.max`
 - `packedCheckboxList` through packed child alias expansion
+- `packedCheckboxList` through packed child alias expansion and optional filter-string binding
 - layout recursion through `children`
 - module-local custom widget/layout registries through `customTypes`
-
-`runtimeGeometry` uses the same `{ slots = { ... } }` shape as declared `node.geometry`, but is validated at draw time against the node's fixed slot schema.
-Runtime geometry may override:
-- `line`
-- `start`
-- `width`
-- `align`
-- `hidden`
-
-`runtimeLayout` is a separate layout-side override surface.
-In v1, `panel` and `verticalTabs` consume it:
-
-```lua
-{
-    children = {
-        rowA = { hidden = true },
-        [7] = { line = 3 },
-    },
-}
-```
-
-Supported child override fields in v1:
-- `hidden`
-- `line`
-
-For `verticalTabs`, only `hidden` is implemented in v1.
-Targets may use:
-- child `tabId`
-- otherwise child `tabLabel`
-- or the 1-based child index as a fallback
-
-`verticalTabs` keeps declaration order in v1.
-`runtimeLayout.children[*].order` is reserved for future support and currently warns.
 
 ### `lib.drawUiTree(imgui, nodes, uiState, width?, customTypes?)`
 
@@ -253,7 +221,6 @@ Public helper for custom widget `draw(...)` implementations that want Lib-manage
 
 Behavior:
 - uses the prepared slot geometry from `node.geometry`
-- respects runtime geometry overrides already applied to `node`
 - defaults `rowStart` to the current cursor X
 - returns `true` if any slot draw returns `true`
 
@@ -262,40 +229,6 @@ Behavior:
 Applies slot-local `width` / `align` positioning for already-measured content.
 
 Useful inside custom widget slot draws when the widget knows the content width but wants Lib to handle the centering/right-align math.
-
-### `lib.buildIndexedHiddenSlotGeometry(items, slotPrefix, opts?)`
-
-Planner-side helper for prefixed indexed widget slots such as:
-- `item:1`, `item:2`, ...
-- `option:1`, `option:2`, ...
-
-This helper is mainly for building runtime geometry that hides some indexed slots without moving slot-assignment logic into the widget itself.
-
-Returns:
-- `runtimeGeometry`
-- `visibleCount`
-
-Example:
-
-```lua
-local runtimeGeometry, visibleCount = lib.buildIndexedHiddenSlotGeometry(rows, "item:", {
-    isHidden = function(row)
-        return row.visible ~= true
-    end,
-    line = function(_, _, visibleIndex, hidden)
-        return hidden and nil or visibleIndex
-    end,
-})
-```
-
-Rules:
-- `items` may be a list or a non-negative integer count
-- `slotPrefix` must be a non-empty string
-- `opts.isHidden(item, index, nextVisibleIndex)` may decide per-slot hiding
-- `nextVisibleIndex` means "the visible slot index this item would receive if shown", not "the number of already-confirmed visible items"
-- if `opts.isHidden` is omitted, list items with `item.hidden == true` are hidden
-- `opts.line(item, index, visibleIndexOrNil, hidden)` may supply a runtime `line`
-- the helper does not assign `start`, `width`, or `align`
 
 ### `lib.collectQuickUiNodes(nodes, out?, customTypes?)`
 
@@ -343,7 +276,7 @@ definition.customTypes = {
         myLayout = {
             handlesChildren = true, -- optional: layout owns child drawing
             validate = function(node, prefix) ... end,
-            render = function(imgui, node, drawChild, runtimeLayout) ... end,
+            render = function(imgui, node, drawChild) ... end,
         },
     },
 }
@@ -353,6 +286,7 @@ Rules:
 - custom widget and layout type names may not collide with built-in names
 - custom widgets must declare `binds`
 - custom widgets must declare `draw(...)`
+- widget bind specs may declare `storageType` for value-kind matching, optional `rootType` for exact storage node matching, and optional `optional = true` for non-required binds
 - custom widgets may optionally declare `slots = { ... }` to whitelist supported `node.geometry.slots[*].name` values
 - custom widgets may optionally declare `defaultGeometry = { slots = { ... } }` as their baseline slot layout
 - custom widgets may optionally declare `dynamicSlots(node, slotName) -> ok, err` for declaration-time-dependent slot names
@@ -360,16 +294,16 @@ Rules:
 
 Custom widget `draw(...)` may either:
 - ignore slots entirely and render imperatively
-- or call `lib.drawWidgetSlots(...)` to let Lib handle slot ordering, default geometry, node geometry, and runtime geometry overrides
+- or call `lib.drawWidgetSlots(...)` to let Lib handle slot ordering, default geometry, and node geometry
 
 When a custom widget uses `lib.drawWidgetSlots(...)`, `slots` and `defaultGeometry` become the normal placement surface rather than validation-only metadata.
 
 Custom layout `render(...)` contract:
-- `render(imgui, node, drawChild, runtimeLayout?)` always receives `drawChild`
+- `render(imgui, node, drawChild)` always receives `drawChild`
 - return `open` for simple layouts that let Lib recurse children normally
 - layouts that own child placement should declare `handlesChildren = true`
 - when `handlesChildren = true`, `render(...)` should return `open, changed`
-- when `handlesChildren = true`, the layout owns child rendering and should call `drawChild(child, runtimeGeometry?, runtimeLayout?)` itself
+- when `handlesChildren = true`, the layout owns child rendering and should call `drawChild(child)` itself
 - when `handlesChildren = true`, `changed` must include any child-driven state change
 
 ## Widget Geometry
@@ -392,14 +326,14 @@ Certain widgets support a widget-local `geometry` bag for manual horizontal plac
 
 Current built-in support:
 - `text`: `value`
-- `dynamicText`: `value`
 - `button`: `control`
 - `confirmButton`: `control`
 - `checkbox`: `control`
 - `inputText`: `label`, `control`
-- `dropdown`: `label`, `control`
+- `dropdown`: `label`, `control` (`string` or `int` choice storage)
 - `mappedDropdown`: `label`, `control`
-- `radio`: `label`, dynamic `option:N`
+- `mappedRadio`: `label`
+- `radio`: `label`, dynamic `option:N` (`string` or `int` choice storage)
 - `stepper`: `label`, `decrement`, `value`, `increment`, optional `fastDecrement`, `fastIncrement`
 - `steppedRange`: `label`, `min.*`, `separator`, `max.*`
 - `packedCheckboxList`: dynamic `item:N`; `slotCount` defaults to `32` when omitted
@@ -418,14 +352,12 @@ Behavior:
 - `packedCheckboxList` supports `item:N` slot names
 - `slotCount` is the declaration-time slot capacity for `packedCheckboxList`; if omitted, Lib defaults it to `32`
 - packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity
-- runtime geometry overrides may additionally set `hidden = true` on a slot to skip rendering it without reflow
 - if a slot is omitted, the widget falls back to its default rendering for that slot
 - unknown top-level geometry keys and unsupported slot names warn during validation
-- `radio` option slots and `packedCheckboxList` item slots meaningfully use `line` and `start`; `width` and `align` are accepted by the generic parser but currently warn because those widgets do not consume them
+- `radio` option slots and packed list `item:N` slots meaningfully use `line` and `start`; `width` and `align` are accepted by the generic parser but currently warn because those widgets do not consume them
 
 Built-in slot intent:
 - `text.value`: use `line` / `start`; `width` + `align` are meaningful
-- `dynamicText.value`: use `line` / `start`; `width` + `align` are meaningful
 - `button.control`: use `line` / `start`; `width` + `align` are meaningful when you want to place the button inside a fixed slot
 - `confirmButton.control`: use `line` / `start`; `width` + `align` are most meaningful for the idle button placement; the armed confirm row expands inline
 - `checkbox.control`: use `line` / `start`; `width` / `align` are not meaningful
@@ -435,8 +367,9 @@ Built-in slot intent:
 - `dropdown.control`: use `line` / `start`; `width` is meaningful; `align` is not
 - `mappedDropdown.label`: use `line` / `start`; `width` / `align` are not meaningful
 - `mappedDropdown.control`: use `line` / `start`; `width` is meaningful; `align` is not
+- `mappedRadio.label`: use `line` / `start`; `width` / `align` are not meaningful
 - `radio.option:N`: use `line` / `start`; `width` / `align` are not meaningful and currently warn
-- `stepper.value`: use `line` / `start`; `width` + `align` are meaningful
+- `stepper.value`: use `line` / `start`; `width` + `align` are meaningful; `displayValues` / `valueColors` affect rendered presentation only
 - `stepper` button slots: use `line` / `start`; `width` / `align` are not meaningful
 - `steppedRange.min.value`, `steppedRange.max.value`: use `line` / `start`; `width` + `align` are meaningful
 - `steppedRange.separator`: use `line` / `start`; `width` + `align` are meaningful
@@ -566,13 +499,13 @@ Lib-owned widget registry.
 
 Built-ins:
 - `text`
-- `dynamicText`
 - `button`
 - `confirmButton`
 - `checkbox`
 - `inputText`
 - `dropdown`
 - `mappedDropdown`
+- `mappedRadio`
 - `radio`
 - `stepper`
 - `steppedRange`
@@ -581,10 +514,6 @@ Built-ins:
 Widget definitions may also declare optional flat capability functions such as:
 - `dynamicSlots(node, slotName)`
 - `defaultGeometry(node)`
-- `summary(node, bound, runtimeGeometry, uiState)`
-
-`summary(...)` is an optional query capability for widgets. Lib does not call it during normal draw.
-Prepared nodes retain their resolved widget type, and `lib.getWidgetSummary(...)` is the public wrapper that calls that prepared widget capability for both built-in and custom widgets.
 
 ### `lib.WidgetHelpers`
 
@@ -594,22 +523,6 @@ Current status:
 - intentionally empty
 - not part of the runtime widget contract
 - reserved so future widget helper APIs do not need a breaking top-level naming change
-
-### `lib.getWidgetSummary(node, uiState, runtimeGeometry, customTypes)`
-
-Queries a widget's optional `summary(...)` capability through the node's prepared widget type.
-
-Behavior:
-- requires a prepared node from `lib.prepareUiNode(...)` or `lib.prepareWidgetNode(...)`
-- returns `nil` when the node is not a widget, is hidden by `visibleIf`, or the widget type does not define `summary`
-- warns when called on an unprepared node
-- passes the same bound surface widgets receive in `draw(...)`
-- applies prepared runtime geometry before calling `summary(...)`
-- works for both built-in widgets and `definition.customTypes.widgets` after preparation
-- returns a fixed outer table when summary data exists:
-  - `type`: widget type name
-  - `data`: widget-specific summary payload
-- `data` is intentionally widget-specific; callers are expected to know the widget type they declared and interpret `data` accordingly
 
 ### `lib.LayoutTypes`
 

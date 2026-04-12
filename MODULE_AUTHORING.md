@@ -253,7 +253,7 @@ Rules:
 
 When to use transient aliases:
 - use transient aliases when multiple UI elements need to coordinate through the same state
-- use transient aliases when planners, `visibleIf`, or layout decisions need to read the same UI state generically
+- use transient aliases when declarative UI conditions like `visibleIf` or multiple widgets need to read the same UI state generically
 - keep state module-local when it is only internal navigation or scratch for one contained widget/view
 - do not promote purely local widget navigation into transient storage unless another UI surface actually needs to read it
 
@@ -319,7 +319,7 @@ Examples:
             type = "dropdown",
             binds = { value = "Mode" },
             values = { "Vanilla", "Chaos" },
-            panel = { column = "control", line = 1, slots = { "control" } },
+            panel = { column = "control", line = 1 },
         },
     },
 }
@@ -344,11 +344,16 @@ public.definition.customTypes = {
         myLayout = {
             handlesChildren = true, -- optional: layout owns child drawing
             validate = function(node, prefix) end,
-            render = function(imgui, node, drawChild, runtimeLayout) return true end,
+            render = function(imgui, node, drawChild) return true end,
         },
     },
 }
 ```
+
+Widget bind specs may declare:
+- `storageType` for value-kind matching such as `bool`, `int`, or `string`
+- optional `rootType` for exact storage node matching such as `packedInt`
+- optional `optional = true` when the widget can operate without that bind being declared
 
 These custom types can be used by:
 - hosted regular-module UI
@@ -358,10 +363,9 @@ These custom types can be used by:
 
 Custom widget `draw(...)` may stay fully imperative, or it may call `lib.drawWidgetSlots(...)` to let Lib manage slot ordering and geometry merging.
 `dynamicSlots(...)` is the optional escape hatch for declaration-time-dependent slot names like `option:N`.
-`summary(...)` is the optional query-time companion to `draw(...)`. Prepared nodes retain their resolved widget type, and `lib.getWidgetSummary(...)` is the public wrapper that calls that capability. Like draw helpers, it expects a prepared node.
-Custom layout `render(...)` always receives `drawChild` and optional `runtimeLayout`.
+Custom layout `render(...)` always receives `drawChild`.
 Simple layouts can ignore it and return just `open`.
-Layouts that want to own child placement should declare `handlesChildren = true`, return `open, changed`, and call `drawChild(child, runtimeGeometry?, runtimeLayout?)` themselves.
+Layouts that want to own child placement should declare `handlesChildren = true`, return `open, changed`, and call `drawChild(child)` themselves.
 
 Built-in widgets may also accept a widget-local `geometry` bag for manual horizontal placement.
 Geometry is now expressed through `geometry.slots`, where each slot descriptor may declare:
@@ -400,24 +404,6 @@ Meaningful built-in slot intent:
 - `steppedRange.separator`: may also use `width` + `align` if you want the separator text in a fixed slot
 - `packedCheckboxList.item:N`: use `line` / `start` to place rows; do not expect `width` / `align` to do anything useful
 
-`lib.drawUiNode(...)` may also receive a separate layout-side `runtimeLayout`
-override. In v1, only `panel` consumes it:
-
-```lua
-{
-    children = {
-        rowA = { hidden = true },
-        [7] = { line = 3 },
-    },
-}
-```
-
-`panel` child placement metadata may now also declare:
-- `panel.key`
-
-Use `panel.key` when you want a stable runtime override target for child
-visibility or row remapping.
-
 ### `steppedRange`
 
 This is now a pure widget bound to two aliases:
@@ -453,6 +439,12 @@ ui = {
 
 ### `visibleIf`
 
+`visibleIf` is part of the static contract. Lib evaluates the condition from managed alias
+state before widget/layout dispatch. It is conditional visibility, not planner-style runtime
+tree mutation.
+
+`visibleIf` works on both widgets and layouts such as `group` and `panel`.
+
 Simple bool gate:
 
 ```lua
@@ -469,6 +461,21 @@ Multiple allowed values:
 
 ```lua
 { type = "stepper", binds = { value = "Count" }, label = "Count", visibleIf = { alias = "Mode", anyOf = { "Forced", "Chaos" } } }
+```
+
+Layout gate:
+
+```lua
+{
+    type = "panel",
+    visibleIf = "ShowAdvanced",
+    columns = {
+        { name = "content", start = 0, width = 180 },
+    },
+    children = {
+        { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", panel = { column = "content", line = 1 } },
+    },
+}
 ```
 
 ### Quick UI filtering
@@ -552,6 +559,21 @@ public.definition.ui = {
                 panel = { line = 1, column = "action" },
             },
         },
+    },
+}
+```
+
+Optional bind example:
+
+```lua
+public.definition.ui = {
+    {
+        type = "packedCheckboxList",
+        binds = {
+            value = "PackedFlags",
+            filterText = "FilterText", -- optional; omit to render all packed rows
+        },
+        slotCount = 16,
     },
 }
 ```

@@ -312,6 +312,33 @@ function TestUiValidation:testValidateUiAcceptsRawStorage()
     lu.assertEquals(#Warnings, 0)
 end
 
+function TestUiValidation:testOptionalBindMayBeOmittedWithoutWarning()
+    local storage = {
+        { type = "int", alias = "Count", configKey = "Count", default = 2, min = 1, max = 5 },
+    }
+    lib.validateStorage(storage, "OptionalBind")
+
+    lib.validateUi({
+        {
+            type = "fancyWidget",
+            binds = { value = "Count" },
+        },
+    }, "OptionalBind", storage, {
+        widgets = {
+            fancyWidget = {
+                binds = {
+                    value = { storageType = "int" },
+                    filterText = { storageType = "string", optional = true },
+                },
+                validate = function() end,
+                draw = function() end,
+            },
+        },
+    })
+
+    lu.assertEquals(#Warnings, 0)
+end
+
 function TestUiValidation:testWidgetGeometryRejectsUnknownKeys()
     local storage = {
         { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
@@ -334,6 +361,74 @@ function TestUiValidation:testWidgetGeometryRejectsUnknownKeys()
     }, "Geometry", storage)
 
     assertWarningContains("geometry key 'controlStart' is not supported; geometry only supports 'slots'")
+end
+
+function TestUiValidation:testDropdownAcceptsIntBinding()
+    local storage = {
+        { type = "int", alias = "Mode", configKey = "Mode", default = 1, min = 0, max = 3 },
+    }
+    lib.validateStorage(storage, "DropdownInt")
+
+    lib.validateUi({
+        {
+            type = "dropdown",
+            binds = { value = "Mode" },
+            values = { 0, 1, 2, 3 },
+        },
+    }, "DropdownInt", storage)
+
+    lu.assertEquals(#Warnings, 0)
+end
+
+function TestUiValidation:testRadioAcceptsIntBinding()
+    local storage = {
+        { type = "int", alias = "Mode", configKey = "Mode", default = 1, min = 0, max = 3 },
+    }
+    lib.validateStorage(storage, "RadioInt")
+
+    lib.validateUi({
+        {
+            type = "radio",
+            binds = { value = "Mode" },
+            values = { 0, 1, 2, 3 },
+        },
+    }, "RadioInt", storage)
+
+    lu.assertEquals(#Warnings, 0)
+end
+
+function TestUiValidation:testDropdownWarnsOnNonScalarChoiceValues()
+    local storage = {
+        { type = "int", alias = "Mode", configKey = "Mode", default = 1, min = 0, max = 3 },
+    }
+    lib.validateStorage(storage, "DropdownBadValues")
+
+    lib.validateUi({
+        {
+            type = "dropdown",
+            binds = { value = "Mode" },
+            values = { 0, true, 2 },
+        },
+    }, "DropdownBadValues", storage)
+
+    assertWarningContains("dropdown values must contain only strings or integers")
+end
+
+function TestUiValidation:testRadioWarnsOnNonScalarChoiceValues()
+    local storage = {
+        { type = "int", alias = "Mode", configKey = "Mode", default = 1, min = 0, max = 3 },
+    }
+    lib.validateStorage(storage, "RadioBadValues")
+
+    lib.validateUi({
+        {
+            type = "radio",
+            binds = { value = "Mode" },
+            values = { 0, true, 2 },
+        },
+    }, "RadioBadValues", storage)
+
+    assertWarningContains("radio values must contain only strings or integers")
 end
 
 function TestUiValidation:testCustomWidgetGeometryIsValidated()
@@ -364,20 +459,6 @@ function TestUiValidation:testCustomWidgetGeometryIsValidated()
     })
 
     lu.assertEquals(#Warnings, 0)
-end
-
-function TestUiValidation:testDynamicTextRequiresGetTextFunction()
-    lib.validateUi({
-        {
-            type = "dynamicText",
-            getColor = "bad",
-            getTooltip = {},
-        },
-    }, "DynamicTextValidation", {})
-
-    assertWarningContains("dynamicText getText must be function")
-    assertWarningContains("dynamicText getColor must be function")
-    assertWarningContains("dynamicText getTooltip must be function")
 end
 
 function TestUiValidation:testMergeCustomTypesCachesByTableIdentity()
@@ -430,6 +511,43 @@ function TestUiValidation:testValueAlignRequiresKnownAlignment()
     }, "ValueAlign", storage)
 
     assertWarningContains("geometry.slots[1].align must be one of 'center' or 'right'")
+end
+
+function TestUiValidation:testMappedRadioRequiresGetOptions()
+    local storage = {
+        { type = "int", alias = "Mode", configKey = "Mode", default = 0, min = 0, max = 3 },
+    }
+    lib.validateStorage(storage, "MappedRadio")
+
+    lib.validateUi({
+        {
+            type = "mappedRadio",
+            binds = { value = "Mode" },
+        },
+    }, "MappedRadio", storage)
+
+    assertWarningContains("mappedRadio getOptions must be function")
+end
+
+function TestUiValidation:testStepperValueColorsMustBeColorTables()
+    local storage = {
+        { type = "int", alias = "Count", configKey = "Count", default = 2, min = 1, max = 5 },
+    }
+    lib.validateStorage(storage, "StepperValueColors")
+
+    lib.validateUi({
+        {
+            type = "stepper",
+            binds = { value = "Count" },
+            min = 1,
+            max = 5,
+            valueColors = {
+                [2] = "bad",
+            },
+        },
+    }, "StepperValueColors", storage)
+
+    assertWarningContains("stepper valueColors[2] must be a 3- or 4-number color table")
 end
 
 function TestUiValidation:testValueAlignRequiresValueWidth()
@@ -546,55 +664,6 @@ function TestUiValidation:testPanelDuplicateChildKeyWarns()
     assertWarningContains("duplicate panel child key 'rowA'")
 end
 
-function TestUiValidation:testPanelRuntimeLayoutWarnsOnMalformedOverrides()
-    local node = {
-        type = "panel",
-        columns = {
-            { name = "left", start = 0 },
-        },
-        children = {
-            { type = "text", text = "A", panel = { key = "rowA", column = "left", line = 1, slots = { "value" } } },
-        },
-    }
-    local imgui = {
-        Text = function() end,
-        TextColored = function() end,
-        CalcTextSize = function(text) return #(tostring(text or "")) * 8 end,
-        SameLine = function() end,
-        NewLine = function() end,
-        IsItemHovered = function() return false end,
-        SetTooltip = function() end,
-        PushItemWidth = function() end,
-        PopItemWidth = function() end,
-        PushID = function() end,
-        PopID = function() end,
-        Indent = function() end,
-        Unindent = function() end,
-        Separator = function() end,
-        CollapsingHeader = function() return true end,
-        GetCursorPosX = function() return 0 end,
-        SetCursorPosX = function() end,
-    }
-
-    lib.prepareUiNode(node, "PanelRuntimeLayoutWarn", {})
-    lib.drawUiNode(imgui, node, { view = {} }, nil, nil, nil, {
-        foo = true,
-        children = {
-            rowA = { line = 0, bogus = true },
-            missing = { hidden = true },
-            [1] = "bad",
-            [2] = { hidden = true },
-        },
-    })
-
-    assertWarningContains("unknown runtime layout key 'foo'")
-    assertWarningContains("children[rowA].line must be a positive integer")
-    assertWarningContains("children[rowA]: unknown child override key 'bogus'")
-    assertWarningContains("children[1] override must be a table")
-    assertWarningContains("children[2] does not match any child index")
-    assertWarningContains("children[missing] does not match any child.panel.key")
-end
-
 function TestUiValidation:testRadioOptionSlotMustBeInRange()
     local storage = {
         { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
@@ -706,6 +775,22 @@ function TestUiValidation:testPackedCheckboxListSlotCountMustBePositiveInteger()
     assertWarningContains("packedCheckboxList slotCount must be a positive integer")
 end
 
+function TestUiValidation:testPackedCheckboxListRequiresPackedIntRoot()
+    local storage = {
+        { type = "int", alias = "PackedFlags", configKey = "PackedFlags", default = 0, min = 0, max = 7 },
+    }
+    lib.validateStorage(storage, "PackedRootRequired")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags" },
+        },
+    }, "PackedRootRequired", storage)
+
+    assertWarningContains("bound alias 'PackedFlags' is root type int, expected packedInt (binds.value)")
+end
+
 function TestUiValidation:testPackedCheckboxListItemSlotMustBeWithinDeclaredSlotCount()
     local storage = {
         {
@@ -761,6 +846,110 @@ function TestUiValidation:testPackedCheckboxListUsesDefaultSlotCountWhenOmitted(
     }, "PackedImplicitSlotCount", storage)
 
     assertWarningContains("geometry slot 'item:33' is out of range for packedCheckboxList slotCount 32")
+end
+
+function TestUiValidation:testPackedCheckboxListRequiresPackedIntRootWhenFilterBindIsUsed()
+    local storage = {
+        { type = "int", alias = "PackedFlags", configKey = "PackedFlags", default = 0, min = 0, max = 7 },
+        { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+    }
+    lib.validateStorage(storage, "FilteredPackedRootRequired")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags", filterText = "Filter" },
+        },
+    }, "FilteredPackedRootRequired", storage)
+
+    assertWarningContains("bound alias 'PackedFlags' is root type int, expected packedInt (binds.value)")
+end
+
+function TestUiValidation:testPackedCheckboxListSlotCountMustBePositiveIntegerWhenFilterBindIsUsed()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+            },
+        },
+        { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+    }
+    lib.validateStorage(storage, "FilteredSlotCount")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags", filterText = "Filter" },
+            slotCount = 1.5,
+        },
+    }, "FilteredSlotCount", storage)
+
+    assertWarningContains("packedCheckboxList slotCount must be a positive integer")
+end
+
+function TestUiValidation:testPackedCheckboxListItemSlotMustBeWithinDeclaredSlotCountWhenFilterBindIsUsed()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+            },
+        },
+        { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+    }
+    lib.validateStorage(storage, "FilteredItemSlot")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags", filterText = "Filter" },
+            slotCount = 2,
+            geometry = {
+                slots = {
+                    { name = "item:3", line = 1, start = 0 },
+                },
+            },
+        },
+    }, "FilteredItemSlot", storage)
+
+    assertWarningContains("geometry slot 'item:3' is out of range for packedCheckboxList slotCount 2")
+end
+
+function TestUiValidation:testPackedCheckboxListWarnsWhenWidthOrAlignAreIgnoredByItemSlotsWhenFilterBindIsUsed()
+    local storage = {
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            bits = {
+                { alias = "FlagA", offset = 0, width = 1, type = "bool", default = false },
+                { alias = "FlagB", offset = 1, width = 1, type = "bool", default = false },
+            },
+        },
+        { type = "string", alias = "Filter", configKey = "Filter", default = "" },
+    }
+    lib.validateStorage(storage, "FilteredIgnoredGeometry")
+
+    lib.validateUi({
+        {
+            type = "packedCheckboxList",
+            binds = { value = "PackedFlags", filterText = "Filter" },
+            slotCount = 2,
+            geometry = {
+                slots = {
+                    { name = "item:1", line = 1, start = 0, width = 100, align = "center" },
+                },
+            },
+        },
+    }, "FilteredIgnoredGeometry", storage)
+
+    assertWarningContains("geometry slot 'item:1' width is ignored by widget type 'packedCheckboxList'")
+    assertWarningContains("geometry slot 'item:1' align is ignored by widget type 'packedCheckboxList'")
 end
 
 function TestUiValidation:testPackedCheckboxListWarnsWhenWidthOrAlignAreIgnoredByItemSlots()
@@ -852,54 +1041,4 @@ function TestUiValidation:testVerticalTabsRequiresIdAndValidSidebarWidth()
     assertWarningContains("verticalTabs sidebarWidth must be a positive number")
     assertWarningContains("verticalTabs child tabLabel must be a non-empty string")
     assertWarningContains("verticalTabs child tabId must be a non-empty string")
-end
-
-function TestUiValidation:testVerticalTabsRuntimeLayoutWarnsOnMalformedOverrides()
-    local node = {
-        type = "verticalTabs",
-        id = "VerticalTabsWarn",
-        children = {
-            { type = "text", text = "A", tabLabel = "First", tabId = "a" },
-            { type = "text", text = "B", tabLabel = "Second", tabId = "b" },
-        },
-    }
-    local imgui = {
-        BeginChild = function() return true end,
-        EndChild = function() end,
-        Selectable = function() return false end,
-        SameLine = function() end,
-        Text = function() end,
-        TextColored = function() end,
-        CalcTextSize = function(text) return #(tostring(text or "")) * 8 end,
-        IsItemHovered = function() return false end,
-        SetTooltip = function() end,
-        PushItemWidth = function() end,
-        PopItemWidth = function() end,
-        PushID = function() end,
-        PopID = function() end,
-        Indent = function() end,
-        Unindent = function() end,
-        Separator = function() end,
-        CollapsingHeader = function() return true end,
-        GetCursorPosX = function() return 0 end,
-        SetCursorPosX = function() end,
-    }
-
-    lib.prepareUiNode(node, "VerticalTabsRuntimeLayoutWarn", {})
-    lib.drawUiNode(imgui, node, { view = {} }, nil, nil, nil, {
-        foo = true,
-        children = {
-            a = { hidden = "yes", order = 1 },
-            missing = { hidden = true },
-            [3] = { hidden = true },
-            [1] = "bad",
-        },
-    })
-
-    assertWarningContains("unknown runtime layout key 'foo'")
-    assertWarningContains("children[a].hidden must be boolean")
-    assertWarningContains("children[a].order is reserved for future vertical/horizontal tab ordering support")
-    assertWarningContains("children[missing] does not match any tab child key")
-    assertWarningContains("children[3] does not match any child index")
-    assertWarningContains("children[1] override must be a table")
 end
