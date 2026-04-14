@@ -265,8 +265,7 @@ function TestUiValidation:testLayoutChildrenValidateRecursively()
 
     lib.validateUi({
         {
-            type = "group",
-            label = "Outer",
+            type = "vstack",
             children = {
                 { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", visibleIf = "Gate" },
             },
@@ -737,23 +736,6 @@ function TestUiValidation:testSlotLineMustBePositiveInteger()
     assertWarningContains("geometry.slots[1].line must be a positive integer")
 end
 
-function TestUiValidation:testPanelDuplicateChildKeyWarns()
-    lib.validateUi({
-        {
-            type = "panel",
-            columns = {
-                { name = "left", start = 0 },
-            },
-            children = {
-                { type = "text", text = "A", panel = { key = "rowA", column = "left", line = 1, slots = { "value" } } },
-                { type = "text", text = "B", panel = { key = "rowA", column = "left", line = 2, slots = { "value" } } },
-            },
-        },
-    }, "PanelDuplicateKey", {})
-
-    assertWarningContains("duplicate panel child key 'rowA'")
-end
-
 function TestUiValidation:testRadioOptionSlotMustBeInRange()
     local storage = {
         { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
@@ -1073,67 +1055,20 @@ function TestUiValidation:testPackedCheckboxListWarnsWhenWidthOrAlignAreIgnoredB
     assertWarningContains("geometry slot 'item:1' align is ignored by widget type 'packedCheckboxList'")
 end
 
-function TestUiValidation:testPanelChildColumnMustExist()
-    local storage = {
-        { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
-    }
-    lib.validateStorage(storage, "PanelColumn")
-
+function TestUiValidation:testTabsRequiresIdAndChildTabLabels()
     lib.validateUi({
         {
-            type = "panel",
-            columns = {
-                { name = "left", start = 0, width = 100 },
-            },
-            children = {
-                {
-                    type = "dropdown",
-                    binds = { value = "Mode" },
-                    values = { "A", "B" },
-                    panel = { column = "right", line = 1, slots = { "control" } },
-                },
-            },
-        },
-    }, "PanelColumn", storage)
-
-    assertWarningContains("panel.column references unknown column 'right'")
-end
-
-function TestUiValidation:testPanelIdMustBeNonEmptyString()
-    lib.validateUi({
-        {
-            type = "panel",
-            id = false,
-            columns = {
-                { name = "left", start = 0, width = 100 },
-            },
-            children = {
-                {
-                    type = "text",
-                    text = "A",
-                    panel = { column = "left", line = 1 },
-                },
-            },
-        },
-    }, "PanelIdValidation", {})
-
-    assertWarningContains("panel id must be a non-empty string")
-end
-
-function TestUiValidation:testHorizontalTabsRequiresIdAndChildTabLabels()
-    lib.validateUi({
-        {
-            type = "horizontalTabs",
+            type = "tabs",
             children = {
                 { type = "text", text = "A" },
                 { type = "text", text = "B", tabLabel = "Second", tabId = "" },
             },
         },
-    }, "HorizontalTabsValidation", {})
+    }, "TabsValidation", {})
 
-    assertWarningContains("horizontalTabs id must be a non-empty string")
-    assertWarningContains("horizontalTabs child tabLabel must be a non-empty string")
-    assertWarningContains("horizontalTabs child tabId must be a non-empty string")
+    assertWarningContains("tabs id must be a non-empty string")
+    assertWarningContains("tabs child tabLabel must be a non-empty string")
+    assertWarningContains("tabs child tabId must be a non-empty string")
 end
 
 function TestUiValidation:testVerticalTabsActiveTabBindMustBeString()
@@ -1144,8 +1079,9 @@ function TestUiValidation:testVerticalTabsActiveTabBindMustBeString()
 
     lib.validateUi({
         {
-            type = "verticalTabs",
+            type = "tabs",
             id = "Tabs",
+            orientation = "vertical",
             binds = { activeTab = "ActiveTab" },
             children = {
                 { type = "text", text = "A", tabLabel = "First", tabId = "first" },
@@ -1156,25 +1092,26 @@ function TestUiValidation:testVerticalTabsActiveTabBindMustBeString()
     assertWarningContains("bound alias 'ActiveTab' is int, expected string (binds.activeTab)")
 end
 
-function TestUiValidation:testHorizontalTabsChildTabLabelColorMustBeColorTable()
+function TestUiValidation:testTabsChildTabLabelColorMustBeColorTable()
     lib.validateUi({
         {
-            type = "horizontalTabs",
+            type = "tabs",
             id = "Tabs",
             children = {
                 { type = "text", text = "A", tabLabel = "First", tabLabelColor = "bad" },
             },
         },
-    }, "HorizontalTabsColorValidation", {})
+    }, "TabsColorValidation", {})
 
-    assertWarningContains("horizontalTabs child tabLabelColor must be a 3- or 4-number color table")
+    assertWarningContains("tabs child tabLabelColor must be a 3- or 4-number color table")
 end
 
 function TestUiValidation:testVerticalTabsRequiresIdAndValidSidebarWidth()
     lib.validateUi({
         {
-            type = "verticalTabs",
-            sidebarWidth = 0,
+            type = "tabs",
+            orientation = "vertical",
+            navWidth = 0,
             children = {
                 { type = "text", text = "A" },
                 { type = "text", text = "B", tabLabel = "Second", tabId = "" },
@@ -1182,22 +1119,23 @@ function TestUiValidation:testVerticalTabsRequiresIdAndValidSidebarWidth()
         },
     }, "VerticalTabsValidation", {})
 
-    assertWarningContains("verticalTabs id must be a non-empty string")
-    assertWarningContains("verticalTabs sidebarWidth must be a positive number")
-    assertWarningContains("verticalTabs child tabLabel must be a non-empty string")
-    assertWarningContains("verticalTabs child tabId must be a non-empty string")
+    assertWarningContains("tabs id must be a non-empty string")
+    assertWarningContains("tabs navWidth must be a positive number")
+    assertWarningContains("tabs child tabLabel must be a non-empty string")
+    assertWarningContains("tabs child tabId must be a non-empty string")
 end
 
 function TestUiValidation:testVerticalTabsChildTabLabelColorMustBeColorTable()
     lib.validateUi({
         {
-            type = "verticalTabs",
+            type = "tabs",
             id = "Tabs",
+            orientation = "vertical",
             children = {
                 { type = "text", text = "A", tabLabel = "First", tabLabelColor = "bad" },
             },
         },
     }, "VerticalTabsColorValidation", {})
 
-    assertWarningContains("verticalTabs child tabLabelColor must be a 3- or 4-number color table")
+    assertWarningContains("tabs child tabLabelColor must be a 3- or 4-number color table")
 end

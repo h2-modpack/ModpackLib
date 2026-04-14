@@ -5,73 +5,203 @@ local libWarn = shared.libWarn
 local registry = shared.fieldRegistry
 local GetCursorPosXSafe = registry.GetCursorPosXSafe
 local GetCursorPosYSafe = registry.GetCursorPosYSafe
-local SetCursorPosSafe = registry.SetCursorPosSafe
 local GetStyleMetricX = registry.GetStyleMetricX
+local GetStyleMetricY = registry.GetStyleMetricY
 local NormalizeColor = registry.NormalizeColor
 local EstimateStructuredRowAdvanceY = registry.EstimateStructuredRowAdvanceY
 local DrawStructuredAt = registry.DrawStructuredAt
 
-LayoutTypes.separator = {
+local function ValidateChildren(node, prefix, layoutName)
+    if node.children ~= nil and type(node.children) ~= "table" then
+        libWarn("%s: %s children must be a table", prefix, layoutName)
+    end
+end
+
+local function ValidateLayoutId(node, prefix, layoutName, required)
+    if node.id == nil then
+        if required then
+            libWarn("%s: %s id must be a non-empty string", prefix, layoutName)
+        end
+        return
+    end
+    if type(node.id) ~= "string" or node.id == "" then
+        libWarn("%s: %s id must be a non-empty string", prefix, layoutName)
+    end
+end
+
+local function ValidateGap(node, prefix, layoutName)
+    if node.gap ~= nil and (type(node.gap) ~= "number" or node.gap < 0) then
+        libWarn("%s: %s gap must be a non-negative number", prefix, layoutName)
+    end
+end
+
+local function ResolveGap(imgui, node, axis)
+    if type(node.gap) == "number" then
+        return node.gap
+    end
+    local style = imgui.GetStyle()
+    if axis == "x" then
+        return GetStyleMetricX(style, "ItemSpacing", 8)
+    end
+    return GetStyleMetricY(style, "ItemSpacing", 4)
+end
+
+local function PushLayoutId(imgui, node)
+    local hasId = type(node.id) == "string" and node.id ~= ""
+    if hasId then
+        imgui.PushID(node.id)
+    end
+    return hasId
+end
+
+local function PopLayoutId(imgui, hasId)
+    if hasId then
+        imgui.PopID()
+    end
+end
+
+local function DrawChildrenVStack(imgui, node, drawChild, x, y, availWidth, availHeight)
+    local children = type(node.children) == "table" and node.children or {}
+    local gap = ResolveGap(imgui, node, "y")
+    local currentY = y
+    local maxWidth = 0
+    local changed = false
+    local drewAny = false
+
+    for _, child in ipairs(children) do
+        local childAvailHeight = type(availHeight) == "number"
+            and math.max(availHeight - (currentY - y), 0)
+            or nil
+        local consumedWidth, consumedHeight, childChanged = drawChild(child, x, currentY, availWidth, childAvailHeight)
+        if childChanged then
+            changed = true
+        end
+        if type(consumedWidth) == "number" and consumedWidth > maxWidth then
+            maxWidth = consumedWidth
+        end
+        if type(consumedHeight) == "number" and consumedHeight > 0 then
+            currentY = currentY + consumedHeight
+            drewAny = true
+            if child ~= children[#children] then
+                currentY = currentY + gap
+            end
+        end
+    end
+
+    if not drewAny then
+        return 0, 0, changed
+    end
+    return maxWidth, math.max(currentY - y, 0), changed
+end
+
+local function DrawChildrenHStack(imgui, node, drawChild, x, y, availWidth, availHeight)
+    local children = type(node.children) == "table" and node.children or {}
+    local gap = ResolveGap(imgui, node, "x")
+    local currentX = x
+    local maxHeight = 0
+    local changed = false
+    local drewAny = false
+
+    for _, child in ipairs(children) do
+        local childAvailWidth = type(availWidth) == "number"
+            and math.max(availWidth - (currentX - x), 0)
+            or nil
+        local consumedWidth, consumedHeight, childChanged = drawChild(child, currentX, y, childAvailWidth, availHeight)
+        if childChanged then
+            changed = true
+        end
+        if type(consumedHeight) == "number" and consumedHeight > maxHeight then
+            maxHeight = consumedHeight
+        end
+        if type(consumedWidth) == "number" and consumedWidth > 0 then
+            currentX = currentX + consumedWidth
+            drewAny = true
+            if child ~= children[#children] then
+                currentX = currentX + gap
+            end
+        end
+    end
+
+    if not drewAny then
+        return 0, 0, changed
+    end
+    return math.max(currentX - x, 0), maxHeight, changed
+end
+
+LayoutTypes.vstack = {
     validate = function(node, prefix)
-        if node.label ~= nil and type(node.label) ~= "string" then
-            libWarn("%s: separator label must be string", prefix)
-        end
+        ValidateLayoutId(node, prefix, "vstack", false)
+        ValidateGap(node, prefix, "vstack")
+        ValidateChildren(node, prefix, "vstack")
     end,
-    render = function(imgui, node, drawChild)
-        local _ = drawChild
-        if node.label and node.label ~= "" then
-            imgui.Separator()
-            imgui.Text(node.label)
-            imgui.Separator()
-        else
-            imgui.Separator()
-        end
-        return true
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight)
+        local hasId = PushLayoutId(imgui, node)
+        local consumedWidth, consumedHeight, changed = DrawChildrenVStack(
+            imgui, node, drawChild, x, y, availWidth, availHeight)
+        PopLayoutId(imgui, hasId)
+        return consumedWidth, consumedHeight, changed
     end,
 }
 
-LayoutTypes.group = {
+LayoutTypes.hstack = {
+    validate = function(node, prefix)
+        ValidateLayoutId(node, prefix, "hstack", false)
+        ValidateGap(node, prefix, "hstack")
+        ValidateChildren(node, prefix, "hstack")
+    end,
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight)
+        local hasId = PushLayoutId(imgui, node)
+        local consumedWidth, consumedHeight, changed = DrawChildrenHStack(
+            imgui, node, drawChild, x, y, availWidth, availHeight)
+        PopLayoutId(imgui, hasId)
+        return consumedWidth, consumedHeight, changed
+    end,
+}
+
+LayoutTypes.collapsible = {
     validate = function(node, prefix)
         if node.label ~= nil and type(node.label) ~= "string" then
-            libWarn("%s: group label must be string", prefix)
-        end
-        if node.collapsible ~= nil and type(node.collapsible) ~= "boolean" then
-            libWarn("%s: group collapsible must be boolean", prefix)
+            libWarn("%s: collapsible label must be string", prefix)
         end
         if node.defaultOpen ~= nil and type(node.defaultOpen) ~= "boolean" then
-            libWarn("%s: group defaultOpen must be boolean", prefix)
+            libWarn("%s: collapsible defaultOpen must be boolean", prefix)
         end
-        if node.children ~= nil and type(node.children) ~= "table" then
-            libWarn("%s: group children must be a table", prefix)
-        end
+        ValidateChildren(node, prefix, "collapsible")
     end,
-    render = function(imgui, node, drawChild)
-        local _ = drawChild
-        if node.collapsible == true then
-            local flags = node.defaultOpen == true and 32 or 0
-            return imgui.CollapsingHeader(node.label or "", flags)
-        end
-        if node.label and node.label ~= "" then
-            imgui.Text(node.label)
-        end
-        return true
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight)
+        local fallbackHeight = EstimateStructuredRowAdvanceY(imgui)
+        local changed, endX, endY, consumedHeight = DrawStructuredAt(
+            imgui,
+            x,
+            y,
+            fallbackHeight,
+            function()
+                local flags = node.defaultOpen == true and 32 or 0
+                local open = imgui.CollapsingHeader(node.label or "", flags)
+                local childChanged = false
+                if open then
+                    local childX = GetCursorPosXSafe(imgui)
+                    local childY = GetCursorPosYSafe(imgui)
+                    local _, _, nestedChanged = DrawChildrenVStack(
+                        imgui,
+                        { children = node.children, gap = node.gap },
+                        drawChild,
+                        childX,
+                        childY,
+                        availWidth,
+                        availHeight)
+                    childChanged = nestedChanged
+                end
+                return childChanged
+            end)
+
+        local consumedWidth = type(availWidth) == "number"
+            and availWidth
+            or math.max((type(endX) == "number" and endX or x) - x, 0)
+        local _ = endY
+        return consumedWidth, consumedHeight, changed
     end,
 }
-
-local function GetHorizontalTabItemLabel(child)
-    if type(child) ~= "table" then
-        return nil
-    end
-    local tabLabel = child.tabLabel
-    if type(tabLabel) ~= "string" or tabLabel == "" then
-        return nil
-    end
-    local tabId = child.tabId
-    if type(tabId) == "string" and tabId ~= "" then
-        return ("%s##%s"):format(tabLabel, tabId)
-    end
-    return tabLabel
-end
 
 local function ValidateTabbedChildren(node, prefix, layoutName)
     if node.children ~= nil and type(node.children) ~= "table" then
@@ -136,7 +266,7 @@ end
 
 local function FindTabbedChildByKey(children, activeKey)
     if type(children) ~= "table" or #children == 0 then
-        return nil
+        return nil, nil
     end
     for index, child in ipairs(children) do
         if GetTabbedChildKey(child, index) == activeKey then
@@ -146,453 +276,272 @@ local function FindTabbedChildByKey(children, activeKey)
     return children[1], 1
 end
 
-LayoutTypes.horizontalTabs = {
-    handlesChildren = true,
+local function SyncActiveTabBinding(node, bound, activeKey)
+    node._activeTabKey = activeKey
+    if bound and bound.activeTab and bound.activeTab.get and bound.activeTab.set then
+        local currentBound = bound.activeTab:get()
+        if currentBound ~= activeKey then
+            bound.activeTab:set(activeKey)
+        end
+    end
+end
+
+LayoutTypes.tabs = {
     binds = {
         activeTab = { storageType = "string", optional = true },
     },
     validate = function(node, prefix)
-        if type(node.id) ~= "string" or node.id == "" then
-            libWarn("%s: horizontalTabs id must be a non-empty string", prefix)
+        ValidateLayoutId(node, prefix, "tabs", true)
+        if node.orientation ~= nil and node.orientation ~= "horizontal" and node.orientation ~= "vertical" then
+            libWarn("%s: tabs orientation must be 'horizontal' or 'vertical'", prefix)
         end
-        ValidateTabbedChildren(node, prefix, "horizontalTabs")
+        if node.navWidth ~= nil and (type(node.navWidth) ~= "number" or node.navWidth <= 0) then
+            libWarn("%s: tabs navWidth must be a positive number", prefix)
+        end
+        ValidateTabbedChildren(node, prefix, "tabs")
     end,
-    render = function(imgui, node, drawChild, _, bound)
-        local changed = false
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight, _, bound)
         local children = type(node.children) == "table" and node.children or {}
+        if #children == 0 then
+            return 0, 0, false
+        end
+
         local requestedKey = bound and bound.activeTab and bound.activeTab.get and bound.activeTab:get() or nil
         local activeChild, activeIndex = FindTabbedChildByKey(children, requestedKey or node._activeTabKey)
-        node._activeTabKey = GetTabbedChildKey(activeChild, activeIndex)
-        if bound and bound.activeTab and bound.activeTab.get and bound.activeTab.set then
-            local currentBound = bound.activeTab:get()
-            if currentBound ~= node._activeTabKey then
-                bound.activeTab:set(node._activeTabKey)
-            end
-        end
+        SyncActiveTabBinding(node, bound, GetTabbedChildKey(activeChild, activeIndex))
 
-        if imgui.BeginTabBar(node.id) then
-            for index, child in ipairs(children) do
-                local tabItemLabel = GetHorizontalTabItemLabel(child)
-                local opened = false
-                if tabItemLabel ~= nil then
-                    opened = WithTabLabelColor(imgui, child, function()
-                        return imgui.BeginTabItem(tabItemLabel)
-                    end)
-                end
-                if opened then
-                    node._activeTabKey = GetTabbedChildKey(child, index)
-                    if bound and bound.activeTab and bound.activeTab.get and bound.activeTab.set then
-                        local currentBound = bound.activeTab:get()
-                        if currentBound ~= node._activeTabKey then
-                            bound.activeTab:set(node._activeTabKey)
+        if node.orientation == "vertical" then
+            local sidebarWidth = node.navWidth or 180
+            local gap = ResolveGap(imgui, node, "x")
+            local sidebarHeight = type(availHeight) == "number" and availHeight or 0
+            local detailWidth = type(availWidth) == "number"
+                and math.max(availWidth - sidebarWidth - gap, 0)
+                or 0
+            local changed = false
+            local _, _, sidebarEndY, sidebarConsumedHeight = DrawStructuredAt(
+                imgui,
+                x,
+                y,
+                EstimateStructuredRowAdvanceY(imgui),
+                function()
+                    imgui.BeginChild(node.id .. "##tabs", sidebarWidth, sidebarHeight, true)
+                    for index, child in ipairs(children) do
+                        local childKey = GetTabbedChildKey(child, index)
+                        local selected = WithTabLabelColor(imgui, child, function()
+                            return imgui.Selectable(child.tabLabel, childKey == node._activeTabKey)
+                        end)
+                        if selected then
+                            SyncActiveTabBinding(node, bound, childKey)
                         end
                     end
-                    if drawChild(child) then
-                        changed = true
+                    imgui.EndChild()
+                    return false
+                end)
+
+            local detailChanged, _, detailEndY, detailConsumedHeight = DrawStructuredAt(
+                imgui,
+                x + sidebarWidth + gap,
+                y,
+                EstimateStructuredRowAdvanceY(imgui),
+                function()
+                    imgui.BeginChild(node.id .. "##detail", detailWidth, sidebarHeight, true)
+                    activeChild = select(1, FindTabbedChildByKey(children, node._activeTabKey))
+                    local childChanged = false
+                    if activeChild ~= nil then
+                        local childX = GetCursorPosXSafe(imgui)
+                        local childY = GetCursorPosYSafe(imgui)
+                        local _, _, nextChanged = DrawChildrenVStack(
+                            imgui,
+                            { children = { activeChild }, gap = 0 },
+                            drawChild,
+                            childX,
+                            childY,
+                            detailWidth ~= 0 and detailWidth or nil,
+                            availHeight)
+                        childChanged = nextChanged
                     end
-                    imgui.EndTabItem()
-                end
+                    imgui.EndChild()
+                    return childChanged
+                end)
+            changed = detailChanged or changed
+
+            local consumedWidth = type(availWidth) == "number" and availWidth or (sidebarWidth + gap + detailWidth)
+            local consumedHeight = math.max(sidebarConsumedHeight or 0, detailConsumedHeight or 0)
+            local finalBottom = math.max(sidebarEndY or y, detailEndY or y)
+            if finalBottom > y + consumedHeight then
+                consumedHeight = finalBottom - y
             end
-            imgui.EndTabBar()
+            return consumedWidth, consumedHeight, changed
         end
 
-        return true, changed
+        local changed, endX, _, consumedHeight = DrawStructuredAt(
+            imgui,
+            x,
+            y,
+            EstimateStructuredRowAdvanceY(imgui),
+            function()
+                local childChanged = false
+                if imgui.BeginTabBar(node.id) then
+                    for index, child in ipairs(children) do
+                        local tabLabel = child.tabLabel
+                        if type(child.tabId) == "string" and child.tabId ~= "" then
+                            tabLabel = ("%s##%s"):format(tabLabel, child.tabId)
+                        end
+                        local opened = WithTabLabelColor(imgui, child, function()
+                            return imgui.BeginTabItem(tabLabel)
+                        end)
+                        if opened then
+                            SyncActiveTabBinding(node, bound, GetTabbedChildKey(child, index))
+                            local childX = GetCursorPosXSafe(imgui)
+                            local childY = GetCursorPosYSafe(imgui)
+                            local _, _, nestedChanged = DrawChildrenVStack(
+                                imgui,
+                                { children = { child }, gap = 0 },
+                                drawChild,
+                                childX,
+                                childY,
+                                availWidth,
+                                availHeight)
+                            childChanged = nestedChanged or childChanged
+                            imgui.EndTabItem()
+                        end
+                    end
+                    imgui.EndTabBar()
+                end
+                return childChanged
+            end)
+
+        local consumedWidth = type(availWidth) == "number"
+            and availWidth
+            or math.max((type(endX) == "number" and endX or x) - x, 0)
+        return consumedWidth, consumedHeight, changed
     end,
 }
 
-LayoutTypes.verticalTabs = {
-    handlesChildren = true,
-    binds = {
-        activeTab = { storageType = "string", optional = true },
-    },
+LayoutTypes.scrollRegion = {
     validate = function(node, prefix)
-        if type(node.id) ~= "string" or node.id == "" then
-            libWarn("%s: verticalTabs id must be a non-empty string", prefix)
+        ValidateLayoutId(node, prefix, "scrollRegion", true)
+        ValidateGap(node, prefix, "scrollRegion")
+        ValidateChildren(node, prefix, "scrollRegion")
+        if node.width ~= nil and type(node.width) ~= "number" then
+            libWarn("%s: scrollRegion width must be a number", prefix)
         end
-        if node.sidebarWidth ~= nil and (type(node.sidebarWidth) ~= "number" or node.sidebarWidth <= 0) then
-            libWarn("%s: verticalTabs sidebarWidth must be a positive number", prefix)
+        if node.height ~= nil and type(node.height) ~= "number" then
+            libWarn("%s: scrollRegion height must be a number", prefix)
         end
-        ValidateTabbedChildren(node, prefix, "verticalTabs")
+        if node.border ~= nil and type(node.border) ~= "boolean" then
+            libWarn("%s: scrollRegion border must be boolean", prefix)
+        end
     end,
-    render = function(imgui, node, drawChild, _, bound)
-        local children = type(node.children) == "table" and node.children or {}
-        if #children == 0 then
-            return true, false
-        end
-
-        local requestedKey = bound and bound.activeTab and bound.activeTab.get and bound.activeTab:get() or nil
-        local activeChild, activeIndex = FindTabbedChildByKey(children, requestedKey or node._activeTabKey)
-        node._activeTabKey = GetTabbedChildKey(activeChild, activeIndex)
-        if bound and bound.activeTab and bound.activeTab.get and bound.activeTab.set then
-            local currentBound = bound.activeTab:get()
-            if currentBound ~= node._activeTabKey then
-                bound.activeTab:set(node._activeTabKey)
-            end
-        end
-
-        local changed = false
-        local sidebarWidth = node.sidebarWidth or 180
-        local gap = GetStyleMetricX(imgui.GetStyle(), "ItemSpacing", 8)
-        local originX = GetCursorPosXSafe(imgui)
-        local originY = GetCursorPosYSafe(imgui)
-
-        local _, _, sidebarEndY, sidebarHeight = DrawStructuredAt(
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight)
+        local regionWidth = type(node.width) == "number" and node.width
+            or (type(availWidth) == "number" and availWidth or 0)
+        local regionHeight = type(node.height) == "number" and node.height
+            or (type(availHeight) == "number" and availHeight or 0)
+        local changed, endX, _, consumedHeight = DrawStructuredAt(
             imgui,
-            originX,
-            originY,
+            x,
+            y,
             EstimateStructuredRowAdvanceY(imgui),
             function()
-                imgui.BeginChild(node.id .. "##tabs", sidebarWidth, 0, true)
-                for index, child in ipairs(children) do
-                    local childKey = GetTabbedChildKey(child, index)
-                    local selected = WithTabLabelColor(imgui, child, function()
-                        return imgui.Selectable(child.tabLabel, childKey == node._activeTabKey)
-                    end)
-                    if selected then
-                        node._activeTabKey = childKey
-                        if bound and bound.activeTab and bound.activeTab.get and bound.activeTab.set then
-                            local currentBound = bound.activeTab:get()
-                            if currentBound ~= node._activeTabKey then
-                                bound.activeTab:set(node._activeTabKey)
-                            end
-                        end
-                    end
-                end
-                imgui.EndChild()
-                return false
-            end)
-
-        local activeChildChanged, _, detailEndY, detailHeight = DrawStructuredAt(
-            imgui,
-            originX + sidebarWidth + gap,
-            originY,
-            EstimateStructuredRowAdvanceY(imgui),
-            function()
-                imgui.BeginChild(node.id .. "##detail", 0, 0, true)
-                activeChild = select(1, FindTabbedChildByKey(children, node._activeTabKey))
-                local childChanged = false
-                if activeChild ~= nil and drawChild(activeChild) then
-                    childChanged = true
-                end
+                imgui.BeginChild(node.id, regionWidth, regionHeight, node.border == true)
+                local childX = GetCursorPosXSafe(imgui)
+                local childY = GetCursorPosYSafe(imgui)
+                local _, _, childChanged = DrawChildrenVStack(
+                    imgui,
+                    node,
+                    drawChild,
+                    childX,
+                    childY,
+                    regionWidth ~= 0 and regionWidth or nil,
+                    regionHeight ~= 0 and regionHeight or nil)
                 imgui.EndChild()
                 return childChanged
             end)
-        changed = activeChildChanged or changed
-
-        local finalY = originY + math.max(sidebarHeight or 0, detailHeight or 0)
-        if type(sidebarEndY) == "number" and sidebarEndY > finalY then
-            finalY = sidebarEndY
-        end
-        if type(detailEndY) == "number" and detailEndY > finalY then
-            finalY = detailEndY
-        end
-        SetCursorPosSafe(imgui, originX, finalY)
-
-        return true, changed
+        local consumedWidth = type(node.width) == "number"
+            and node.width
+            or (type(availWidth) == "number" and availWidth or math.max((endX or x) - x, 0))
+        return consumedWidth, consumedHeight, changed
     end,
 }
 
-local function ValidatePanelColumn(prefix, index, column, seenNames)
-    local columnPrefix = ("%s columns[%d]"):format(prefix, index)
-    if type(column) ~= "table" then
-        libWarn("%s must be a table", columnPrefix)
-        return
-    end
-    if column.name ~= nil then
-        if type(column.name) ~= "string" or column.name == "" then
-            libWarn("%s.name must be a non-empty string", columnPrefix)
-        elseif seenNames[column.name] then
-            libWarn("%s: duplicate column name '%s'", prefix, tostring(column.name))
-        else
-            seenNames[column.name] = true
-        end
-    end
-    if column.start ~= nil then
-        if type(column.start) ~= "number" then
-            libWarn("%s.start must be a number", columnPrefix)
-        elseif column.start < 0 then
-            libWarn("%s.start must be a non-negative number", columnPrefix)
-        end
-    end
-    if column.width ~= nil and (type(column.width) ~= "number" or column.width <= 0) then
-        libWarn("%s.width must be a positive number", columnPrefix)
-    end
-    if column.align ~= nil and column.align ~= "center" and column.align ~= "right" then
-        libWarn("%s.align must be one of 'center' or 'right'", columnPrefix)
-    end
-end
-
-local function ResolvePanelColumn(node, columnRef)
-    if type(node.columns) ~= "table" then
-        return nil
-    end
-    if type(columnRef) == "number" then
-        return node.columns[columnRef]
-    end
-    if type(columnRef) == "string" and columnRef ~= "" then
-        for _, column in ipairs(node.columns) do
-            if type(column) == "table" and column.name == columnRef then
-                return column
-            end
-        end
-    end
-    return nil
-end
-
-local function GetPanelChildKey(child)
-    local placement = type(child) == "table" and child.panel or nil
-    local childKey = type(placement) == "table" and placement.key or nil
-    if type(childKey) == "string" and childKey ~= "" then
-        return childKey
-    end
-    return nil
-end
-
-local function ValidatePanelChild(node, prefix, childIndex, child, seenKeys)
-    if type(child) ~= "table" then
-        return
-    end
-    local placement = child.panel
-    if placement == nil then
-        return
-    end
-    local placementPrefix = ("%s child #%d panel"):format(prefix, childIndex)
-    if type(placement) ~= "table" then
-        libWarn("%s must be a table", placementPrefix)
-        return
-    end
-    if placement.column == nil then
-        libWarn("%s.column is required", placementPrefix)
-    elseif ResolvePanelColumn(node, placement.column) == nil then
-        libWarn("%s.column references unknown column '%s'", placementPrefix, tostring(placement.column))
-    end
-    if placement.line ~= nil then
-        if type(placement.line) ~= "number" or placement.line < 1 or math.floor(placement.line) ~= placement.line then
-            libWarn("%s.line must be a positive integer", placementPrefix)
-        end
-    end
-    if placement.key ~= nil then
-        if type(placement.key) ~= "string" or placement.key == "" then
-            libWarn("%s.key must be a non-empty string", placementPrefix)
-        elseif seenKeys[placement.key] then
-            libWarn("%s: duplicate panel child key '%s'", prefix, tostring(placement.key))
-        else
-            seenKeys[placement.key] = true
-        end
-    end
-end
-
-local function ResolvePanelChildPlacement(node, child, index)
-    local placement = type(child) == "table" and child.panel or nil
-    local column = type(placement) == "table" and ResolvePanelColumn(node, placement.column) or nil
-    return {
-        child = child,
-        index = index,
-        key = GetPanelChildKey(child),
-        line = type(placement) == "table" and placement.line or 1,
-        start = type(column) == "table" and column.start or nil,
-        width = type(column) == "table" and column.width or nil,
-        align = type(column) == "table" and column.align or nil,
-    }
-end
-
-local function BuildPanelEntries(node)
-    if type(node) == "table" and type(node._staticPanelEntries) == "table" then
-        return node._staticPanelEntries
-    end
-
-    local children = type(node.children) == "table" and node.children or {}
-    local entries = {}
-    local entryCount = 0
-
-    for index, child in ipairs(children) do
-        local entry = ResolvePanelChildPlacement(node, child, index)
-        entryCount = entryCount + 1
-        entries[entryCount] = {
-            child = entry.child,
-            index = entry.index,
-            key = entry.key,
-            line = entry.line,
-            start = entry.start,
-            width = entry.width,
-            align = entry.align,
-        }
-    end
-
-    if type(node) == "table" then
-        node._staticPanelEntries = entries
-    end
-
-    return entries
-end
-
-local function BuildPanelEntryOrderKey(entries)
-    local parts = {}
-    for _, entry in ipairs(entries) do
-        parts[#parts + 1] = tostring(entry.key or entry.index)
-        parts[#parts + 1] = "@"
-        parts[#parts + 1] = tostring(entry.line or 1)
-        parts[#parts + 1] = ":"
-        parts[#parts + 1] = entry.start ~= nil and tostring(entry.start) or "_"
-        parts[#parts + 1] = "|"
-    end
-    return table.concat(parts)
-end
-
-local function GetOrderedPanelEntries(node, entries)
-    local orderKey = BuildPanelEntryOrderKey(entries)
-    if type(node) == "table" and node._panelOrderCacheKey == orderKey
-        and type(node._panelOrderCacheOrder) == "table" then
-        return node._panelOrderCacheOrder
-    end
-
-    local orderedPositions = {}
-    for index = 1, #entries do
-        orderedPositions[index] = index
-    end
-
-    table.sort(orderedPositions, function(leftIndex, rightIndex)
-        local left = entries[leftIndex]
-        local right = entries[rightIndex]
-        if left.line ~= right.line then
-            return left.line < right.line
-        end
-        if type(left.start) == "number" and type(right.start) == "number" and left.start ~= right.start then
-            return left.start < right.start
-        end
-        return left.index < right.index
-    end)
-
-    if type(node) == "table" then
-        node._panelOrderCacheKey = orderKey
-        node._panelOrderCacheOrder = orderedPositions
-    end
-    return orderedPositions
-end
-
-local function BuildPanelRows(entries, orderedPositions)
-    local rows = {}
-    local rowCount = 0
-    local currentLine = nil
-
-    for _, position in ipairs(orderedPositions) do
-        local entry = entries[position]
-        if currentLine ~= entry.line then
-            currentLine = entry.line
-            rowCount = rowCount + 1
-            rows[rowCount] = {
-                line = currentLine,
-                entries = {},
-            }
-        end
-        local row = rows[rowCount]
-        row.entries[#row.entries + 1] = entry
-    end
-
-    return rows
-end
-
-LayoutTypes.panel = {
-    handlesChildren = true,
+LayoutTypes.split = {
     validate = function(node, prefix)
-        if node.id ~= nil and (type(node.id) ~= "string" or node.id == "") then
-            libWarn("%s: panel id must be a non-empty string", prefix)
+        if node.orientation ~= nil and node.orientation ~= "horizontal" and node.orientation ~= "vertical" then
+            libWarn("%s: split orientation must be 'horizontal' or 'vertical'", prefix)
         end
-        if type(node.columns) ~= "table" or #node.columns == 0 then
-            libWarn("%s: panel columns must be a non-empty list", prefix)
-        else
-            local seenNames = {}
-            for index, column in ipairs(node.columns) do
-                ValidatePanelColumn(prefix, index, column, seenNames)
-            end
+        ValidateGap(node, prefix, "split")
+        ValidateChildren(node, prefix, "split")
+        if type(node.children) == "table" and #node.children ~= 2 then
+            libWarn("%s: split requires exactly two children", prefix)
         end
-        if node.children ~= nil and type(node.children) ~= "table" then
-            libWarn("%s: panel children must be a table", prefix)
-        elseif type(node.children) == "table" then
-            local seenKeys = {}
-            for childIndex, child in ipairs(node.children) do
-                ValidatePanelChild(node, prefix, childIndex, child, seenKeys)
-            end
+        if node.firstSize ~= nil and (type(node.firstSize) ~= "number" or node.firstSize < 0) then
+            libWarn("%s: split firstSize must be a non-negative number", prefix)
+        end
+        if node.secondSize ~= nil and (type(node.secondSize) ~= "number" or node.secondSize < 0) then
+            libWarn("%s: split secondSize must be a non-negative number", prefix)
+        end
+        if node.ratio ~= nil and (type(node.ratio) ~= "number" or node.ratio < 0 or node.ratio > 1) then
+            libWarn("%s: split ratio must be between 0 and 1", prefix)
         end
     end,
-    render = function(imgui, node, drawChild, uiState)
-        local hasPanelId = type(node.id) == "string" and node.id ~= ""
-        if hasPanelId then
-            imgui.PushID(node.id)
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight)
+        local children = type(node.children) == "table" and node.children or {}
+        local first = children[1]
+        local second = children[2]
+        if first == nil or second == nil then
+            return 0, 0, false
         end
 
-        local rowStartX = GetCursorPosXSafe(imgui)
-        local rowStartY = GetCursorPosYSafe(imgui)
-        local entries = BuildPanelEntries(node)
-        local orderedPositions = GetOrderedPanelEntries(node, entries)
-        local rows = BuildPanelRows(entries, orderedPositions)
+        local horizontal = node.orientation ~= "vertical"
+        local gap = ResolveGap(imgui, node, horizontal and "x" or "y")
+        local axisExtent = horizontal and availWidth or availHeight
+        local firstExtent
 
-        local changed = false
-        local defaultRowAdvance = EstimateStructuredRowAdvanceY(imgui)
-        local renderRows = {}
-
-        for _, row in ipairs(rows) do
-            local visibleEntries = {}
-            for _, entry in ipairs(row.entries) do
-                if public.isUiNodeVisible(entry.child, uiState and uiState.view) then
-                    visibleEntries[#visibleEntries + 1] = entry
-                end
-            end
-            if #visibleEntries > 0 then
-                renderRows[#renderRows + 1] = {
-                    line = row.line,
-                    entries = visibleEntries,
-                }
-            end
+        if type(node.firstSize) == "number" then
+            firstExtent = node.firstSize
+        elseif type(node.secondSize) == "number" and type(axisExtent) == "number" then
+            firstExtent = math.max(axisExtent - gap - node.secondSize, 0)
+        elseif type(node.ratio) == "number" and type(axisExtent) == "number" then
+            firstExtent = math.max((axisExtent - gap) * node.ratio, 0)
+        elseif type(axisExtent) == "number" then
+            firstExtent = math.max((axisExtent - gap) / 2, 0)
+        else
+            firstExtent = 0
         end
 
-        local currentRowY = rowStartY
+        local secondExtent = type(axisExtent) == "number"
+            and math.max(axisExtent - gap - firstExtent, 0)
+            or nil
 
-        for _, row in ipairs(renderRows) do
-            local rowAdvance = defaultRowAdvance
-
-            for entryIndex, entry in ipairs(row.entries) do
-                if entryIndex > 1 and type(entry.start) ~= "number" then
-                    imgui.SameLine()
-                end
-
-                local childX = type(entry.start) == "number" and (rowStartX + entry.start) or GetCursorPosXSafe(imgui)
-                local childChanged, nextX, _, childAdvance = DrawStructuredAt(
-                    imgui,
-                    childX,
-                    currentRowY,
-                    defaultRowAdvance,
-                    function()
-                        return drawChild(entry.child) == true
-                    end)
-                if childChanged then
-                    changed = true
-                end
-                if childAdvance > rowAdvance then
-                    rowAdvance = childAdvance
-                end
-
-                SetCursorPosSafe(imgui, nextX, currentRowY)
-            end
-
-            currentRowY = currentRowY + rowAdvance
+        if horizontal then
+            local firstWidth, firstHeight, firstChanged = drawChild(first, x, y, firstExtent, availHeight)
+            local secondX = x + (type(firstExtent) == "number" and firstExtent or firstWidth or 0) + gap
+            local secondWidth, secondHeight, secondChanged = drawChild(second, secondX, y, secondExtent, availHeight)
+            local consumedWidth = type(availWidth) == "number"
+                and availWidth
+                or math.max((firstWidth or firstExtent or 0) + gap + (secondWidth or secondExtent or 0), 0)
+            local consumedHeight = math.max(firstHeight or 0, secondHeight or 0)
+            return consumedWidth, consumedHeight, firstChanged or secondChanged
         end
 
-        SetCursorPosSafe(imgui, rowStartX, currentRowY)
-
-        if hasPanelId then
-            imgui.PopID()
-        end
-
-        return true, changed
+        local firstWidth, firstHeight, firstChanged = drawChild(first, x, y, availWidth, firstExtent)
+        local secondY = y + (type(firstExtent) == "number" and firstExtent or firstHeight or 0) + gap
+        local secondWidth, secondHeight, secondChanged = drawChild(second, x, secondY, availWidth, secondExtent)
+        local consumedWidth = math.max(firstWidth or 0, secondWidth or 0)
+        local consumedHeight = type(availHeight) == "number"
+            and availHeight
+            or math.max((firstHeight or firstExtent or 0) + gap + (secondHeight or secondExtent or 0), 0)
+        return consumedWidth, consumedHeight, firstChanged or secondChanged
     end,
 }
 
-local function DrawLayoutNode(imgui, node, drawChild, layoutTypes, uiState)
+local function DrawLayoutNode(imgui, node, drawChild, layoutTypes, uiState, x, y, availWidth, availHeight)
     local layoutType = layoutTypes[node.type]
     if not layoutType then
-        return false, false
+        return false, 0, 0, false
     end
+
     local bound = nil
     if type(layoutType.binds) == "table" then
         bound = node._boundCache
@@ -601,23 +550,19 @@ local function DrawLayoutNode(imgui, node, drawChild, layoutTypes, uiState)
         end
         bound._changed = false
     end
-    -- Layout render contract:
-    --   open = render(imgui, node, drawChild)
-    --   or, when layoutType.handlesChildren == true:
-    --   open, changed = render(imgui, node, drawChild)
-    -- Layouts with handlesChildren = true fully own child rendering and must
-    -- report any child-driven change via the second return value.
-    local open, layoutChanged = layoutType.render(imgui, node, drawChild, uiState, bound)
-    if layoutType.handlesChildren == true then
-        return true, (bound and bound._changed or false) or layoutChanged == true
-    end
-    local changed = false
-    if open and type(node.children) == "table" then
-        for _, child in ipairs(node.children) do
-            if drawChild(child) then changed = true end
-        end
-    end
-    return true, (bound and bound._changed or false) or changed
+
+    local consumedWidth, consumedHeight, layoutChanged = layoutType.render(
+        imgui,
+        node,
+        drawChild,
+        x,
+        y,
+        availWidth,
+        availHeight,
+        uiState,
+        bound)
+
+    return true, consumedWidth or 0, consumedHeight or 0, (bound and bound._changed or false) or layoutChanged == true
 end
 
 registry.DrawLayoutNode = DrawLayoutNode

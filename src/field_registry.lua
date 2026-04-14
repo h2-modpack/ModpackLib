@@ -14,14 +14,14 @@ function public.drawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
     local drawWidgetSlots = registry.DrawWidgetSlots
     local getCursorPosXSafe = registry.GetCursorPosXSafe
     if type(drawWidgetSlots) ~= "function" or type(getCursorPosXSafe) ~= "function" then
-        return false
+        return 0, 0, false
     end
     return drawWidgetSlots(
         imgui,
         node,
         slots,
         rowStart or getCursorPosXSafe(imgui),
-        rowStartY) == true
+        rowStartY)
 end
 
 function public.alignSlotContent(imgui, slot, contentWidth)

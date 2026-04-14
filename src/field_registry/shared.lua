@@ -118,7 +118,15 @@ end
 registry.GetCursorPosYSafe = GetCursorPosYSafe
 
 local function SetCursorPosSafe(imgui, x, y)
-    imgui.SetCursorPos(x, y)
+    if type(imgui.SetCursorPos) == "function" then
+        imgui.SetCursorPos(x, y)
+    end
+    if type(imgui.SetCursorPosX) == "function" and type(x) == "number" then
+        imgui.SetCursorPosX(x)
+    end
+    if type(imgui.SetCursorPosY) == "function" and type(y) == "number" then
+        imgui.SetCursorPosY(y)
+    end
 end
 
 registry.SetCursorPosSafe = SetCursorPosSafe
@@ -304,7 +312,18 @@ registry.GetStyleMetricY = GetStyleMetricY
 
 local function CalcTextWidth(imgui, text)
     local width = imgui.CalcTextSize(tostring(text or ""))
-    return type(width) == "number" and width or 0
+    if type(width) == "number" then
+        return width
+    end
+    if type(width) == "table" then
+        if type(width.x) == "number" then
+            return width.x
+        end
+        if type(width[1]) == "number" then
+            return width[1]
+        end
+    end
+    return 0
 end
 
 registry.CalcTextWidth = CalcTextWidth
@@ -424,14 +443,14 @@ local function GetOrderedSlotPositions(node, entries)
     return orderedPositions
 end
 
-local function DrawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
+local function DrawWidgetSlots(imgui, node, slots, startX, startY)
     if type(slots) ~= "table" then
-        return false
+        return 0, 0, false
     end
 
     local changed = false
-    rowStart = rowStart or GetCursorPosXSafe(imgui)
-    rowStartY = type(rowStartY) == "number" and rowStartY or GetCursorPosYSafe(imgui)
+    startX = type(startX) == "number" and startX or GetCursorPosXSafe(imgui)
+    startY = type(startY) == "number" and startY or GetCursorPosYSafe(imgui)
     local defaultRowAdvance = EstimateStructuredRowAdvanceY(imgui)
     local renderSlots = type(node) == "table" and node._renderSlotCache or nil
     if type(renderSlots) ~= "table" then
@@ -467,8 +486,10 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
     local orderedPositions = GetOrderedSlotPositions(node, renderSlots)
 
     local currentLine = nil
-    local currentRowY = rowStartY
+    local currentRowY = startY
     local currentRowAdvance = defaultRowAdvance
+    local maxRight = startX
+    local maxBottom = startY
 
     for _, position in ipairs(orderedPositions) do
         local entry = renderSlots[position]
@@ -485,8 +506,11 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
             merged.align = entry.align
             merged.sameLine = slot.sameLine
             merged.line = entry.line
+            merged.measuredWidth = nil
+            merged.measuredHeight = nil
 
-            if currentLine ~= entry.line then
+            local isNewLine = currentLine ~= entry.line
+            if isNewLine then
                 if currentLine ~= nil then
                     currentRowY = currentRowY + currentRowAdvance
                 end
@@ -496,7 +520,14 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
                 imgui.SameLine()
             end
 
-            local slotX = type(entry.start) == "number" and (rowStart + entry.start) or GetCursorPosXSafe(imgui)
+            local slotX
+            if type(entry.start) == "number" then
+                slotX = startX + entry.start
+            elseif isNewLine then
+                slotX = startX
+            else
+                slotX = GetCursorPosXSafe(imgui)
+            end
             if type(entry.start) == "number" then
                 merged.start = entry.start
             end
@@ -510,7 +541,7 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
                         imgui.PushItemWidth(entry.width)
                     end
                     imgui.PushID((slot.name or "slot") .. "_" .. tostring(entry.index))
-                    local drewChanged = slot.draw(imgui, merged, rowStart) == true
+                    local drewChanged = slot.draw(imgui, merged, startX) == true
                     imgui.PopID()
                     if type(entry.width) == "number" and entry.width > 0 then
                         imgui.PopItemWidth()
@@ -520,16 +551,47 @@ local function DrawWidgetSlots(imgui, node, slots, rowStart, rowStartY)
             if slotChanged then
                 changed = true
             end
-            if consumedAdvance > currentRowAdvance then
-                currentRowAdvance = consumedAdvance
+            local slotConsumedHeight = type(merged.measuredHeight) == "number"
+                and merged.measuredHeight > 0
+                and merged.measuredHeight
+                or consumedAdvance
+            if slotConsumedHeight > currentRowAdvance then
+                currentRowAdvance = slotConsumedHeight
+            end
+            local slotConsumedWidth = type(merged.measuredWidth) == "number"
+                and merged.measuredWidth > 0
+                and merged.measuredWidth
+                or 0
+            if type(entry.width) == "number" and entry.width > slotConsumedWidth then
+                slotConsumedWidth = entry.width
+            end
+            if type(nextX) == "number" and nextX > slotX then
+                local cursorWidth = nextX - slotX
+                if cursorWidth > slotConsumedWidth then
+                    slotConsumedWidth = cursorWidth
+                end
+            end
+            local slotRight = slotX + slotConsumedWidth
+            if slotRight > maxRight then
+                maxRight = slotRight
+            end
+            local slotBottom = currentRowY + slotConsumedHeight
+            if slotBottom > maxBottom then
+                maxBottom = slotBottom
             end
 
             SetCursorPosSafe(imgui, nextX, currentRowY)
         end
     end
 
-    SetCursorPosSafe(imgui, rowStart, currentRowY + currentRowAdvance)
-    return changed
+    local finalBottom = currentRowY + currentRowAdvance
+    if finalBottom > maxBottom then
+        maxBottom = finalBottom
+    end
+    local consumedWidth = math.max(maxRight - startX, 0)
+    local consumedHeight = math.max(maxBottom - startY, 0)
+    SetCursorPosSafe(imgui, startX, startY + consumedHeight)
+    return consumedWidth, consumedHeight, changed
 end
 
 registry.DrawWidgetSlots = DrawWidgetSlots

@@ -10,6 +10,9 @@ local MergeCustomTypes = registry.MergeCustomTypes
 local ValidateWidgetGeometry = registry.ValidateWidgetGeometry
 local EnsurePreparedStorage = registry.EnsurePreparedStorage
 local DrawLayoutNode = registry.DrawLayoutNode
+local GetCursorPosXSafe = registry.GetCursorPosXSafe
+local GetCursorPosYSafe = registry.GetCursorPosYSafe
+local SetCursorPosSafe = registry.SetCursorPosSafe
 local nextAnonymousImguiId = 0
 
 local function BuildBoundEntries(node, bindOwnerType, uiState)
@@ -357,28 +360,52 @@ function public.isUiNodeVisible(node, view)
     return value == true
 end
 
-function public.drawUiNode(imgui, node, uiState, width, customTypes)
+local function DrawUiNodeAt(imgui, node, uiState, x, y, availWidth, availHeight, widgetTypes, layoutTypes)
     if not public.isUiNodeVisible(node, uiState and uiState.view) then
-        return false
+        return 0, 0, false
     end
 
-    local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
-
-    local function drawChild(child)
-        return public.drawUiNode(imgui, child, uiState, width, customTypes)
+    local function drawChild(child, childX, childY, childAvailWidth, childAvailHeight)
+        return DrawUiNodeAt(
+            imgui,
+            child,
+            uiState,
+            type(childX) == "number" and childX or x,
+            type(childY) == "number" and childY or y,
+            childAvailWidth ~= nil and childAvailWidth or availWidth,
+            childAvailHeight ~= nil and childAvailHeight or availHeight,
+            widgetTypes,
+            layoutTypes)
     end
 
-    local wasLayout, layoutChanged = DrawLayoutNode(imgui, node, drawChild, layoutTypes, uiState)
-    if wasLayout then return layoutChanged end
+    local wasLayout, layoutWidth, layoutHeight, layoutChanged = DrawLayoutNode(
+        imgui,
+        node,
+        drawChild,
+        layoutTypes,
+        uiState,
+        x,
+        y,
+        availWidth,
+        availHeight)
+    if wasLayout then
+        SetCursorPosSafe(imgui, x, y + layoutHeight)
+        return layoutWidth, layoutHeight, layoutChanged
+    end
 
     local widgetType = widgetTypes[node.type]
     if not widgetType then
         libWarn("drawUiNode: unknown node type '%s'", tostring(node.type))
-        return false
+        return 0, 0, false
     end
 
     imgui.PushID(node._imguiId or tostring(node.type))
-    if node.indent then imgui.Indent() end
+    local drawX = x
+    if node.indent then
+        SetCursorPosSafe(imgui, x, y)
+        imgui.Indent()
+        drawX = GetCursorPosXSafe(imgui)
+    end
 
     local bound = node._boundCache
     if bound == nil or node._boundCacheUiState ~= uiState or node._boundCacheBindOwnerType ~= widgetType then
@@ -387,35 +414,84 @@ function public.drawUiNode(imgui, node, uiState, width, customTypes)
     bound._changed = false
 
     local drawChanged = false
+    local consumedWidth = 0
+    local consumedHeight = 0
     if type(widgetType.draw) == "function" then
-        local ok, result = xpcall(function()
-            return widgetType.draw(imgui, node, bound, width, uiState) == true
+        local ok, resultWidth, resultHeight, resultChanged = xpcall(function()
+            return widgetType.draw(
+                imgui,
+                node,
+                bound,
+                drawX,
+                y,
+                availWidth,
+                availHeight,
+                uiState)
         end, function(err)
             return debug.traceback(err, 2)
         end)
         if not ok then
-            error(result, 0)
+            error(resultWidth, 0)
         end
-        drawChanged = result == true
+        consumedWidth = type(resultWidth) == "number" and resultWidth or 0
+        consumedHeight = type(resultHeight) == "number" and resultHeight or 0
+        drawChanged = resultChanged == true
     else
         libWarn("drawUiNode: widget type '%s' is missing draw", tostring(node.type))
     end
 
-    if node.indent then imgui.Unindent() end
+    if node.indent then
+        imgui.Unindent()
+        consumedWidth = consumedWidth + math.max(drawX - x, 0)
+    end
     imgui.PopID()
-    return bound._changed or drawChanged
+    SetCursorPosSafe(imgui, x, y + consumedHeight)
+    return consumedWidth, consumedHeight, bound._changed or drawChanged
+end
+
+function public.drawUiNode(imgui, node, uiState, width, customTypes)
+    local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
+    local startX = GetCursorPosXSafe(imgui)
+    local startY = GetCursorPosYSafe(imgui)
+    local _, consumedHeight, changed = DrawUiNodeAt(
+        imgui,
+        node,
+        uiState,
+        startX,
+        startY,
+        width,
+        nil,
+        widgetTypes,
+        layoutTypes)
+    SetCursorPosSafe(imgui, startX, startY + consumedHeight)
+    return changed
 end
 
 function public.drawUiTree(imgui, nodes, uiState, width, customTypes)
     if type(nodes) ~= "table" then
         return false
     end
+    local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
     local changed = false
+    local startX = GetCursorPosXSafe(imgui)
+    local currentY = GetCursorPosYSafe(imgui)
     for _, node in ipairs(nodes) do
-        if public.drawUiNode(imgui, node, uiState, width, customTypes) then
+        local _, consumedHeight, nodeChanged = DrawUiNodeAt(
+            imgui,
+            node,
+            uiState,
+            startX,
+            currentY,
+            width,
+            nil,
+            widgetTypes,
+            layoutTypes)
+        if nodeChanged then
             changed = true
         end
+        currentY = currentY + consumedHeight
     end
+    SetCursorPosSafe(imgui, startX, currentY)
     return changed
 end
 

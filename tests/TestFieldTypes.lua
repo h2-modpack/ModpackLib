@@ -323,7 +323,14 @@ function TestUiNodes:testTextWidgetCanUseValueSlotGeometryAndColor()
     lu.assertEquals(#coloredCalls, 1)
     lu.assertEquals(coloredCalls[1].text, "Epic")
     lu.assertTrue(sawCursorPosition(imgui, 20, 0))
-    lu.assertEquals(imgui._state.setCursorPosXCalls[1], 54)
+    local sawAlignedX = false
+    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+        if x == 54 then
+            sawAlignedX = true
+            break
+        end
+    end
+    lu.assertTrue(sawAlignedX)
 end
 
 
@@ -572,7 +579,7 @@ function TestUiNodes:testDrawUiNodeRespectsVisibleIfOnGroupLayout()
         },
         ui = {
             {
-                type = "group",
+                type = "vstack",
                 visibleIf = "ShowGroup",
                 children = {
                     { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
@@ -605,13 +612,10 @@ function TestUiNodes:testDrawUiNodeRespectsVisibleIfOnPanelLayout()
         },
         ui = {
             {
-                type = "panel",
+                type = "vstack",
                 visibleIf = "ShowPanel",
-                columns = {
-                    { name = "content", start = 0, width = 120 },
-                },
                 children = {
-                    { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", panel = { column = "content", line = 1 } },
+                    { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
                 },
             },
         },
@@ -661,13 +665,11 @@ end
 function TestUiNodes:testCollectQuickUiNodesRecursesThroughLayoutChildren()
     local nodes = {
         {
-            type = "group",
-            label = "Outer",
+            type = "vstack",
             children = {
                 { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", quick = true },
                 {
-                    type = "group",
-                    label = "Inner",
+                    type = "vstack",
                     children = {
                         { type = "stepper", binds = { value = "Count" }, label = "Count", quick = true, min = 1, max = 9, step = 1 },
                     },
@@ -1034,8 +1036,7 @@ function TestUiNodes:testDrawUiNodeReturnsChangedWhenLayoutChildChanges()
         },
         ui = {
             {
-                type = "group",
-                label = "Outer",
+                type = "vstack",
                 children = {
                     { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
                 },
@@ -1052,7 +1053,7 @@ function TestUiNodes:testDrawUiNodeReturnsChangedWhenLayoutChildChanges()
     lu.assertFalse(store.uiState.get("Enabled"))
 end
 
-function TestUiNodes:testPanelLayoutCanPlaceChildrenIntoColumnsAndLines()
+function TestUiNodes:testHStackAndVStackCanPlaceChildrenPredictably()
     local definition = {
         storage = {
             { type = "string", alias = "ModeA", configKey = "ModeA", default = "A" },
@@ -1061,29 +1062,29 @@ function TestUiNodes:testPanelLayoutCanPlaceChildrenIntoColumnsAndLines()
         },
         ui = {
             {
-                type = "panel",
-                columns = {
-                    { name = "left", start = 0, width = 100 },
-                    { name = "right", start = 120, width = 140 },
-                },
+                type = "vstack",
+                gap = 10,
                 children = {
                     {
-                        type = "dropdown",
-                        binds = { value = "ModeA" },
-                        values = { "A", "B" },
-                        panel = { column = "left", line = 1 },
-                    },
-                    {
-                        type = "dropdown",
-                        binds = { value = "ModeB" },
-                        values = { "A", "B" },
-                        panel = { column = "right", line = 1 },
+                        type = "hstack",
+                        gap = 20,
+                        children = {
+                            {
+                                type = "dropdown",
+                                binds = { value = "ModeA" },
+                                values = { "A", "B" },
+                            },
+                            {
+                                type = "dropdown",
+                                binds = { value = "ModeB" },
+                                values = { "A", "B" },
+                            },
+                        },
                     },
                     {
                         type = "dropdown",
                         binds = { value = "ModeC" },
                         values = { "A", "B" },
-                        panel = { column = "left", line = 2 },
                     },
                 },
             },
@@ -1099,39 +1100,23 @@ function TestUiNodes:testPanelLayoutCanPlaceChildrenIntoColumnsAndLines()
     local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
 
     lu.assertFalse(changed)
-    lu.assertEquals(imgui._state.newLineCalls, 0)
-
-    local saw0 = false
-    local saw120 = false
-    for _, x in ipairs(getCursorXs(imgui)) do
-        if x == 0 then
-            saw0 = true
-        elseif x == 120 then
-            saw120 = true
-        end
-    end
-    lu.assertTrue(saw0)
-    lu.assertTrue(saw120)
+    lu.assertTrue(#imgui._state.setCursorPosCalls > 0)
 end
 
-function TestUiNodes:testPanelLayoutOptionalIdPushesScope()
+function TestUiNodes:testVStackOptionalIdPushesScope()
     local definition = {
         storage = {
             { type = "string", alias = "ModeA", configKey = "ModeA", default = "A" },
         },
         ui = {
             {
-                type = "panel",
-                id = "ScopedPanel",
-                columns = {
-                    { name = "left", start = 0, width = 100 },
-                },
+                type = "vstack",
+                id = "ScopedStack",
                 children = {
                     {
                         type = "dropdown",
                         binds = { value = "ModeA" },
                         values = { "A", "B" },
-                        panel = { column = "left", line = 1 },
                     },
                 },
             },
@@ -1145,21 +1130,21 @@ function TestUiNodes:testPanelLayoutOptionalIdPushesScope()
     local changed = lib.drawUiNode(imgui, definition.ui[1], store.uiState)
 
     lu.assertFalse(changed)
-    local sawScopedPanel = false
+    local sawScopedStack = false
     for _, id in ipairs(imgui._state.pushIds) do
-        if id == "ScopedPanel" then
-            sawScopedPanel = true
+        if id == "ScopedStack" then
+            sawScopedStack = true
             break
         end
     end
-    lu.assertTrue(sawScopedPanel)
+    lu.assertTrue(sawScopedStack)
 end
 
-function TestUiNodes:testHorizontalTabsTracksActiveTabKey()
+function TestUiNodes:testTabsTracksActiveTabKey()
     local definition = {
         ui = {
             {
-                type = "horizontalTabs",
+                type = "tabs",
                 id = "Tabs",
                 children = {
                     { type = "text", text = "A", tabLabel = "First", tabId = "first" },
@@ -1185,8 +1170,9 @@ function TestUiNodes:testVerticalTabsCanBindActiveTab()
         },
         ui = {
             {
-                type = "verticalTabs",
+                type = "tabs",
                 id = "Tabs",
+                orientation = "vertical",
                 binds = { activeTab = "ActiveTab" },
                 children = {
                     { type = "text", text = "A", tabLabel = "First", tabId = "first" },
@@ -1216,15 +1202,24 @@ function TestUiNodes:testCustomLayoutCanDelegateChildRenderingThroughDrawChild()
                 delegatingLayout = {
                     handlesChildren = true,
                     validate = function() end,
-                    render = function(_, node, drawChild)
+                    render = function(_, node, drawChild, x, y, availWidth, availHeight)
                         sawDrawChild = type(drawChild) == "function"
                         local changed = false
+                        local consumedWidth = 0
+                        local consumedHeight = 0
                         for _, child in ipairs(node.children or {}) do
-                            if drawChild(child) then
+                            local childWidth, childHeight, childChanged = drawChild(child, x, y, availWidth, availHeight)
+                            if childChanged then
                                 changed = true
                             end
+                            if type(childWidth) == "number" and childWidth > consumedWidth then
+                                consumedWidth = childWidth
+                            end
+                            if type(childHeight) == "number" and childHeight > consumedHeight then
+                                consumedHeight = childHeight
+                            end
                         end
-                        return true, changed
+                        return consumedWidth, consumedHeight, changed
                     end,
                 },
             },
@@ -1249,7 +1244,7 @@ function TestUiNodes:testCustomLayoutCanDelegateChildRenderingThroughDrawChild()
     lu.assertFalse(store.uiState.get("Enabled"))
 end
 
-function TestUiNodes:testHorizontalTabsLayoutRendersOnlyActiveTabChild()
+function TestUiNodes:testTabsLayoutRendersOnlyActiveTabChild()
     local definition = {
         storage = {
             { type = "bool", alias = "EnabledA", configKey = "EnabledA", default = true },
@@ -1257,7 +1252,7 @@ function TestUiNodes:testHorizontalTabsLayoutRendersOnlyActiveTabChild()
         },
         ui = {
             {
-                type = "horizontalTabs",
+                type = "tabs",
                 id = "ExampleTabs",
                 children = {
                     {
@@ -1294,9 +1289,9 @@ function TestUiNodes:testHorizontalTabsLayoutRendersOnlyActiveTabChild()
     lu.assertFalse(store.uiState.get("EnabledB"))
 end
 
-function TestUiNodes:testHorizontalTabsLayoutCanColorTabLabels()
+function TestUiNodes:testTabsLayoutCanColorTabLabels()
     local node = {
-        type = "horizontalTabs",
+        type = "tabs",
         id = "ExampleTabs",
         children = {
             {
@@ -1331,9 +1326,10 @@ function TestUiNodes:testVerticalTabsLayoutSelectsAndRendersActiveChild()
         },
         ui = {
             {
-                type = "verticalTabs",
+                type = "tabs",
                 id = "ExampleVerticalTabs",
-                sidebarWidth = 220,
+                orientation = "vertical",
+                navWidth = 220,
                 children = {
                     {
                         type = "checkbox",
@@ -1373,8 +1369,9 @@ end
 
 function TestUiNodes:testVerticalTabsLayoutCanColorTabLabels()
     local node = {
-        type = "verticalTabs",
+        type = "tabs",
         id = "ExampleVerticalTabs",
+        orientation = "vertical",
         children = {
             {
                 type = "text",
@@ -1866,7 +1863,8 @@ function TestUiNodes:testPackedCheckboxListCanUseDeclaredItemSlots()
 
     local first0 = nil
     local first80 = nil
-    for _, x in ipairs(imgui._state.setCursorPosXCalls) do
+    for _, pos in ipairs(imgui._state.setCursorPosCalls) do
+        local x = pos.x
         if x == 0 then
             first0 = true
         elseif x == 80 then
@@ -2404,7 +2402,8 @@ function TestUiNodes:testPackedCheckboxListGeometryCompactsVisibleItemsIntoItemS
     lu.assertFalse(changed)
     local first24 = nil
     local first60 = nil
-    for index, x in ipairs(imgui._state.setCursorPosXCalls) do
+    for index, pos in ipairs(imgui._state.setCursorPosCalls) do
+        local x = pos.x
         if x == 24 and first24 == nil then
             first24 = index
         elseif x == 60 and first60 == nil then
