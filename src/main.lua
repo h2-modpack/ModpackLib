@@ -31,9 +31,10 @@ internal.shared = {
     chalk = chalk,
 }
 
-import 'core.lua'
-import 'field_registry.lua'
-import 'special.lua'
+import 'core/init.lua'
+import 'field_registry/init.lua'
+import 'special/init.lua'
+import 'compat/legacy_api.lua'
 
 -- Standalone framework debug toggle — hidden when Core is installed.
 ---@diagnostic disable-next-line: redundant-parameter

@@ -13,7 +13,7 @@ public.definition = {
     modpack = PACK_ID,
 }
 
-public.store = lib.createStore(config, public.definition, dataDefaults)
+public.store = lib.store.create(config, public.definition, dataDefaults)
 store = public.store
 ```
 
@@ -26,7 +26,7 @@ There is no supported use of:
 - `definition.options`
 - `definition.stateSchema`
 
-`lib.createStore(...)` now runs an early definition warning pass before storage/UI
+`lib.store.create(...)` now runs an early definition warning pass before storage/UI
 validation. It warns on:
 - unknown top-level definition keys
 - fields that exist but are ignored by the current module kind
@@ -34,6 +34,50 @@ validation. It warns on:
 
 That warning pass keeps the flat `definition` shape, but makes authoring mistakes
 visible much earlier.
+
+## Fast Start
+
+If you want the shortest path to a working module, start here:
+
+1. declare `public.definition`
+2. add a small `definition.storage`
+3. add a small `definition.ui`
+4. create the store with `lib.store.create(...)`
+5. let Framework or the standalone helper render it
+
+Minimal regular-module example:
+
+```lua
+local dataDefaults = import("config.lua")
+
+public.definition = {
+    modpack = PACK_ID,
+    id = "HelloModule",
+    name = "Hello Module",
+    category = "Run Mods",
+    subgroup = "General",
+    default = false,
+    affectsRunData = false,
+    storage = {
+        { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+    },
+    ui = {
+        { type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" },
+    },
+}
+
+public.store = lib.store.create(config, public.definition, dataDefaults)
+store = public.store
+```
+
+Use this path unless you already know you need:
+- special-module hosting
+- custom widgets
+- prepared-node caching
+- derived text
+- custom before/after draw hooks
+
+If you need only “a thing on screen,” start with `definition.ui` first and add complexity later.
 
 ## Definition By Consumer
 
@@ -99,11 +143,15 @@ Framework-visible differences:
 Validation and warning rule:
 - if you put a special-only field on a regular module, or a regular-only field on a special module, Lib/Framework now warn instead of silently leaving the mismatch implicit
 
+Practical rule:
+- choose regular unless you have a concrete reason to choose special
+- choose special when the module owns a custom tab or needs draw orchestration outside a normal declarative tree
+
 ## State Access Rules
 
 These are contract rules:
 - keep raw Chalk config local to `main.lua`
-- after `public.store = lib.createStore(config, public.definition, dataDefaults)`, other module files should use `store.read(...)` and `store.write(...)`
+- after `public.store = lib.store.create(config, public.definition, dataDefaults)`, other module files should use `store.read(...)` and `store.write(...)`
 - special UI should use `store.uiState`
 
 Avoid:
@@ -121,6 +169,11 @@ if store.read("Strict") then
     -- ...
 end
 ```
+
+Additional rule:
+- use `store.read(...)` / `store.write(...)` for persisted module state
+- use `store.uiState` for transient UI aliases and staged widget state
+- do not mix raw Chalk reads into normal module logic once the store exists
 
 ## Regular Modules
 
@@ -163,10 +216,15 @@ Rules:
 - `quickId` is optional but recommended when runtime quick filtering is used
 - `selectQuickUi(...)` runs at Quick Setup render time and may filter which quick candidates are shown
 
+Start here when:
+- the UI can be described as a normal tree of widgets and layouts
+- there is no need for custom frame orchestration
+- Quick Setup should come from declarative widget nodes
+
 Standalone helper:
 
 ```lua
-rom.gui.add_to_menu_bar(lib.standaloneUI(public.definition, public.store))
+rom.gui.add_to_menu_bar(lib.coordinator.standaloneUI(public.definition, public.store))
 ```
 
 ## Special Modules
@@ -215,7 +273,7 @@ If `public.DrawTab` is absent and `definition.ui` exists, Lib can render `defini
 Standalone helper:
 
 ```lua
-local specialUi = lib.standaloneSpecialUI(
+local specialUi = lib.special.standaloneUI(
     public.definition,
     public.store,
     public.store.uiState,
@@ -235,6 +293,12 @@ Use these hooks for special-module orchestration that should stay outside widget
 - pre-draw derived-text refresh
 - post-draw reactions to active root or active tab changes
 - module-local cache invalidation after a real UI change
+
+Reach for special modules when:
+- the module owns a custom tab shell
+- declarative `definition.ui` is still useful, but only as part of a larger hosted draw flow
+- the module needs before/after draw orchestration around the tab content
+- the module needs caller-owned prepared-node caches or derived-text refresh loops
 
 ## Storage Authoring
 
@@ -270,7 +334,7 @@ When to use transient aliases:
 - do not promote purely local widget navigation into transient storage unless another UI surface actually needs to read it
 
 Derived display text:
-- use transient string aliases plus `lib.runDerivedText(...)` when a plain `text` widget should display computed summaries, empty-state messages, or status lines
+- use transient string aliases plus `lib.special.runDerivedText(...)` when a plain `text` widget should display computed summaries, empty-state messages, or status lines
 - keep the compute logic module-side; Lib only provides the lightweight refresh helper
 - this helper is intentionally string-only and should not be used to drive dynamic widget or layout structure
 
@@ -284,8 +348,8 @@ Lib now uses caching actively, but cache ownership is intentionally split:
   - slot/panel order caches
   - internal merged-registry caches
 - module-owned semantic caches:
-  - prepared node trees cached with `lib.getCachedPreparedNode(...)`
-  - derived-text caches passed to `lib.runDerivedText(...)`
+  - prepared node trees cached with `lib.special.getCachedPreparedNode(...)`
+  - derived-text caches passed to `lib.special.runDerivedText(...)`
   - domain summaries, selector labels, and other module-specific memoized values
 
 Authoring rules:
@@ -297,8 +361,8 @@ Authoring rules:
 - treat node-attached Lib caches as mechanical implementation detail; module code should not invalidate or depend on them directly
 
 Practical split:
-- use `lib.getCachedPreparedNode(...)` for reusable prepared UI trees
-- use `lib.runDerivedText(...)` with a caller-owned cache for derived display strings
+- use `lib.special.getCachedPreparedNode(...)` for reusable prepared UI trees
+- use `lib.special.runDerivedText(...)` with a caller-owned cache for derived display strings
 - keep one-off function-local lookup caches local when they only save repeated reads within a single computation
 
 ### Packed storage
@@ -404,13 +468,12 @@ These custom types can be used by:
 - hosted regular-module UI
 - standalone Lib helpers
 - Framework rendering
-- special-module calls to `lib.drawUiNode(...)` / `lib.drawUiTree(...)`
+- special-module calls to `lib.ui.drawNode(...)` / `lib.ui.drawTree(...)`
 
-Custom widget `draw(...)` may stay fully imperative, or it may call `lib.drawWidgetSlots(...)` to let Lib manage slot ordering and geometry merging.
-If a custom widget is building an atomic local sub-structure and must avoid inheriting the surrounding cursor baseline, `lib.drawWidgetSlots(...)` may also be given an explicit `rowStartY`.
+Custom widget `draw(...)` may stay fully imperative.
 For local positioned custom-widget composition, prefer:
-- `lib.WidgetHelpers.drawStructuredAt(...)`
-- `lib.WidgetHelpers.estimateRowAdvanceY(...)`
+- `lib.registry.widgetHelpers.drawStructuredAt(...)`
+- `lib.registry.widgetHelpers.estimateRowAdvanceY(...)`
 
 These helpers are the supported way to keep a local custom widget honest about footprint settlement without recursively drawing another full structured widget.
 `dynamicSlots(...)` is the optional escape hatch for declaration-time-dependent slot names like `option:N`.

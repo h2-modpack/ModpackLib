@@ -1,7 +1,7 @@
 # Migrating To Layout V2
 
 This guide is for modules moving from the v1 `field_registry` layout surface to
-the v2 layout substrate on the `layout-substrate-v2` branch.
+the current v2 layout substrate.
 
 This is a **first-pass migration guide**. It captures the intentional contract
 changes already made in Lib. It should be updated again after the first real
@@ -87,8 +87,8 @@ These module concepts are still valid:
 - `definition.customTypes`
 - alias binds
 - transient vs persisted storage
-- `lib.drawUiNode(...)`
-- `lib.drawUiTree(...)`
+- `lib.ui.drawNode(...)`
+- `lib.ui.drawTree(...)`
 
 Module authors still provide declarative trees. The rendering substrate under
 that tree changed.
@@ -310,9 +310,34 @@ Recommended pattern:
 - render your internal controls
 - return the footprint you actually consumed
 
-The widget may still call `lib.WidgetHelpers.drawStructuredAt(...)` for local
+The widget may still call `lib.registry.widgetHelpers.drawStructuredAt(...)` for local
 atomic drawing. That helper is now compatible with the current positioned
 runtime and is still useful for freeform custom widgets.
+
+## Namespaced Lib Surface
+
+While migrating layout-v1 modules, also move module code to the preferred
+namespaced Lib surface.
+
+Preferred examples:
+- `lib.store.create(...)`
+- `lib.definition.validate(...)`
+- `lib.mutation.apply(...)`
+- `lib.ui.validate(...)`
+- `lib.ui.prepareNode(...)`
+- `lib.ui.drawNode(...)`
+- `lib.ui.drawTree(...)`
+- `lib.storage.validate(...)`
+- `lib.storage.getAliases(...)`
+- `lib.special.runPass(...)`
+- `lib.special.runDerivedText(...)`
+- `lib.special.getCachedPreparedNode(...)`
+- `lib.special.standaloneUI(...)`
+- `lib.coordinator.standaloneUI(...)`
+- `lib.registry.widgetHelpers.drawStructuredAt(...)`
+
+Old flat `lib.*` names still work through compatibility aliases, but new module
+code should not introduce more of them.
 
 ### Custom layouts
 
@@ -328,16 +353,88 @@ end
 
 ## Geometry Migration
 
-V1 widget slot geometry still exists in Lib internals for built-in widget
-composition, but modules should treat it as a legacy authoring surface.
+The authored `geometry` block has been removed. Modules can no longer attach a
+`geometry` block to widget nodes to reposition sub-components. The key is
+silently ignored if left on a node.
 
-Migration guidance:
-- do not build new module layout around `panel` + `geometry.slots`
-- use `vstack` / `hstack` first
-- only keep slot geometry when it is truly widget-internal
+### Replacements by widget type
 
-This is one of the main goals of v2:
-- outer and inner composition should converge on the same mental model
+**stepper / steppedRange** — `valueWidth` / `valueAlign`
+
+The old `value` slot `width` and `align` are now direct props on the node.
+
+```lua
+-- old
+geometry = { slots = { { name = "value", start = 24, width = 60, align = "center" } } }
+
+-- new
+valueWidth = 60,
+valueAlign = "center",   -- "left" | "center" | "right"
+```
+
+`start` positions for decrement/value/increment are not replaceable. They flow
+left-to-right in order. For `steppedRange`, both value slots share the same
+`valueWidth` and `valueAlign`.
+
+**inputText / dropdown / mappedDropdown / packedDropdown** — `controlWidth`
+
+```lua
+-- old
+geometry = { slots = { { name = "control", start = 120, width = 180 } } }
+
+-- new
+controlWidth = 180,
+```
+
+`start` is not replaceable. The control renders after the label in normal flow.
+
+**text** — `width`
+
+```lua
+-- old
+geometry = { slots = { { name = "value", width = 300 } } }
+
+-- new
+width = 300,
+```
+
+`align` on a text slot has no replacement. Use `hstack` / `split` to position
+text at a fixed x instead.
+
+**radio / mappedRadio / packedRadio** — no replacement for option slots
+
+Explicit `start` / `line` on individual options is gone. Options now render
+one per line in sequential order. For inline multi-column layouts, restructure
+as separate widgets in an `hstack`.
+
+**packedCheckboxList** — no replacement for item slot geometry
+
+`dynamicSlots` / `item:N` geometry is gone. Items render one per line in the
+order they appear after filtering.
+
+**checkbox / button / confirmButton** — nothing to migrate.
+
+### Custom widget types
+
+Remove `slots`, `dynamicSlots`, and `defaultGeometry` from custom widget type
+definitions. They are no longer part of the contract.
+
+```lua
+-- old
+fancyStepper = {
+    binds = { value = { storageType = "int" } },
+    slots = { "decrement", "value", "increment" },
+    validate = function() end,
+    draw = function() end,
+}
+
+-- new
+fancyStepper = {
+    binds = { value = { storageType = "int" } },
+    validate = function() end,
+    draw = function() end,
+}
+```
 
 ## Recommended Migration Order
 
@@ -362,7 +459,8 @@ For a single module, recommended order is:
 1. replace top-level layout node types
 2. replace nested rows/sections with `vstack` / `hstack`
 3. migrate custom widgets to the new draw signature
-4. reintroduce region nodes (`tabs`, `split`, `scrollRegion`) only where needed
+4. switch module code to namespaced Lib calls while you are already touching the file
+5. reintroduce region nodes (`tabs`, `split`, `scrollRegion`) only where needed
 
 ## Performance Rules
 
@@ -380,13 +478,10 @@ that as a design bug, not just polish debt.
 
 ## Current Rough Edges
 
-This guide is intentionally ahead of the first real migrated subtree.
-
-Expect these sections to get refined after the first module slice proves:
+Expect these sections to get refined as more modules migrate:
 - whether a dedicated separator widget returns
 - whether shared cross-row sizing needs a first-class surface earlier
 - whether `split` sizing rules need tightening
-- where custom widget helpers are still too low-level
 
 ## Migration Checklist
 
@@ -397,20 +492,31 @@ For each module:
 3. update custom widget `draw(...)` signatures
 4. make custom widgets return `(consumedWidth, consumedHeight, changed)`
 5. verify active-tab binds still work through `binds.activeTab`
-6. retest layout for:
+6. search for `geometry = {` in node files and remove each block:
+   - `stepper`/`steppedRange` value slot width/align → `valueWidth` / `valueAlign`
+   - `inputText`/`dropdown` family control width → `controlWidth`
+   - `text` value width → `width`
+   - option/item slot geometry on `radio`/`packedCheckboxList` → remove; restructure layout if needed
+7. remove `slots`, `dynamicSlots`, `defaultGeometry` from custom widget type definitions
+8. bump the module's node cache version string so stale prepared nodes are evicted
+9. switch old flat Lib calls to namespaced calls:
+   - `lib.createStore(...)` → `lib.store.create(...)`
+   - `lib.validateUi(...)` → `lib.ui.validate(...)`
+   - `lib.drawUiNode(...)` / `lib.drawUiTree(...)` → `lib.ui.drawNode(...)` / `lib.ui.drawTree(...)`
+   - `lib.runUiStatePass(...)` → `lib.special.runPass(...)`
+   - `lib.runDerivedText(...)` → `lib.special.runDerivedText(...)`
+   - `lib.getCachedPreparedNode(...)` → `lib.special.getCachedPreparedNode(...)`
+   - `lib.WidgetHelpers.*` → `lib.registry.widgetHelpers.*`
+10. retest layout for:
    - overlap
    - missing height settlement
    - broken scroll regions
    - broken tab selection
-7. profile steady-state redraw cost
+11. profile steady-state redraw cost
 
 ## Status
 
-This is a branch-local migration guide for the active v2 substrate rewrite.
+This is the live migration guide for modules still on the older layout surface.
 
-It should be treated as:
-- real enough to guide migration work now
-- not yet final enough to be copied back to `main`
-
-Once the first BoonBans slice lands cleanly, update this guide with the concrete
-lessons from that migration.
+BoonBans has already been migrated. The geometry section of this
+guide reflects lessons from that migration.

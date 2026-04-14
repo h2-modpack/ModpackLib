@@ -2,12 +2,13 @@ local internal = AdamantModpackLib_Internal
 local shared = internal.shared
 local WidgetTypes = shared.WidgetTypes
 local LayoutTypes = shared.LayoutTypes
-local libWarn = shared.libWarn
+local libWarn = shared.logging.warnIf
 local registry = shared.fieldRegistry
+public.ui = public.ui or {}
+local ui = public.ui
 
 local ValidateCustomTypes = registry.ValidateCustomTypes
 local MergeCustomTypes = registry.MergeCustomTypes
-local ValidateWidgetGeometry = registry.ValidateWidgetGeometry
 local EnsurePreparedStorage = registry.EnsurePreparedStorage
 local DrawLayoutNode = registry.DrawLayoutNode
 local GetCursorPosXSafe = registry.GetCursorPosXSafe
@@ -238,7 +239,6 @@ local function ValidateUiNode(node, prefix, storageNodes, widgetTypes, layoutTyp
         node._widgetType = widgetType
         node._layoutType = nil
         widgetType.validate(node, prefix)
-        ValidateWidgetGeometry(node, prefix, widgetType)
         if node.quickId ~= nil and (type(node.quickId) ~= "string" or node.quickId == "") then
             libWarn("%s: quickId must be a non-empty string", prefix)
         end
@@ -270,7 +270,12 @@ local function ValidateUiNode(node, prefix, storageNodes, widgetTypes, layoutTyp
     ValidateVisibleIf(prefix, node, storageNodes)
 end
 
-function public.validateUi(uiNodes, label, storage, customTypes)
+--- Validates a UI tree against the current widget, layout, and storage registries.
+---@param uiNodes table Ordered list of UI nodes to validate.
+---@param label string Validation label used to prefix warnings.
+---@param storage table|nil Storage schema used to resolve binds and visibility aliases.
+---@param customTypes table|nil Optional custom widget/layout registry extensions.
+function ui.validate(uiNodes, label, storage, customTypes)
     if type(uiNodes) ~= "table" then
         libWarn("%s: ui is not a table", label)
         return
@@ -285,13 +290,22 @@ function public.validateUi(uiNodes, label, storage, customTypes)
     end
 end
 
-function public.prepareUiNode(node, label, storage, customTypes)
+--- Validates a single UI node against the current widget, layout, and storage registries.
+---@param node table UI node to validate in place.
+---@param label string|nil Optional label used to prefix validation warnings.
+---@param storage table|nil Storage schema used to resolve binds and visibility aliases.
+---@param customTypes table|nil Optional custom widget/layout registry extensions.
+function ui.prepareNode(node, label, storage, customTypes)
     local prefix = label or "prepareUiNode"
     local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
     ValidateUiNode(node, prefix, EnsurePreparedStorage(storage, prefix .. " storage"), widgetTypes, layoutTypes)
 end
 
-function public.prepareWidgetNode(node, label, customTypes)
+--- Validates a single widget node without requiring a full UI tree or storage schema.
+---@param node table Widget node to validate in place.
+---@param label string|nil Optional label used to prefix validation warnings.
+---@param customTypes table|nil Optional custom widget registry extensions.
+function ui.prepareWidgetNode(node, label, customTypes)
     local prefix = label or "prepareWidgetNode"
     if type(node) ~= "table" then
         libWarn("%s: widget node is not a table", prefix)
@@ -308,11 +322,16 @@ function public.prepareWidgetNode(node, label, customTypes)
         return
     end
     widgetType.validate(node, prefix)
-    ValidateWidgetGeometry(node, prefix, widgetType)
     EnsureNodeImguiId(node, prefix, widgetType)
 end
 
-function public.prepareUiNodes(nodes, label, storage, customTypes)
+--- Validates a list of UI nodes and returns a bind-alias registry for the prepared nodes.
+---@param nodes table Ordered list of UI nodes to validate.
+---@param label string|nil Optional label used to prefix validation warnings.
+---@param storage table|nil Storage schema used to resolve binds and visibility aliases.
+---@param customTypes table|nil Optional custom widget/layout registry extensions.
+---@return table registryTable Map from bind alias to the prepared UI node that declared it.
+function ui.prepareNodes(nodes, label, storage, customTypes)
     local prefix = label or "prepareUiNodes"
     local preparedStorage = EnsurePreparedStorage(storage, prefix .. " storage")
     local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
@@ -326,7 +345,11 @@ function public.prepareUiNodes(nodes, label, storage, customTypes)
     return registryTable
 end
 
-function public.isUiNodeVisible(node, view)
+--- Evaluates whether a UI node should be visible for the supplied view-state snapshot.
+---@param node table UI node whose `visibleIf` contract should be evaluated.
+---@param view table|nil View-state table keyed by storage alias.
+---@return boolean visible True when the node should be rendered for the current view state.
+function ui.isVisible(node, view)
     if not node.visibleIf then
         return true
     end
@@ -361,7 +384,7 @@ function public.isUiNodeVisible(node, view)
 end
 
 local function DrawUiNodeAt(imgui, node, uiState, x, y, availWidth, availHeight, widgetTypes, layoutTypes)
-    if not public.isUiNodeVisible(node, uiState and uiState.view) then
+    if not ui.isVisible(node, uiState and uiState.view) then
         return 0, 0, false
     end
 
@@ -449,7 +472,14 @@ local function DrawUiNodeAt(imgui, node, uiState, x, y, availWidth, availHeight,
     return consumedWidth, consumedHeight, bound._changed or drawChanged
 end
 
-function public.drawUiNode(imgui, node, uiState, width, customTypes)
+--- Draws a single prepared UI node at the current ImGui cursor position.
+---@param imgui table Active ImGui binding surface.
+---@param node table Prepared UI node to render.
+---@param uiState table|nil UI state used to resolve binds, writes, and visibility.
+---@param width number|nil Available width hint for the node.
+---@param customTypes table|nil Optional custom widget/layout registry extensions.
+---@return boolean changed True when the node or one of its binds changed during rendering.
+function ui.drawNode(imgui, node, uiState, width, customTypes)
     local widgetTypes, layoutTypes = MergeCustomTypes(customTypes)
     local startX = GetCursorPosXSafe(imgui)
     local startY = GetCursorPosYSafe(imgui)
@@ -467,7 +497,14 @@ function public.drawUiNode(imgui, node, uiState, width, customTypes)
     return changed
 end
 
-function public.drawUiTree(imgui, nodes, uiState, width, customTypes)
+--- Draws a list of prepared UI nodes sequentially from the current ImGui cursor position.
+---@param imgui table Active ImGui binding surface.
+---@param nodes table Ordered list of prepared UI nodes to render.
+---@param uiState table|nil UI state used to resolve binds, writes, and visibility.
+---@param width number|nil Available width hint for each node.
+---@param customTypes table|nil Optional custom widget/layout registry extensions.
+---@return boolean changed True when any rendered node or bind changed during rendering.
+function ui.drawTree(imgui, nodes, uiState, width, customTypes)
     if type(nodes) ~= "table" then
         return false
     end
@@ -496,7 +533,12 @@ function public.drawUiTree(imgui, nodes, uiState, width, customTypes)
 end
 
 
-function public.collectQuickUiNodes(nodes, out, customTypes)
+--- Collects all quick-UI widget nodes from a prepared UI tree.
+---@param nodes table Ordered list of UI nodes to scan.
+---@param out table|nil Optional output list to append quick nodes into.
+---@param customTypes table|nil Optional custom widget/layout registry extensions.
+---@return table out List containing every quick-UI widget node found in the tree.
+function ui.collectQuick(nodes, out, customTypes)
     out = out or {}
     if type(nodes) ~= "table" then
         return out
@@ -509,13 +551,16 @@ function public.collectQuickUiNodes(nodes, out, customTypes)
                 table.insert(out, node)
             end
             if layoutTypes[node.type] and type(node.children) == "table" then
-                public.collectQuickUiNodes(node.children, out, customTypes)
+                ui.collectQuick(node.children, out, customTypes)
             end
         end
     end
     return out
 end
 
-function public.getQuickUiNodeId(node)
+--- Derives the quick-UI identifier for a UI node.
+---@param node table UI node to inspect.
+---@return string|nil quickId Derived quick-UI identifier, or nil when the node has none.
+function ui.getQuickId(node)
     return DeriveQuickUiNodeId(node)
 end

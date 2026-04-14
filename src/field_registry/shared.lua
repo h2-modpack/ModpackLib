@@ -4,7 +4,6 @@ local WidgetHelpers = shared.WidgetHelpers
 local StorageTypes = shared.StorageTypes
 local WidgetTypes = shared.WidgetTypes
 local LayoutTypes = shared.LayoutTypes
-local libWarn = shared.libWarn
 local registry = shared.fieldRegistry or {}
 shared.fieldRegistry = registry
 local mergedCustomTypesCache = setmetatable({}, { __mode = "k" })
@@ -131,164 +130,6 @@ end
 
 registry.SetCursorPosSafe = SetCursorPosSafe
 
-local function BuildSlotSet(widgetType)
-    if type(widgetType) ~= "table" or type(widgetType.slots) ~= "table" then
-        return {}
-    end
-    local allowed = {}
-    for _, key in ipairs(widgetType.slots) do
-        allowed[key] = true
-    end
-    return allowed
-end
-
-local function ValidateDynamicSlot(widgetType, node, slotName)
-    if type(widgetType) ~= "table" then
-        return false, nil
-    end
-    local dynamicSlots = widgetType.dynamicSlots
-    if type(dynamicSlots) == "function" then
-        local ok, err = dynamicSlots(node, slotName)
-        return ok == true, err
-    end
-    return false, nil
-end
-
-local function ParseWidgetGeometry(node, prefix, widgetType, geometry)
-    if geometry == nil then
-        return {}
-    end
-    if type(geometry) ~= "table" then
-        libWarn("%s: geometry must be a table", prefix)
-        return {}
-    end
-    local allowed = BuildSlotSet(widgetType)
-    local slotSpecs = geometry.slots
-    local parsed = {}
-
-    for key in pairs(geometry) do
-        if key ~= "slots" then
-            libWarn("%s: geometry key '%s' is not supported; geometry only supports 'slots'",
-                prefix, tostring(key))
-        end
-    end
-
-    if slotSpecs == nil then
-        return parsed
-    end
-    if type(slotSpecs) ~= "table" then
-        libWarn("%s: geometry.slots must be a list", prefix)
-        return parsed
-    end
-
-    local seen = {}
-    for index, slotSpec in ipairs(slotSpecs) do
-        local slotPrefix = ("%s geometry.slots[%d]"):format(prefix, index)
-        if type(slotSpec) ~= "table" then
-            libWarn("%s must be a table", slotPrefix)
-        else
-            local slotName = slotSpec.name
-            if type(slotName) ~= "string" or slotName == "" then
-                libWarn("%s.name must be a non-empty string", slotPrefix)
-            else
-                local dynamicOk, dynamicErr = ValidateDynamicSlot(widgetType, node, slotName)
-                if dynamicErr ~= nil then
-                    libWarn("%s: %s", prefix, tostring(dynamicErr))
-                elseif not allowed[slotName] and not dynamicOk then
-                    libWarn("%s: geometry slot '%s' is not supported by widget type '%s'",
-                        prefix, tostring(slotName), tostring(node.type))
-                end
-                if seen[slotName] then
-                    libWarn("%s: geometry slot '%s' is declared more than once", prefix, tostring(slotName))
-                end
-                seen[slotName] = true
-
-                for key, value in pairs(slotSpec) do
-                    if key ~= "name" and key ~= "line" and key ~= "start" and key ~= "width" and key ~= "align" then
-                        libWarn("%s: unknown slot geometry key '%s'", slotPrefix, tostring(key))
-                    elseif key == "line" then
-                        if type(value) ~= "number" then
-                            libWarn("%s.line must be a number", slotPrefix)
-                        elseif value < 1 or math.floor(value) ~= value then
-                            libWarn("%s.line must be a positive integer", slotPrefix)
-                        end
-                    elseif key == "start" then
-                        if type(value) ~= "number" then
-                            libWarn("%s.start must be a number", slotPrefix)
-                        elseif value < 0 then
-                            libWarn("%s.start must be a non-negative number", slotPrefix)
-                        end
-                    elseif key == "width" then
-                        if type(value) ~= "number" or value <= 0 then
-                            libWarn("%s.width must be a positive number", slotPrefix)
-                        end
-                    elseif key == "align" then
-                        if value ~= "center" and value ~= "right" then
-                            libWarn("%s.align must be one of 'center' or 'right'", slotPrefix)
-                        end
-                    end
-                end
-
-                if slotSpec.align ~= nil and (type(slotSpec.width) ~= "number" or slotSpec.width <= 0) then
-                    libWarn("%s.align requires width on the same slot", slotPrefix)
-                end
-
-                parsed[slotName] = {
-                    line = type(slotSpec.line) == "number" and slotSpec.line >= 1 and math.floor(slotSpec.line) == slotSpec.line
-                        and slotSpec.line or nil,
-                    start = type(slotSpec.start) == "number" and slotSpec.start or nil,
-                    width = type(slotSpec.width) == "number" and slotSpec.width > 0 and slotSpec.width or nil,
-                    align = (slotSpec.align == "center" or slotSpec.align == "right") and slotSpec.align or nil,
-                }
-            end
-        end
-    end
-    return parsed
-end
-
-local function ValidateWidgetGeometry(node, prefix, widgetType)
-    node._defaultSlotGeometry = ParseWidgetGeometry(
-        node,
-        prefix .. " defaultGeometry",
-        widgetType,
-        type(widgetType) == "table" and widgetType.defaultGeometry or nil)
-    node._slotGeometry = ParseWidgetGeometry(node, prefix, widgetType, node.geometry)
-    if type(widgetType) == "table" and type(widgetType.validateGeometry) == "function" then
-        widgetType.validateGeometry(node, prefix .. " defaultGeometry", node._defaultSlotGeometry)
-        widgetType.validateGeometry(node, prefix, node._slotGeometry)
-    end
-end
-
-registry.ValidateWidgetGeometry = ValidateWidgetGeometry
-
-local function GetSlotGeometry(node, slotName)
-    if type(node) ~= "table" then
-        return nil
-    end
-    local defaultSlot = type(node._defaultSlotGeometry) == "table" and node._defaultSlotGeometry[slotName] or nil
-    local staticSlot = type(node._slotGeometry) == "table" and node._slotGeometry[slotName] or nil
-
-    if type(defaultSlot) ~= "table" then
-        return staticSlot
-    end
-    if type(staticSlot) ~= "table" then
-        return defaultSlot
-    end
-
-    local merged = {}
-    for key, value in pairs(defaultSlot) do
-        merged[key] = value
-    end
-    for key, value in pairs(staticSlot) do
-        merged[key] = value
-    end
-    if next(merged) == nil then
-        return nil
-    end
-    return merged
-end
-
-registry.GetSlotGeometry = GetSlotGeometry
 
 local function GetStyleMetricX(style, key, fallback)
     local metric = style and style[key]
@@ -411,22 +252,6 @@ local function AssertWidgetContracts(registryTable, label)
     end
 end
 
-local function AssertWidgetSlotsContract(widgetType, typeName, label)
-    if widgetType.slots == nil then
-        return
-    end
-    if type(widgetType.slots) ~= "table" then
-        error(("%s type '%s' slots must be a list of non-empty strings"):format(
-            label, tostring(typeName)), 0)
-    end
-    for index, key in ipairs(widgetType.slots) do
-        if type(key) ~= "string" or key == "" then
-            error(("%s type '%s' slots[%d] must be a non-empty string"):format(
-                label, tostring(typeName), index), 0)
-        end
-    end
-end
-
 local function ValidateCustomTypes(customTypes, label)
     if type(customTypes) ~= "table" then
         error((label or "module") .. ": definition.customTypes must be a table", 0)
@@ -451,7 +276,6 @@ local function ValidateCustomTypes(customTypes, label)
                 error(("%s: customTypes.widgets '%s' must declare a binds table"):format(
                     label or "module", tostring(typeName)), 0)
             end
-            AssertWidgetSlotsContract(item, typeName, "Widget")
         end
     end
     if layouts ~= nil then
@@ -501,7 +325,7 @@ end
 
 registry.MergeCustomTypes = MergeCustomTypes
 
-function public.validateRegistries()
+function registry.validateRegistries()
     AssertRegistryContracts(StorageTypes, REQUIRED_STORAGE_METHODS, "Storage")
     AssertWidgetContracts(WidgetTypes, "Widget")
     AssertRegistryContracts(LayoutTypes, REQUIRED_LAYOUT_METHODS, "Layout")
@@ -509,7 +333,6 @@ function public.validateRegistries()
         if type(widgetType.binds) ~= "table" then
             error(("Widget type '%s' must declare a binds table"):format(tostring(typeName)), 0)
         end
-        AssertWidgetSlotsContract(widgetType, typeName, "Widget")
     end
     return true
 end

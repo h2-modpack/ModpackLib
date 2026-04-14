@@ -1,9 +1,29 @@
 local internal = AdamantModpackLib_Internal
 local shared = internal.shared
 local StorageTypes = shared.StorageTypes
-local libWarn = shared.libWarn
+local libWarn = shared.logging.warnIf
 local registry = shared.fieldRegistry
+public.storage = public.storage or {}
+local storageApi = public.storage
 local NormalizeInteger = registry.NormalizeInteger
+
+local function DeepValueEqual(a, b)
+    if a == b then return true end
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return false end
+
+    for key, value in pairs(a) do
+        if not DeepValueEqual(value, b[key]) then
+            return false
+        end
+    end
+    for key in pairs(b) do
+        if a[key] == nil then
+            return false
+        end
+    end
+    return true
+end
 
 StorageTypes.bool = {
     valueKind = "bool",
@@ -232,7 +252,10 @@ local function ValidateChildAlias(bitNode, root, storage, seenAliases, seenRootK
     root._bitAliases[#root._bitAliases + 1] = child
 end
 
-function public.validateStorage(storage, label)
+--- Validates a storage schema and prepares its root, alias, and packed-bit metadata in place.
+---@param storage table Ordered list of storage root descriptors to validate.
+---@param label string Validation label used to prefix warnings.
+function storageApi.validate(storage, label)
     if type(storage) ~= "table" then
         libWarn("%s: storage is not a table", label)
         return
@@ -319,15 +342,15 @@ function public.validateStorage(storage, label)
                             local encoded = child.type == "bool"
                                 and (child.default == true and 1 or 0)
                                 or child.default
-                            node.default = public.writeBitsValue(node.default, child.offset, child.width, encoded)
+                            node.default = public.accessors.writePackedBits(node.default, child.offset, child.width, encoded)
                         end
                     else
                         node.default = NormalizeInteger(node, node.default)
                         for _, child in ipairs(node._bitAliases) do
                             if child.default == nil then
-                                child.default = public.readBitsValue(node.default, child.offset, child.width)
+                                child.default = public.accessors.readPackedBits(node.default, child.offset, child.width)
                             else
-                                local expected = public.readBitsValue(node.default, child.offset, child.width)
+                                local expected = public.accessors.readPackedBits(node.default, child.offset, child.width)
                                 local normalized = StorageTypes[child.type].normalize(child, child.default)
                                 if expected ~= normalized then
                                     libWarn("%s: packed child default '%s' does not match packedInt default",
@@ -348,12 +371,18 @@ function public.validateStorage(storage, label)
     end
 end
 
-function public.getStorageRoots(storage)
+--- Returns the prepared persistent root nodes for a validated storage schema.
+---@param storage table Validated storage schema.
+---@return table roots Prepared list of persistent root storage nodes.
+function storageApi.getRoots(storage)
     if type(storage) ~= "table" then return {} end
     return rawget(storage, "_rootNodes") or {}
 end
 
-function public.getPackWidth(node)
+--- Returns the packed width contributed by a storage node, when the node type supports packing.
+---@param node table Storage node to inspect.
+---@return number|nil width Packed width in bits, or nil when the node is not packable.
+function storageApi.getPackWidth(node)
     if type(node) ~= "table" then return nil end
     local storageType = StorageTypes[node.type]
     if storageType and storageType.packWidth then
@@ -362,7 +391,23 @@ function public.getPackWidth(node)
     return nil
 end
 
-function public.getStorageAliases(storage)
+--- Compares two values using storage-type equality when available, falling back to deep equality.
+---@param node table|nil Storage node whose type-specific equality should be used.
+---@param a any First value to compare.
+---@param b any Second value to compare.
+---@return boolean equal True when the two values are considered equivalent for the storage node.
+function storageApi.valuesEqual(node, a, b)
+    local storageType = node and StorageTypes and node.type and StorageTypes[node.type] or nil
+    if storageType and type(storageType.equals) == "function" then
+        return storageType.equals(node, a, b)
+    end
+    return DeepValueEqual(a, b)
+end
+
+--- Returns the prepared alias map for a validated storage schema.
+---@param storage table Validated storage schema.
+---@return table aliases Map from storage alias to prepared storage node.
+function storageApi.getAliases(storage)
     if type(storage) ~= "table" then return {} end
     return rawget(storage, "_aliasNodes") or {}
 end
@@ -374,8 +419,8 @@ local function EnsurePreparedStorage(storage, label)
     if rawget(storage, "_aliasNodes") ~= nil and rawget(storage, "_rootNodes") ~= nil then
         return storage._aliasNodes
     end
-    public.validateStorage(storage, label or "storage")
-    return public.getStorageAliases(storage)
+    storageApi.validate(storage, label or "storage")
+    return storageApi.getAliases(storage)
 end
 
 registry.EnsurePreparedStorage = EnsurePreparedStorage

@@ -3,12 +3,12 @@
 This document replaces the old field-centric model.
 
 Lib now has three registries:
-- `lib.StorageTypes`
-- `lib.WidgetTypes`
-- `lib.LayoutTypes`
+- `lib.registry.storage`
+- `lib.registry.widgets`
+- `lib.registry.layouts`
 
 Lib also reserves:
-- `lib.WidgetHelpers`
+- `lib.registry.widgetHelpers`
 
 These registries are separate on purpose.
 
@@ -447,7 +447,7 @@ Lib validates:
 - `visibleIf` alias validity
 
 Lib hard-validates registry contracts through:
-- `lib.validateRegistries()`
+- `lib.registry.validate()`
 
 ## Built-In Behavior Notes
 
@@ -551,11 +551,11 @@ Modules may extend the built-in registries with:
 - custom widgets must declare `binds`
 - custom widgets must declare `draw(...)`
 
-`lib.WidgetHelpers` is the public home for small widget-authoring helpers that do not belong in the runtime `WidgetTypes` contract table.
+`lib.registry.widgetHelpers` is the public home for small widget-authoring helpers that do not belong in the runtime widget contract tables.
 
 Current helpers:
-- `lib.WidgetHelpers.drawStructuredAt(...)`
-- `lib.WidgetHelpers.estimateRowAdvanceY(...)`
+- `lib.registry.widgetHelpers.drawStructuredAt(...)`
+- `lib.registry.widgetHelpers.estimateRowAdvanceY(...)`
 
 Rules:
 - custom widget names may not collide with built-in widget or layout names
@@ -589,12 +589,12 @@ Leaf-widget rule:
 Custom widgets may stay fully imperative, but widgets that declare `slots` and `defaultGeometry` can call `lib.drawWidgetSlots(...)` from inside `draw(...)` to reuse Lib-managed slot ordering and geometry merging.
 
 Custom types are merged into the registry surface for:
-- `lib.validateUi(...)`
-- `lib.prepareUiNode(...)`
-- `lib.prepareUiNodes(...)`
-- `lib.drawUiNode(...)`
-- `lib.drawUiTree(...)`
-- `lib.collectQuickUiNodes(...)`
+- `lib.ui.validate(...)`
+- `lib.ui.prepareNode(...)`
+- `lib.ui.prepareNodes(...)`
+- `lib.ui.drawNode(...)`
+- `lib.ui.drawTree(...)`
+- `lib.ui.collectQuick(...)`
 
 ## Minimal Example
 
