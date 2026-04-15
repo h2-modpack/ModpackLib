@@ -1,90 +1,93 @@
 # Module Authoring
 
-This guide covers the supported module contract after the storage/UI redesign.
+This guide describes the current supported module contract in Lib.
 
-## Shared Rules
+It is written for the live v2 surface:
+- namespaced public API
+- rect-based UI runtime
+- `vstack` / `hstack` / `tabs` / `split` layout model
 
-Every module exposes:
+It does **not** document the old v1 layout system.
+
+## Scope
+
+This guide covers:
+- regular vs special modules
+- `public.definition`
+- `lib.store.create(...)`
+- storage authoring
+- UI authoring
+- custom widgets and layouts
+- standalone helpers
+
+It does **not** cover:
+- built-in widget and layout registry details
+- internal file organization
+- full storage type contracts
+
+Those are covered in:
+- [FIELD_REGISTRY.md](FIELD_REGISTRY.md)
+
+## Preferred Lib Surface
+
+New module code should use the namespaced API:
+
+- `lib.store.create(...)`
+- `lib.definition.validate(...)`
+- `lib.mutation.apply(...)`
+- `lib.mutation.revert(...)`
+- `lib.mutation.reapply(...)`
+- `lib.mutation.setEnabled(...)`
+- `lib.ui.validate(...)`
+- `lib.ui.drawNode(...)`
+- `lib.ui.drawTree(...)`
+- `lib.storage.validate(...)`
+- `lib.storage.getAliases(...)`
+- `lib.special.runPass(...)`
+- `lib.special.runDerivedText(...)`
+- `lib.special.getCachedPreparedNode(...)`
+- `lib.special.standaloneUI(...)`
+- `lib.coordinator.register(...)`
+- `lib.coordinator.isEnabled(...)`
+- `lib.coordinator.standaloneUI(...)`
+- `lib.registry.widgetHelpers.drawStructuredAt(...)`
+
+Flat `lib.*` aliases still exist for compatibility, but new modules should not
+introduce more of them.
+
+## Shared Module Shape
+
+Every module follows the same basic pattern:
 
 ```lua
 local dataDefaults = import("config.lua")
 
 public.definition = {
     modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
 }
 
 public.store = lib.store.create(config, public.definition, dataDefaults)
 store = public.store
 ```
 
-Every module now declares:
-- `definition.storage`
-- `definition.ui` when it wants Lib-managed rendering
-- optional `definition.customTypes` for module-local reusable widgets/layouts
+The meaningful authoring fields are:
+- metadata
+- `storage`
+- `ui`
+- optional `customTypes`
+- optional mutation lifecycle exports
 
 There is no supported use of:
 - `definition.options`
 - `definition.stateSchema`
 
-`lib.store.create(...)` now runs an early definition warning pass before storage/UI
-validation. It warns on:
-- unknown top-level definition keys
-- fields that exist but are ignored by the current module kind
-- incomplete lifecycle declarations like `apply` without `revert`
+## Definition Overview
 
-That warning pass keeps the flat `definition` shape, but makes authoring mistakes
-visible much earlier.
+Lib and Framework read different parts of the flat `definition` table.
 
-## Fast Start
-
-If you want the shortest path to a working module, start here:
-
-1. declare `public.definition`
-2. add a small `definition.storage`
-3. add a small `definition.ui`
-4. create the store with `lib.store.create(...)`
-5. let Framework or the standalone helper render it
-
-Minimal regular-module example:
-
-```lua
-local dataDefaults = import("config.lua")
-
-public.definition = {
-    modpack = PACK_ID,
-    id = "HelloModule",
-    name = "Hello Module",
-    category = "Run Mods",
-    subgroup = "General",
-    default = false,
-    affectsRunData = false,
-    storage = {
-        { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
-    },
-    ui = {
-        { type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" },
-    },
-}
-
-public.store = lib.store.create(config, public.definition, dataDefaults)
-store = public.store
-```
-
-Use this path unless you already know you need:
-- special-module hosting
-- custom widgets
-- prepared-node caching
-- derived text
-- custom before/after draw hooks
-
-If you need only “a thing on screen,” start with `definition.ui` first and add complexity later.
-
-## Definition By Consumer
-
-The runtime shape stays flat, but authors should think about `definition` in
-consumer groups.
-
-Framework discovery and routing reads:
+Framework discovery and routing:
 - `modpack`
 - `special`
 - `id`
@@ -95,93 +98,49 @@ Framework discovery and routing reads:
 - `tooltip`
 - `default`
 
-Lib store and hosted UI reads:
+Lib store and UI:
 - `storage`
 - `ui`
 - `customTypes`
 
-Framework hosted Quick Setup reads:
+Quick UI:
 - `selectQuickUi`
 
-Lifecycle and run-data behavior reads:
+Mutation and run-data lifecycle:
 - `affectsRunData`
 - `patchPlan`
 - `apply`
 - `revert`
 
-Framework hash/profile encoding may also read:
+Hash/profile encoding may also read:
 - `hashGroups`
 
-Authoring rule:
-- keep the table flat
-- but place fields mentally by consumer so you know why each field exists
+The table stays flat, but you should think about fields by consumer.
 
-## Special vs Regular Decision Guide
+## Regular vs Special
 
-Use a regular module when:
-- the module belongs under a category/subgroup in the main Framework UI
-- the module can be described through `definition.ui`
-- Quick Setup should come from `quick = true` widget nodes
+Use a **regular** module when:
+- it belongs under Framework category/subgroup routing
+- the UI can be expressed through `definition.ui`
+- Quick Setup should come from declarative `quick = true` nodes
 - the stable hash namespace should be `definition.id`
 
-Use a special module when:
+Use a **special** module when:
 - the module owns its own dedicated sidebar tab
-- the module needs custom `DrawTab` and/or `DrawQuickContent`
-- the module wants the special-module hash namespace based on `modName`
+- it needs caller-owned draw orchestration
+- it needs `DrawTab` and/or `DrawQuickContent`
 - category/subgroup routing does not make sense
-
-Framework-visible differences:
-- regular modules are routed by `definition.category` / `definition.subgroup`
-- special modules ignore `definition.category` / `definition.subgroup`
-- regular modules use `definition.id` as their hash namespace
-- special modules use `modName` as their hash namespace
-- regular modules can filter hosted quick nodes through `definition.selectQuickUi`
-- special modules ignore `definition.selectQuickUi`; Quick Setup uses `DrawQuickContent`
-- regular modules ignore `shortName`
-- special modules may use `shortName` for compact sidebar labels
-
-Validation and warning rule:
-- if you put a special-only field on a regular module, or a regular-only field on a special module, Lib/Framework now warn instead of silently leaving the mismatch implicit
 
 Practical rule:
 - choose regular unless you have a concrete reason to choose special
-- choose special when the module owns a custom tab or needs draw orchestration outside a normal declarative tree
-
-## State Access Rules
-
-These are contract rules:
-- keep raw Chalk config local to `main.lua`
-- after `public.store = lib.store.create(config, public.definition, dataDefaults)`, other module files should use `store.read(...)` and `store.write(...)`
-- special UI should use `store.uiState`
-
-Avoid:
-
-```lua
-if config.Strict then
-    -- ...
-end
-```
-
-Use:
-
-```lua
-if store.read("Strict") then
-    -- ...
-end
-```
-
-Additional rule:
-- use `store.read(...)` / `store.write(...)` for persisted module state
-- use `store.uiState` for transient UI aliases and staged widget state
-- do not mix raw Chalk reads into normal module logic once the store exists
 
 ## Regular Modules
-
-Regular modules participate in category/subgroup rendering and may expose hosted declarative UI.
 
 Example:
 
 ```lua
+local dataDefaults = import("config.lua")
+
 public.definition = {
     modpack = PACK_ID,
     id = "ExampleModule",
@@ -192,34 +151,38 @@ public.definition = {
     default = false,
     affectsRunData = false,
     storage = {
-        { type = "bool", alias = "Strict", configKey = "Strict", default = false },
-        { type = "string", alias = "Label", configKey = "Label", default = "", maxLen = 64 },
+        { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
+        { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 32 },
     },
     ui = {
-        { type = "checkbox", binds = { value = "Strict" }, label = "Strict Mode", quick = true },
-        { type = "separator", label = "Naming" },
-        { type = "dropdown", binds = { value = "Label" }, label = "Label", values = { "", "A", "B" } },
+        {
+            type = "vstack",
+            gap = 8,
+            children = {
+                { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", quick = true },
+                {
+                    type = "dropdown",
+                    binds = { value = "Mode" },
+                    label = "Mode",
+                    values = { "Vanilla", "Chaos" },
+                    controlWidth = 180,
+                },
+            },
+        },
     },
-    selectQuickUi = function(store, uiState, quickNodes)
-        return nil
-    end,
 }
+
+public.store = lib.store.create(config, public.definition, dataDefaults)
+store = public.store
 ```
 
 Rules:
 - `definition.id` is the regular-module hash namespace
-- coordinated regular modules should declare `definition.id`
-- storage aliases should be stable after release
-- root aliases default to `configKey` when omitted
+- storage aliases should stay stable after release
 - widgets bind by alias
 - `quick = true` marks quick candidates
 - `quickId` is optional but recommended when runtime quick filtering is used
-- `selectQuickUi(...)` runs at Quick Setup render time and may filter which quick candidates are shown
-
-Start here when:
-- the UI can be described as a normal tree of widgets and layouts
-- there is no need for custom frame orchestration
-- Quick Setup should come from declarative widget nodes
+- `selectQuickUi(...)` may filter the quick candidates shown by Framework
 
 Standalone helper:
 
@@ -229,11 +192,11 @@ rom.gui.add_to_menu_bar(lib.coordinator.standaloneUI(public.definition, public.s
 
 ## Special Modules
 
-Special modules get their own framework tab and usually own more of their layout.
-
 Example:
 
 ```lua
+local dataDefaults = import("config.lua")
+
 public.definition = {
     modpack = PACK_ID,
     id = "ExampleSpecial",
@@ -243,32 +206,33 @@ public.definition = {
     default = false,
     affectsRunData = true,
     storage = {
-        { type = "string", alias = "Mode", configKey = "Mode", default = "A" },
-        { type = "string", alias = "TargetKey", configKey = "TargetKey", default = "", maxLen = 128 },
-        { type = "bool", alias = "NestedFlag", configKey = { "Nested", "Flag" }, default = false },
+        { type = "string", alias = "Mode", configKey = "Mode", default = "A", maxLen = 16 },
+        { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
     },
     ui = {},
 }
+
+public.store = lib.store.create(config, public.definition, dataDefaults)
+store = public.store
 ```
 
 Rules:
 - special-module hash namespace is the module `modName`
-- coordinated special modules should declare `definition.name`
-- `shortName` is optional and only needed when a compact UI surface should use a shorter label than `name`
-- storage may still use nested raw config paths
-- alias names are the UI and `uiState` access surface
-- `category`, `subgroup`, and `selectQuickUi` are ignored on special modules
+- `shortName` is optional
+- `category`, `subgroup`, and `selectQuickUi` do not matter for special modules
+- aliases are still the UI-facing access surface
 
-Supported public UI entrypoints:
+Supported special entrypoints:
 - `public.DrawQuickContent(ui, uiState, theme)`
 - `public.DrawTab(ui, uiState, theme)`
-- optional special-module orchestration hooks:
+- optional hooks:
   - `public.BeforeDrawQuickContent(ui, uiState, theme)`
   - `public.AfterDrawQuickContent(ui, uiState, theme, changed)`
   - `public.BeforeDrawTab(ui, uiState, theme)`
   - `public.AfterDrawTab(ui, uiState, theme, changed)`
 
-If `public.DrawTab` is absent and `definition.ui` exists, Lib can render `definition.ui` automatically.
+If `public.DrawTab` is absent and `definition.ui` exists, Lib can render
+`definition.ui` automatically.
 
 Standalone helper:
 
@@ -289,30 +253,59 @@ rom.gui.add_imgui(specialUi.renderWindow)
 rom.gui.add_to_menu_bar(specialUi.addMenuBar)
 ```
 
-Use these hooks for special-module orchestration that should stay outside widget/layout definitions, for example:
-- pre-draw derived-text refresh
-- post-draw reactions to active root or active tab changes
-- module-local cache invalidation after a real UI change
+Use special modules when the module needs caller-owned draw orchestration, not
+just a bigger declarative tree.
 
-Reach for special modules when:
-- the module owns a custom tab shell
-- declarative `definition.ui` is still useful, but only as part of a larger hosted draw flow
-- the module needs before/after draw orchestration around the tab content
-- the module needs caller-owned prepared-node caches or derived-text refresh loops
+## Store and State Rules
+
+After store creation:
+- use `store.read(alias)` and `store.write(alias, value)` for persisted module state
+- use `store.uiState` for transient or staged UI state
+- keep raw Chalk config local to `main.lua`
+
+Avoid:
+
+```lua
+if config.Strict then
+    -- ...
+end
+```
+
+Use:
+
+```lua
+if store.read("Strict") then
+    -- ...
+end
+```
+
+`uiState` surface:
+- `uiState.view`
+- `uiState.get(alias)`
+- `uiState.set(alias, value)`
+- `uiState.update(alias, fn)`
+- `uiState.toggle(alias)`
+- `uiState.reset(alias)`
+- `uiState.reloadFromConfig()`
+
+Rules:
+- persisted aliases stage in `uiState` and commit later
+- transient aliases live only in `uiState`
+- do not write alias-backed config directly during draw
 
 ## Storage Authoring
 
-### Scalar storage
+### Scalar roots
 
 ```lua
-{ type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false }
+{ type = "bool", alias = "Enabled", configKey = "Enabled", default = false }
 { type = "int", alias = "Count", configKey = "Count", default = 3, min = 1, max = 9 }
-{ type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 64 }
+{ type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 32 }
 ```
 
-### Transient UI storage
+### Transient roots
 
-Use `lifetime = "transient"` for alias-backed UI state that should not persist to Chalk, hashes, or profiles:
+Use `lifetime = "transient"` for UI-only aliases:
 
 ```lua
 { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 }
@@ -324,50 +317,11 @@ Rules:
 - transient roots use `lifetime = "transient"`
 - `configKey` and `lifetime` are mutually exclusive
 - transient roots must declare an explicit `alias`
-- transient roots are UI-only and must be accessed through `store.uiState`
-- transient `packedInt` roots are not supported in v1
-
-When to use transient aliases:
-- use transient aliases when multiple UI elements need to coordinate through the same state
-- use transient aliases when declarative UI conditions like `visibleIf` or multiple widgets need to read the same UI state generically
-- keep state module-local when it is only internal navigation or scratch for one contained widget/view
-- do not promote purely local widget navigation into transient storage unless another UI surface actually needs to read it
-
-Derived display text:
-- use transient string aliases plus `lib.special.runDerivedText(...)` when a plain `text` widget should display computed summaries, empty-state messages, or status lines
-- keep the compute logic module-side; Lib only provides the lightweight refresh helper
-- this helper is intentionally string-only and should not be used to drive dynamic widget or layout structure
-
-### Cache conventions
-
-Lib now uses caching actively, but cache ownership is intentionally split:
-
-- Lib-owned mechanical caches:
-  - prepared-node metadata
-  - bound caches
-  - slot/panel order caches
-  - internal merged-registry caches
-- module-owned semantic caches:
-  - prepared node trees cached with `lib.special.getCachedPreparedNode(...)`
-  - derived-text caches passed to `lib.special.runDerivedText(...)`
-  - domain summaries, selector labels, and other module-specific memoized values
-
-Authoring rules:
-- cache reusable prepared node subtrees when rebuilding them every frame would be wasteful
-- keep signature design module-side; Lib should not infer semantic invalidation for you
-- change the cache signature when the rendered structure meaningfully changes
-- use explicit invalidation when cached semantic summaries or labels become stale because domain data changed outside the builder signature path
-- keep long-lived semantic caches on module-owned tables, not on transient local draw variables
-- treat node-attached Lib caches as mechanical implementation detail; module code should not invalidate or depend on them directly
-
-Practical split:
-- use `lib.special.getCachedPreparedNode(...)` for reusable prepared UI trees
-- use `lib.special.runDerivedText(...)` with a caller-owned cache for derived display strings
-- keep one-off function-local lookup caches local when they only save repeated reads within a single computation
+- transient roots do not persist and do not hash
 
 ### Packed storage
 
-Use `packedInt` when you want alias-addressable packed children:
+Use `packedInt` when you need alias-addressable packed children:
 
 ```lua
 {
@@ -381,369 +335,283 @@ Use `packedInt` when you want alias-addressable packed children:
 }
 ```
 
-If a module only treats a packed value as a raw mask, it can remain a plain root `int`.
+If a module only treats a packed value as a raw mask, keep it as a plain root
+`int` instead.
 
 ## UI Authoring
 
-### Widget nodes
+The old layout surface is gone.
+
+Do **not** use:
+- `panel`
+- `group`
+- `horizontalTabs`
+- `verticalTabs`
+- widget `geometry`
+
+Use:
+- `vstack`
+- `hstack`
+- `collapsible`
+- `tabs`
+- `scrollRegion`
+- `split`
+
+### Basic widgets
 
 Examples:
 
 ```lua
 { type = "text", text = "Section Title" }
-{ type = "text", text = "Warning", color = { 1, 0.5, 0.2, 1 } }
-{ type = "button", label = "Reset Filter", onClick = function(uiState) uiState.reset("FilterText") end }
-{ type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" }
-{ type = "inputText", binds = { value = "FilterText" }, label = "Filter" }
-{ type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1 }
-{ type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "Vanilla", "Chaos" } }
-{ type = "packedCheckboxList", binds = { value = "PackedFlags" } } -- defaults to slotCount = 32
-{ type = "packedCheckboxList", binds = { value = "PackedFlags" }, slotCount = 8 }
+{ type = "separator" }
+{ type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" }
+{ type = "inputText", binds = { value = "FilterText" }, label = "Filter", controlWidth = 180 }
+{ type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "Vanilla", "Chaos" }, controlWidth = 180 }
+{ type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1, valueWidth = 48, valueAlign = "center" }
+{ type = "button", label = "Reset", onClick = function(uiState) uiState.reset("FilterText") end }
 ```
 
-### Layout nodes
+### Layouts
 
-Examples:
+Vertical section:
 
 ```lua
-{ type = "separator", label = "Options" }
-
 {
-    type = "group",
-    label = "Advanced",
+    type = "vstack",
+    gap = 8,
     children = {
-        { type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled" },
+        { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
+        { type = "dropdown", binds = { value = "Mode" }, label = "Mode", values = { "A", "B" } },
     },
 }
+```
 
+Simple row:
+
+```lua
 {
-    type = "panel",
-    columns = {
-        { name = "label", start = 0, width = 220 },
-        { name = "control", start = 240, width = 180 },
-    },
+    type = "hstack",
+    gap = 12,
     children = {
         { type = "text", text = "Mode" },
-        {
-            type = "dropdown",
-            binds = { value = "Mode" },
-            values = { "Vanilla", "Chaos" },
-            panel = { column = "control", line = 1 },
-        },
+        { type = "dropdown", binds = { value = "Mode" }, values = { "A", "B" }, controlWidth = 160 },
     },
 }
 ```
 
-### Module-local custom widgets and layouts
-
-Modules may declare `definition.customTypes` when they want reusable UI pieces that should not be promoted into Lib:
-
-```lua
-public.definition.customTypes = {
-    widgets = {
-        myWidget = {
-            binds = { value = { storageType = "int" } },
-            slots = { "label", "control" }, -- optional supported geometry slot names
-            dynamicSlots = function(node, slotName) end, -- optional declaration-time slot validator
-            validate = function(node, prefix) end,
-            draw = function(imgui, node, bound, width, uiState) end,
-        },
-    },
-    layouts = {
-        myLayout = {
-            handlesChildren = true, -- optional: layout owns child drawing
-            validate = function(node, prefix) end,
-            render = function(imgui, node, drawChild) return true end,
-        },
-    },
-}
-```
-
-Widget bind specs may declare:
-- `storageType` for value-kind matching such as `bool`, `int`, or `string`
-- optional `rootType` for exact storage node matching such as `packedInt`
-- optional `optional = true` when the widget can operate without that bind being declared
-
-These custom types can be used by:
-- hosted regular-module UI
-- standalone Lib helpers
-- Framework rendering
-- special-module calls to `lib.ui.drawNode(...)` / `lib.ui.drawTree(...)`
-
-Custom widget `draw(...)` may stay fully imperative.
-For local positioned custom-widget composition, prefer:
-- `lib.registry.widgetHelpers.drawStructuredAt(...)`
-- `lib.registry.widgetHelpers.estimateRowAdvanceY(...)`
-
-These helpers are the supported way to keep a local custom widget honest about footprint settlement without recursively drawing another full structured widget.
-`dynamicSlots(...)` is the optional escape hatch for declaration-time-dependent slot names like `option:N`.
-Custom layout `render(...)` always receives `drawChild`.
-Simple layouts can ignore it and return just `open`.
-Layouts that want to own child placement should declare `handlesChildren = true`, return `open, changed`, and call `drawChild(child)` themselves.
-
-Structured rendering contract:
-- parents/layouts assign child start positions
-- structured children should begin rendering from that assigned start
-- structured children should leave the cursor settled at the bottom of the space they consumed before returning
-- Lib uses that settled end position as the parent footprint signal
-
-Leaf-widget rule:
-- widgets should be treated as leaf renderers by default
-- widget-local immediate-mode composition is fine when it stays self-contained inside the widget
-- recursively drawing another full structured widget/layout from inside a widget should be treated as an exception, not the normal pattern
-
-Built-in widgets may also accept a widget-local `geometry` bag for manual horizontal placement.
-Geometry is now expressed through `geometry.slots`, where each slot descriptor may declare:
-- `name`
-- `line`
-- `start`
-- `width`
-- `align`
-
-`line` defaults to `1` and must be a positive integer when present.
-`line` is the public vertical placement surface. Lib resolves row `y` internally; raw `y` is not part of the authoring contract.
-`start` is relative to the current row origin after any `indent`.
-`width` must be positive when present.
-`align` may be `center` or `right` and requires an explicit `width`.
-Slots are rendered in ascending `line`.
-Within the same line, slots with explicit `start` values are ordered by `start`.
-Otherwise declaration order breaks ties and preserves slots without explicit `start`.
-`text` supports a single `value` slot.
-`text.color` may be used to color a single text node.
-`button` supports a single `control` slot.
-`checkbox` supports a single `control` slot.
-`inputText` supports `label` and `control`.
-`radio` supports `option:N` slot names for each entry in `node.values`.
-`packedCheckboxList` supports `item:N` slot names. If `slotCount` is omitted, Lib defaults it to `32`.
-
-`slotCount` is the declaration-time slot capacity for `packedCheckboxList`. Packed children may be omitted at runtime, but the widget does not create new slots beyond the declared capacity.
-
-Meaningful built-in slot intent:
-- `text.value`: use `start`, and optional `width` + `align` when you want text aligned inside a slot
-- `button.control`: use `line` / `start`; optional `width` + `align` can be used to place the button inside a fixed slot
-- `checkbox.control`: use `start` to move the whole checkbox row
-- `inputText.control`: use `start` and `width`; `label` is mainly a text-position slot
-- `dropdown.control`: use `start` and `width`; `label` is mainly a text-position slot
-- `radio.option:N`: use `line` / `start` to place each option; do not expect `width` / `align` to do anything useful
-- `stepper.value`: this is the slot where `width` + `align` matter
-- `stepper` button slots are mainly explicit `line` / `start` anchors
-- `steppedRange.min.value` / `max.value`: these are the meaningful aligned value slots
-- `steppedRange.separator`: may also use `width` + `align` if you want the separator text in a fixed slot
-- `packedCheckboxList.item:N`: use `line` / `start` to place rows; do not expect `width` / `align` to do anything useful
-
-Tabbed layout presentation:
-- `horizontalTabs` / `verticalTabs` children may declare `tabLabelColor = { r, g, b }` or `{ r, g, b, a }` to color the child tab label
-
-`panel` and `verticalTabs` now own internal row/pane positioning explicitly. Module authors still describe vertical structure with `line` and tree shape rather than raw `y`.
-
-### `steppedRange`
-
-This is now a pure widget bound to two aliases:
-
-```lua
-storage = {
-    { type = "int", alias = "DepthMin", configKey = "DepthMin", default = 1, min = 1, max = 10 },
-    { type = "int", alias = "DepthMax", configKey = "DepthMax", default = 10, min = 1, max = 10 },
-}
-
-ui = {
-    {
-        type = "steppedRange",
-        binds = { min = "DepthMin", max = "DepthMax" },
-        label = "Depth",
-        geometry = {
-            slots = {
-                { name = "min.decrement", start = 0 },
-                { name = "min.value", start = 24, width = 14, align = "center" },
-                { name = "min.increment", start = 42 },
-                { name = "separator", start = 260 },
-                { name = "max.decrement", start = 300 },
-                { name = "max.value", start = 324, width = 14, align = "center" },
-                { name = "max.increment", start = 342 },
-            },
-        },
-        min = 1,
-        max = 10,
-        step = 1,
-    },
-}
-```
-
-### `visibleIf`
-
-`visibleIf` is part of the static contract. Lib evaluates the condition from managed alias
-state before widget/layout dispatch. It is conditional visibility, not planner-style runtime
-tree mutation.
-
-`visibleIf` works on both widgets and layouts such as `group` and `panel`.
-
-Simple bool gate:
-
-```lua
-{ type = "checkbox", binds = { value = "EnabledFlag" }, label = "Enabled", visibleIf = "GateEnabled" }
-```
-
-Equality gate:
-
-```lua
-{ type = "stepper", binds = { value = "Count" }, label = "Count", visibleIf = { alias = "Mode", value = "Forced" } }
-```
-
-Multiple allowed values:
-
-```lua
-{ type = "stepper", binds = { value = "Count" }, label = "Count", visibleIf = { alias = "Mode", anyOf = { "Forced", "Chaos" } } }
-```
-
-Layout gate:
+Collapsible section:
 
 ```lua
 {
-    type = "panel",
-    visibleIf = "ShowAdvanced",
-    columns = {
-        { name = "content", start = 0, width = 180 },
-    },
+    type = "collapsible",
+    label = "Advanced",
+    defaultOpen = false,
     children = {
-        { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", panel = { column = "content", line = 1 } },
+        { type = "checkbox", binds = { value = "Strict" }, label = "Strict" },
     },
 }
 ```
 
-### Quick UI filtering
+Tabbed surface:
 
-Any widget node may opt into Quick Setup by setting:
+```lua
+{
+    type = "tabs",
+    id = "MainTabs",
+    orientation = "vertical",
+    navWidth = 180,
+    binds = { activeTab = "SelectedTab" },
+    children = {
+        {
+            tabId = "settings",
+            tabLabel = "Settings",
+            type = "vstack",
+            children = {
+                { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
+            },
+        },
+    },
+}
+```
+
+Two-pane split:
+
+```lua
+{
+    type = "split",
+    orientation = "horizontal",
+    gap = 12,
+    firstSize = 220,
+    children = {
+        { type = "vstack", children = { { type = "text", text = "Sidebar" } } },
+        { type = "vstack", children = { { type = "text", text = "Detail" } } },
+    },
+}
+```
+
+## Visibility
+
+Any widget or layout may declare `visibleIf`.
+
+Forms:
+
+```lua
+visibleIf = "Enabled"
+visibleIf = { alias = "Mode", value = "Forced" }
+visibleIf = { alias = "Mode", anyOf = { "Forced", "Chaos" } }
+```
+
+Invisible nodes are not drawn and do not consume layout space.
+
+## Quick UI
+
+Any declarative node may opt into Quick Setup:
 
 ```lua
 quick = true
 ```
 
-Quick candidate ids are:
+Quick ids are:
 - `node.quickId` when explicitly provided
 - otherwise derived from `node.binds`
 
-Modules may optionally filter which quick nodes are shown at runtime:
+Modules may optionally filter them:
 
 ```lua
 public.definition.selectQuickUi = function(store, uiState, quickNodes)
-    return { "value=Strict" }
+    return { "value=Enabled" }
 end
 ```
 
 Return:
 - `nil` to show all quick candidates
 - one quick id string
-- an array of quick id strings
+- an array of quick ids
 - or a `{ [quickId] = true }` set
 
-## Managed UI State
+## Built-in Widget Notes
 
-When a module declares `definition.storage`, Lib creates `public.store.uiState`.
+`confirmButton`
+- popup-based confirmation flow
+- supports optional `confirmLabel`, `cancelLabel`, `onConfirm`
+
+`inputText` / `dropdown` / `mappedDropdown`
+- use `controlWidth` when you want a fixed control width
+
+`stepper` / `steppedRange`
+- use `valueWidth` and `valueAlign`
+- `steppedRange` binds to two aliases: `binds = { min = "DepthMin", max = "DepthMax" }`
+
+`text`
+- supports optional `width`
+- supports optional `color`
+
+`packedCheckboxList`
+- renders one visible packed child per line
+- optional:
+  - `binds.filterText`
+  - `binds.filterMode`
+
+## Custom Types
+
+Modules may declare:
+
+```lua
+public.definition.customTypes = {
+    widgets = {},
+    layouts = {},
+}
+```
+
+These are module-local extensions to the built-in registries.
+
+### Custom widgets
+
+Contract:
+
+```lua
+myWidget = {
+    binds = {
+        value = { storageType = "int" },
+    },
+    validate = function(node, prefix) end,
+    draw = function(imgui, node, bound, x, y, availWidth, availHeight, uiState)
+        return consumedWidth, consumedHeight, changed
+    end,
+}
+```
+
+Rules:
+- custom widgets are leaf renderers by default
+- the draw contract is rect-based
+- return honest consumed size
+- do not rely on ambient cursor state as your surrounding layout contract
+
+Widget bind specs may declare:
+- `storageType`
+- optional `rootType`
+- optional `optional = true`
+
+For local custom widget composition, prefer:
+- `lib.registry.widgetHelpers.drawStructuredAt(...)`
+- `lib.registry.widgetHelpers.estimateRowAdvanceY(...)`
+
+### Custom layouts
+
+Contract:
+
+```lua
+myLayout = {
+    validate = function(node, prefix) end,
+    render = function(imgui, node, drawChild, x, y, availWidth, availHeight, uiState, bound)
+        return consumedWidth, consumedHeight, changed
+    end,
+}
+```
+
+Rules:
+- layouts own child placement
+- `drawChild(...)` is a positioned child renderer
+- return honest consumed size
+
+## Caching and Derived Text
+
+Lib-owned mechanical caches already exist for:
+- prepared node metadata
+- registry merge results
+- bound/preparation plumbing
+
+Module-owned semantic caches should stay module-side.
 
 Use:
-- `uiState.view` for rendering
-- `uiState.get(alias)` for explicit reads
-- `uiState.set(alias, value)` for edits
-- `uiState.update(alias, fn)` for derived edits
-- `uiState.toggle(alias)` for bool edits
+- `lib.special.getCachedPreparedNode(...)` for reusable prepared subtrees
+- `lib.special.runDerivedText(...)` for derived display strings backed by your own cache
 
-Notes:
-- persisted aliases stage in `uiState` and flush to Chalk on commit
-- transient aliases also live in `uiState`, but never flush to Chalk
-- `uiState.reloadFromConfig()` resets transient aliases to defaults
-- `uiState.reset(alias)` resets one alias to its declared default
-- `store.read/write(...)` remain persisted/runtime-facing; transient aliases are UI-state only
-
-Example filter row:
-
-```lua
-public.definition.storage = {
-    { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
-    { type = "string", alias = "FilterMode", lifetime = "transient", default = "all", maxLen = 16 },
-}
-
-public.definition.ui = {
-    {
-        type = "panel",
-        columns = {
-            { name = "label", start = 0, width = 80 },
-            { name = "field", start = 88, width = 180 },
-            { name = "action", start = 276, width = 90 },
-        },
-        children = {
-            {
-                type = "text",
-                text = "Filter",
-                panel = { line = 1, column = "label" },
-            },
-            {
-                type = "inputText",
-                binds = { value = "FilterText" },
-                panel = { line = 1, column = "field", slots = { control = true } },
-            },
-            {
-                type = "button",
-                label = "Clear",
-                onClick = function(uiState)
-                    uiState.reset("FilterText")
-                    uiState.reset("FilterMode")
-                end,
-                panel = { line = 1, column = "action" },
-            },
-        },
-    },
-}
-```
-
-Optional bind example:
-
-```lua
-public.definition.ui = {
-    {
-        type = "packedCheckboxList",
-        binds = {
-            value = "PackedFlags",
-            filterText = "FilterText", -- optional; omit to render all packed rows
-            filterMode = "FilterMode", -- optional; all/checked/unchecked
-        },
-        slotCount = 16,
-        valueColors = {
-            FlagBoss = { 0.85, 0.3, 0.3, 1 },
-        },
-    },
-}
-```
-
-Do not write alias-backed config directly during draw.
-
-Hosted Framework UI and standalone Lib helpers already:
-- commit `uiState` transactionally
-- roll persisted state back on failed reapply
-- call `SetupRunData()` after successful commits when required
+Rules:
+- keep cache signatures module-side
+- invalidate semantic caches explicitly when the meaning changes
+- do not depend on Lib's internal caches directly
 
 ## Modules That Affect Run Data
 
-If successful changes require run-data rebuild behavior, declare:
+Declare:
 
 ```lua
 public.definition.affectsRunData = true
 ```
-
-Lifecycle shape is inferred from exports.
 
 ### Patch-only
 
 ```lua
 public.definition.patchPlan = function(plan, store)
     plan:set(RoomData.RoomA, "ForcedReward", "Devotion")
-    plan:appendUnique(NamedRequirementsData, "SomeKey", { Name = "Req" })
 end
 ```
 
 ### Manual-only
 
 ```lua
-local backup, restore = lib.createBackupSystem()
+local backup, restore = lib.mutation.createBackup()
 
 public.definition.apply = function()
     backup(SomeTable, "SomeKey")
@@ -773,15 +641,48 @@ Ordering:
 - apply: patch, then manual
 - revert: manual, then patch
 
-## Hash/Profile Stability
+## Stability Rules
 
 After release, treat these as compatibility-sensitive:
 - regular `definition.id`
 - special `modName`
-- storage root `alias` values — these are the hash keys
+- storage root aliases
 - storage defaults
 - storage type hash encodings
 
-`alias` is the frozen hash surface. If you omit `alias` on a root, it defaults to the stringified `configKey`, which means `configKey` is effectively frozen for that root too. If you declare an explicit `alias`, you can safely rename the underlying `configKey` (restructure Chalk config) without breaking saved hashes or profiles — the alias stays stable.
+If an explicit root `alias` exists, that alias is the frozen hash/profile
+surface. If a root omits `alias`, the stringified `configKey` effectively
+becomes that stable surface.
 
-If those change, existing hashes and saved profiles may stop mapping cleanly.
+## Minimal Example
+
+```lua
+local dataDefaults = import("config.lua")
+
+public.definition = {
+    modpack = PACK_ID,
+    id = "HelloModule",
+    name = "Hello Module",
+    category = "Run Mods",
+    subgroup = "General",
+    default = false,
+    affectsRunData = false,
+    storage = {
+        { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
+        { type = "int", alias = "Count", configKey = "Count", default = 3, min = 1, max = 9 },
+    },
+    ui = {
+        {
+            type = "vstack",
+            gap = 8,
+            children = {
+                { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled", quick = true },
+                { type = "stepper", binds = { value = "Count" }, label = "Count", min = 1, max = 9, step = 1 },
+            },
+        },
+    },
+}
+
+public.store = lib.store.create(config, public.definition, dataDefaults)
+store = public.store
+```
