@@ -234,12 +234,12 @@ local function PrepareOrderedRangeEntries(node, minStepper, maxStepper)
         name = "separator",
         line = 1,
         estimateWidth = function(_imgui)
-            return CalcTextWidth(_imgui, "to")
+            return CalcTextWidth(_imgui, "  to")
         end,
         render = function(_imgui)
             _imgui.AlignTextToFramePadding()
-            _imgui.Text("to")
-            return false, CalcTextWidth(_imgui, "to"), EstimateStructuredRowAdvanceY(_imgui)
+            _imgui.Text("  to")
+            return false, CalcTextWidth(_imgui, "  to"), EstimateStructuredRowAdvanceY(_imgui)
         end,
     }
     local maxEntries = BuildOrderedStepperEntries(maxStepper, {
