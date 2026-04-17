@@ -21,7 +21,6 @@ local function BuildManagedStorage(definition)
     end
 
     if definition.storage ~= nil
-        or definition.special ~= nil
         or definition.id ~= nil
     then
         if type(definition.storage) == "table" then

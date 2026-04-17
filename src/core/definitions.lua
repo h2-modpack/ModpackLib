@@ -9,9 +9,9 @@ local KnownDefinitionKeys = {
     id = true,
     name = true,
     shortName = true,
-    special = true,
     category = true,
     subgroup = true,
+    placement = true,
     tooltip = true,
     default = true,
     affectsRunData = true,
@@ -70,10 +70,10 @@ function definition.validate(def, label)
         end
     end
 
-    for _, key in ipairs({ "modpack", "id", "name", "shortName", "category", "subgroup", "tooltip" }) do
+    for _, key in ipairs({ "modpack", "id", "name", "shortName", "placement", "category", "subgroup", "tooltip" }) do
         warnType(key, "string")
     end
-    for _, key in ipairs({ "special", "affectsRunData" }) do
+    for _, key in ipairs({ "affectsRunData" }) do
         warnType(key, "boolean")
     end
     for _, key in ipairs({ "storage", "ui", "customTypes", "hashGroups" }) do
@@ -83,26 +83,30 @@ function definition.validate(def, label)
         warnType(key, "function")
     end
 
-    if def.special == true then
-        if def.category ~= nil then
-            internal.logging.warn("%s: special modules ignore definition.category", prefix)
-        end
-        if def.subgroup ~= nil then
-            internal.logging.warn("%s: special modules ignore definition.subgroup", prefix)
-        end
-        if def.selectQuickUi ~= nil then
-            internal.logging.warn("%s: special modules ignore definition.selectQuickUi; use DrawQuickContent for Quick Setup", prefix)
-        end
-        if def.modpack ~= nil and def.name == nil then
-            internal.logging.warn("%s: coordinated special modules should declare definition.name", prefix)
-        end
-    else
-        if def.shortName ~= nil then
-            internal.logging.warn("%s: regular modules ignore definition.shortName", prefix)
-        end
-        if def.modpack ~= nil and def.id == nil then
-            internal.logging.warn("%s: coordinated regular modules should declare definition.id", prefix)
-        end
+    if def.modpack ~= nil and def.id == nil then
+        internal.logging.warn("%s: coordinated modules should declare definition.id", prefix)
+    end
+    if def.category ~= nil then
+        internal.logging.warn("%s: definition.category is ignored under the one-tab-per-module framework contract",
+            prefix)
+    end
+    if def.subgroup ~= nil then
+        internal.logging.warn("%s: definition.subgroup is ignored under the one-tab-per-module framework contract",
+            prefix)
+    end
+    if def.placement ~= nil then
+        internal.logging.warn("%s: definition.placement is ignored under the one-tab-per-module framework contract",
+            prefix)
+    end
+    if def.ui ~= nil then
+        internal.logging.warn("%s: definition.ui is ignored under the lean DrawTab contract", prefix)
+    end
+    if def.customTypes ~= nil then
+        internal.logging.warn("%s: definition.customTypes is ignored under the lean DrawTab contract", prefix)
+    end
+    if def.selectQuickUi ~= nil then
+        internal.logging.warn("%s: definition.selectQuickUi is ignored; quick setup uses DrawQuickContent",
+            prefix)
     end
 
     local inferred, info = mutation.inferShape(def)
