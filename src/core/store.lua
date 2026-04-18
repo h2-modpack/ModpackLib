@@ -36,22 +36,14 @@ local StorageKey = storageInternal.StorageKey
 ---@field id string|nil
 ---@field name string|nil
 ---@field shortName string|nil
----@field category string|nil
----@field subgroup string|nil
----@field placement string|nil
 ---@field tooltip string|nil
 ---@field default boolean|nil
 ---@field affectsRunData boolean|nil
 ---@field storage StorageSchema|nil
----@field ui table|nil
----@field customTypes table|nil
+---@field hashGroups table|nil
 ---@field patchPlan fun(store: ManagedStore): table|nil
 ---@field apply fun(store: ManagedStore)|nil
 ---@field revert fun(store: ManagedStore)|nil
----@field selectQuickUi fun(...): any|nil
----@field hashGroups table|nil
----@field stateSchema table|nil
----@field options table|nil
 
 ---@class ManagedStore
 ---@field storage StorageSchema|nil
@@ -61,8 +53,6 @@ local StorageKey = storageInternal.StorageKey
 ---@field readBits fun(configKey: ConfigPath, offset: number, width: number): number
 ---@field writeBits fun(configKey: ConfigPath, offset: number, width: number, value: number)
 ---@field getPackedAliases fun(alias: string): PackedBitNode[]
----@field hasAlias fun(alias: string): boolean
----@field getAliasNode fun(alias: string): StorageNode|PackedBitNode|nil
 
 local function readNestedPath(tbl, key)
     if type(key) == "table" then
@@ -100,10 +90,6 @@ end
 local function BuildManagedStorage(definition)
     if type(definition) ~= "table" then
         return nil
-    end
-
-    if definition.stateSchema ~= nil or definition.options ~= nil then
-        error("legacy definition.stateSchema/options are no longer supported; use definition.storage", 2)
     end
 
     if definition.storage ~= nil
@@ -471,15 +457,13 @@ end
 
 local KnownDefinitionKeys = {
     modpack = true, id = true, name = true, shortName = true,
-    category = true, subgroup = true, placement = true, tooltip = true,
-    default = true, affectsRunData = true, storage = true,
-    ui = true, customTypes = true, patchPlan = true, apply = true,
-    revert = true, selectQuickUi = true, hashGroups = true,
+    tooltip = true, default = true, affectsRunData = true,
+    storage = true, hashGroups = true,
+    patchPlan = true, apply = true, revert = true,
 }
 
 local function IsLikelyDefinitionTable(def)
     if type(def) ~= "table" then return false end
-    if def.stateSchema ~= nil or def.options ~= nil then return true end
     for key in pairs(def) do
         if type(key) == "string" and KnownDefinitionKeys[key] then return true end
     end
@@ -492,8 +476,7 @@ local function ValidateDefinition(def, label)
     local prefix = tostring(label or def.name or def.id or _PLUGIN.guid or "module")
 
     for key in pairs(def) do
-        if type(key) == "string" and key ~= "stateSchema" and key ~= "options"
-            and not KnownDefinitionKeys[key] then
+        if type(key) == "string" and not KnownDefinitionKeys[key] then
             warn("%s: unknown definition key '%s'", prefix, tostring(key))
         end
     end
@@ -504,33 +487,16 @@ local function ValidateDefinition(def, label)
         end
     end
 
-    for _, key in ipairs({ "modpack", "id", "name", "shortName", "placement", "category", "subgroup", "tooltip" }) do
+    for _, key in ipairs({ "modpack", "id", "name", "shortName", "tooltip" }) do
         warnType(key, "string")
     end
     warnType("affectsRunData", "boolean")
-    for _, key in ipairs({ "storage", "ui", "customTypes", "hashGroups" }) do warnType(key, "table") end
-    for _, key in ipairs({ "patchPlan", "apply", "revert", "selectQuickUi" }) do warnType(key, "function") end
+    warnType("storage", "table")
+    warnType("hashGroups", "table")
+    for _, key in ipairs({ "patchPlan", "apply", "revert" }) do warnType(key, "function") end
 
     if def.modpack ~= nil and def.id == nil then
         warn("%s: coordinated modules should declare definition.id", prefix)
-    end
-    if def.category ~= nil then
-        warn("%s: definition.category is ignored under the one-tab-per-module framework contract", prefix)
-    end
-    if def.subgroup ~= nil then
-        warn("%s: definition.subgroup is ignored under the one-tab-per-module framework contract", prefix)
-    end
-    if def.placement ~= nil then
-        warn("%s: definition.placement is ignored under the one-tab-per-module framework contract", prefix)
-    end
-    if def.ui ~= nil then
-        warn("%s: definition.ui is ignored under the lean DrawTab contract", prefix)
-    end
-    if def.customTypes ~= nil then
-        warn("%s: definition.customTypes is ignored under the lean DrawTab contract", prefix)
-    end
-    if def.selectQuickUi ~= nil then
-        warn("%s: definition.selectQuickUi is ignored; quick setup uses DrawQuickContent", prefix)
     end
 
     local inferred, info = mutation.inferShape(def)
@@ -544,7 +510,7 @@ end
 
 --- Creates a managed store wrapper around a module definition and its persisted config table.
 ---@param modConfig table Module config table used for persisted reads and writes.
----@param definition ModuleDefinition Module definition declaring storage, ui, and mutation behavior.
+---@param definition ModuleDefinition Module definition declaring storage and mutation behavior.
 ---@param dataDefaults table|nil Optional defaults table used to seed missing storage defaults.
 ---@return ManagedStore store Managed store instance for config, UI state, and mutation lifecycle.
 function storeApi.create(modConfig, definition, dataDefaults)
@@ -715,7 +681,6 @@ function storeApi.create(modConfig, definition, dataDefaults)
     end
 
     store.storage = storage
-    store.ui = nil
     store._persistedAliasNodes = persistedAliasNodes
 
     if storage then

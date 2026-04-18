@@ -20,7 +20,7 @@ New module UI should be written directly in `DrawTab(ui, uiState)` and optional 
   How to author a module against the current immediate-mode contract.
 - [WIDGETS.md](WIDGETS.md)
   Widgets, nav, and storage notes for the live surface.
-- [SPECIAL_MODULE_PERFORMANCE.md](SPECIAL_MODULE_PERFORMANCE.md)
+- [UI_PERFORMANCE.md](UI_PERFORMANCE.md)
   Render-path guidance for immediate-mode module UIs.
 - [IMGUI_LUA_REFERENCE.md](IMGUI_LUA_REFERENCE.md)
   Notes on the Dear ImGui Lua binding used by the stack.

@@ -26,9 +26,8 @@ local function ResolveGap(imgui, value)
     return gap
 end
 
-local function MakeStepperConfig(alias, opts)
+local function MakeStepperConfig(opts)
     return {
-        binds = { value = alias },
         label = tostring(opts.label or ""),
         default = opts.default,
         min = opts.min,
@@ -132,7 +131,7 @@ end
 ---@return boolean
 function WidgetFns.stepper(imgui, uiState, alias, opts)
     opts = opts or {}
-    local cfg = MakeStepperConfig(alias, opts)
+    local cfg = MakeStepperConfig(opts)
     local boundValue = {
         get = function() return uiState.view[alias] end,
         set = function(value) uiState.set(alias, value) end,
@@ -161,7 +160,7 @@ end
 ---@return boolean
 function WidgetFns.steppedRange(imgui, uiState, minAlias, maxAlias, opts)
     opts = opts or {}
-    local minStepper = MakeStepperConfig(minAlias, {
+    local minStepper = MakeStepperConfig({
         label = "",
         default = opts.default,
         min = opts.min,
@@ -170,7 +169,7 @@ function WidgetFns.steppedRange(imgui, uiState, minAlias, maxAlias, opts)
         valueWidth = opts.valueWidth,
         buttonSpacing = opts.buttonSpacing,
     })
-    local maxStepper = MakeStepperConfig(maxAlias, {
+    local maxStepper = MakeStepperConfig({
         label = "",
         default = opts.defaultMax or opts.default,
         min = opts.min,

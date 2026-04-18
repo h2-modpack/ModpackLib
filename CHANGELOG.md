@@ -1,6 +1,97 @@
 # Changelog
 
-## [Unreleased]
+## [Unreleased] — UI Lean-Down
+
+Complete removal of the v2 declarative UI tree and registry model. This release is not backward-compatible with modules targeting v2 declarative authoring.
+
+### Breaking Changes
+
+**Declarative UI tree removed**
+
+The entire `definition.ui` / `definition.customTypes` authoring model is gone.
+
+Removed:
+- `lib.ui.*` namespace
+- `lib.registry.*` namespace
+- `lib.accessors.*` namespace
+- `lib.definition.*` namespace
+- `src/compat/legacy_api.lua`
+- `field_registry/` source directory
+- `lib.registry.widgetHelpers.drawStructuredAt(...)` and `estimateRowAdvanceY(...)`
+
+`definition.ui`, `definition.customTypes`, and `selectQuickUi` are now ignored. Lib warns in debug mode if they are present.
+
+`category`, `subgroup`, and `placement` on module definitions are ignored.
+
+**Widget and layout draw contracts removed**
+
+The rect-based draw contract `(imgui, node, bound, x, y, availWidth, availHeight, uiState)` → `(consumedWidth, consumedHeight, changed)` is gone.
+
+Layout types removed: `vstack`, `hstack`, `tabs`, `collapsible`, `scrollRegion`, `split`
+
+Custom widget/layout registry extension is no longer supported.
+
+**`lib.special.*` replaced by `lib.host.*`**
+
+`lib.special.runPass` and `lib.special.getCachedPreparedNode` are removed with no replacement.
+
+Remaining helpers migrated:
+- `lib.special.runDerivedText` → `lib.host.runDerivedText`
+- `lib.special.auditAndResyncState` → `lib.host.auditAndResyncState`
+- `lib.special.commitState` → `lib.host.commitState`
+- `lib.special.standaloneUI` → `lib.host.standaloneUI`
+
+**`lib.ui.*` nav helpers replaced by `lib.nav.*`**
+
+`lib.ui.verticalTabs` → `lib.nav.verticalTabs`
+
+`lib.ui.isVisible` → `lib.nav.isVisible`
+
+**Widget feature removals**
+
+- `confirmButton` timeout (`timeoutSeconds`) removed
+- Stepper fast-step buttons (`<<` / `>>`) removed
+- Stepper `valueColors` on the value slot removed
+
+### Added
+
+**`lib.widgets.*` — immediate-mode widget helpers**
+
+Widgets are now direct draw functions, not registered node types. No preparation, no registry lookup, no draw contract.
+
+New and retained widgets under `lib.widgets`:
+- `separator`
+- `text`
+- `button`
+- `confirmButton`
+- `inputText`
+- `dropdown`
+- `mappedDropdown`
+- `packedDropdown`
+- `radio`
+- `mappedRadio`
+- `packedRadio`
+- `stepper`
+- `steppedRange`
+- `checkbox`
+- `packedCheckboxList`
+
+**`lib.nav.*` — navigation helpers**
+
+- `lib.nav.verticalTabs(imgui, opts)` — immediate-mode vertical tab rail
+- `lib.nav.isVisible(uiState, condition)` — evaluates `visibleIf`-style conditions against `uiState.view`
+
+**`lib.host.*` — module lifecycle helpers**
+
+- `lib.host.runDerivedText(uiState, entries, cache?)`
+- `lib.host.auditAndResyncState(name, uiState)`
+- `lib.host.commitState(def, store, uiState)`
+- `lib.host.standaloneUI(def, store, uiState?, opts?)`
+
+**`lib.storage` additions**
+
+- `lib.storage.readPackedBits(packed, offset, width)` — now public
+- `lib.storage.writePackedBits(packed, offset, width, value)` — now public
 
 ---
 

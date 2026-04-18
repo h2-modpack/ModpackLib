@@ -41,7 +41,7 @@ x, y = ImGui.GetCursorStartPos()
 ```
 
 `SetCursorPosX/Y` and `GetCursorPosX/Y` are local to the current window content area.
-`GetCursorScreenPos` gives the absolute screen coordinate — useful when you need to know
+`GetCursorScreenPos` gives the absolute screen coordinate - useful when you need to know
 the actual rendered Y after drawing a sequence of items.
 
 ### Flow control
@@ -161,7 +161,7 @@ deactivated = ImGui.IsItemDeactivated()
 deactivated_after_edit = ImGui.IsItemDeactivatedAfterEdit()
 ```
 
-`GetItemRectSize()` returns `x, y` — a tuple, not a scalar. Test doubles often
+`GetItemRectSize()` returns `x, y` - a tuple, not a scalar. Test doubles often
 simplify this to a single number; real backend returns two values.
 
 ---
@@ -174,7 +174,7 @@ x, y = ImGui.CalcTextSize(text, hide_text_after_double_hash)
 x, y = ImGui.CalcTextSize(text, hide_text_after_double_hash, wrap_width)
 ```
 
-Returns `x, y` — a tuple. The `x` component is the width you usually want for sizing.
+Returns `x, y` - a tuple. The `x` component is the width you usually want for sizing.
 
 `hide_text_after_double_hash = true` stops measurement at `##` (same as ImGui label
 truncation). Useful when measuring a label string that includes an ID suffix.
@@ -502,7 +502,7 @@ width, height = ImGui.GetItemRectSize()
 ```
 
 Both return two values. Using them as a single return (e.g. `local w = ImGui.CalcTextSize(...)`)
-silently discards the height. Test doubles sometimes return a scalar — the real backend does not.
+silently discards the height. Test doubles sometimes return a scalar - the real backend does not.
 
 ### Cursor positions are window-local; screen positions are absolute
 

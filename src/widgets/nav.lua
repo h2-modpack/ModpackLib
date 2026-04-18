@@ -55,9 +55,7 @@ function nav.verticalTabs(imgui, opts)
             else
                 imgui.Text(group)
             end
-            
             imgui.Separator()
-            
             currentGroup = group
         end
         if type(color) == "table" then

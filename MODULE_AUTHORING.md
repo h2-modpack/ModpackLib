@@ -13,6 +13,7 @@ It does not document the old declarative `definition.ui` model.
 ## Preferred Lib Surface
 
 New module code should use:
+- `lib.config`
 - `lib.store.create(...)`
 - `lib.storage.*`
 - `lib.mutation.*`
@@ -22,6 +23,9 @@ New module code should use:
 - `lib.nav.*`
 
 Flat `lib.*` aliases should not be used for new code.
+
+The only top-level non-namespaced export that still matters is:
+- `lib.config`
 
 ## Basic Module Shape
 
@@ -71,6 +75,9 @@ public.DrawTab = internal.DrawTab
 public.DrawQuickContent = internal.DrawQuickContent
 ```
 
+This example assumes coordinated/framework hosting.
+For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
+
 ## Definition Rules
 
 Meaningful module definition fields:
@@ -97,6 +104,16 @@ Ignored under the current lean contract:
 
 If you keep those fields around, Lib will warn in debug mode.
 
+Coordinated modules should declare:
+- `modpack`
+- `id`
+- `name`
+- `storage`
+
+Under the current framework contract:
+- every coordinated module gets its own tab
+- `shortName` is used as the shorter tab label when present
+
 ## Store and State Rules
 
 After store creation:
@@ -111,6 +128,12 @@ Runtime/gameplay code should usually read from:
 - `store.read(...)`
 
 Do not write schema-backed persisted values directly from draw code through raw config.
+
+Also avoid:
+- `store.read(...)` for transient aliases
+- `store.write(...)` for transient aliases
+
+Use `uiState` for those instead.
 
 ## Storage Authoring
 
@@ -179,6 +202,7 @@ Framework Quick Setup now reads only:
 - module `DrawQuickContent(ui, uiState)`
 
 There is no quick-node discovery from `definition.ui`.
+Standalone host does not consume `DrawQuickContent`.
 
 ## Mutation Lifecycle
 
@@ -220,6 +244,11 @@ Framework discovery requires:
 - public `store`
 - public `DrawTab`
 
+Framework behavior:
+- each coordinated module gets its own top-level tab
+- `DrawTab` is the normal rendering contract
+- `DrawQuickContent` participates only in Quick Setup
+
 ## Standalone Modules
 
 For non-framework hosting, use:
@@ -231,7 +260,6 @@ local runtime = lib.host.standaloneUI(
     public.store.uiState,
     {
         getDrawTab = function() return public.DrawTab end,
-        getDrawQuickContent = function() return public.DrawQuickContent end,
     }
 )
 
@@ -239,4 +267,150 @@ rom.gui.add_imgui(runtime.renderWindow)
 rom.gui.add_to_menu_bar(runtime.addMenuBar)
 ```
 
-Standalone host still supports before/after draw hooks in `opts`, but framework-hosted modules should not rely on them.
+Notes:
+- `lib.host.standaloneUI(...)` suppresses its window/menu when the module is coordinated
+- the standalone window includes built-in:
+  - `Enabled`
+  - `Debug Mode`
+  - `Audit + Resync UI State`
+- the host only calls `DrawTab`; it does not use `DrawQuickContent`
+
+## Complete Example
+
+This is a minimal end-to-end module shape showing:
+- `main.lua`
+- storage
+- `DrawTab`
+- optional `DrawQuickContent`
+- standalone wiring
+
+```lua
+local mods = rom.mods
+mods["SGG_Modding-ENVY"].auto()
+
+---@diagnostic disable: lowercase-global
+rom = rom
+_PLUGIN = _PLUGIN
+game = rom.game
+modutil = mods["SGG_Modding-ModUtil"]
+local chalk = mods["SGG_Modding-Chalk"]
+local reload = mods["SGG_Modding-ReLoad"]
+lib = mods["adamant-ModpackLib"]
+
+local dataDefaults = import("config.lua")
+local config = chalk.auto("config.lua")
+
+local PACK_ID = "example-pack"
+ExampleModule_Internal = ExampleModule_Internal or {}
+local internal = ExampleModule_Internal
+
+public.definition = {
+    modpack = PACK_ID,
+    id = "ExampleModule",
+    name = "Example Module",
+    shortName = "Example",
+    tooltip = "Demonstrates the current Lib module contract.",
+    default = dataDefaults.Enabled,
+    affectsRunData = false,
+    storage = {
+        { type = "bool", alias = "FeatureEnabled", configKey = "FeatureEnabled", default = false },
+        { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 32 },
+        { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+        {
+            type = "packedInt",
+            alias = "PackedFlags",
+            configKey = "PackedFlags",
+            default = 0,
+            bits = {
+                { alias = "PackedFlags_Attack", label = "Attack", type = "bool", offset = 0, width = 1, default = false },
+                { alias = "PackedFlags_Special", label = "Special", type = "bool", offset = 1, width = 1, default = false },
+            },
+        },
+    },
+}
+
+public.store = nil
+store = nil
+internal.standaloneUi = nil
+
+function internal.DrawTab(ui, uiState)
+    lib.widgets.checkbox(ui, uiState, "FeatureEnabled", {
+        label = "Enable Feature",
+        tooltip = "Turns the feature logic on for this module.",
+    })
+
+    lib.widgets.dropdown(ui, uiState, "Mode", {
+        label = "Mode",
+        values = { "Vanilla", "Chaos", "Custom" },
+        controlWidth = 180,
+    })
+
+    lib.widgets.inputText(ui, uiState, "FilterText", {
+        label = "Filter",
+        controlWidth = 180,
+    })
+
+    ui.Separator()
+    lib.widgets.text(ui, "Packed Flags")
+    lib.widgets.packedCheckboxList(ui, uiState, "PackedFlags", store, {
+        optionsPerLine = 2,
+    })
+end
+
+function internal.DrawQuickContent(ui, uiState)
+    lib.widgets.dropdown(ui, uiState, "Mode", {
+        label = "Mode",
+        values = { "Vanilla", "Chaos", "Custom" },
+        controlWidth = 140,
+    })
+end
+
+local function registerHooks()
+    public.DrawTab = internal.DrawTab
+    public.DrawQuickContent = internal.DrawQuickContent
+end
+
+local function init()
+    import_as_fallback(rom.game)
+
+    public.store = lib.store.create(config, public.definition, dataDefaults)
+    store = public.store
+    registerHooks()
+
+    internal.standaloneUi = lib.host.standaloneUI(
+        public.definition,
+        store,
+        store.uiState,
+        {
+            getDrawTab = function()
+                return public.DrawTab
+            end,
+        }
+    )
+end
+
+local loader = reload.auto_single()
+
+modutil.once_loaded.game(function()
+    loader.load(init, init)
+end)
+
+rom.gui.add_imgui(function()
+    if internal.standaloneUi and internal.standaloneUi.renderWindow then
+        internal.standaloneUi.renderWindow()
+    end
+end)
+
+rom.gui.add_to_menu_bar(function()
+    if internal.standaloneUi and internal.standaloneUi.addMenuBar then
+        internal.standaloneUi.addMenuBar()
+    end
+end)
+```
+
+Notes on the example:
+- `config` and `reload` stay local to `main.lua`
+- `store` is recreated on every reload
+- `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
+- `DrawQuickContent` is optional
+- packed widgets need the module `store`

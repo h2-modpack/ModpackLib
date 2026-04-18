@@ -1,5 +1,3 @@
-local internal = AdamantModpackLib_Internal
-
 public.widgets = public.widgets or {}
 import 'widgets/widget_helpers.lua'
 import 'widgets/base.lua'

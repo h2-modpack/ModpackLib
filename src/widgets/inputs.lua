@@ -1,4 +1,3 @@
-local internal = AdamantModpackLib_Internal
 local WidgetFns = public.widgets
 
 ---@class InputTextOpts

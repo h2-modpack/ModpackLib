@@ -9,6 +9,7 @@ local GetPackedChoiceLabel = widgetHelpers.GetPackedChoiceLabel
 local ClassifyPackedChoice = widgetHelpers.ClassifyPackedChoice
 local ApplyPackedChoiceSelection = widgetHelpers.ApplyPackedChoiceSelection
 local ClearPackedChoiceSelection = widgetHelpers.ClearPackedChoiceSelection
+local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
 
 ---@class RadioOpts
 ---@field label string|nil
@@ -46,33 +47,6 @@ local ClearPackedChoiceSelection = widgetHelpers.ClearPackedChoiceSelection
 ---@field color Color|nil
 ---@field selected boolean
 ---@field onSelect fun(): boolean
-
-local function ResolvePackedChildren(uiState, alias, store)
-    local aliasNode = uiState and uiState.getAliasNode and uiState.getAliasNode(alias) or nil
-    local children = {}
-    if store and type(store.getPackedAliases) == "function" then
-        for _, child in ipairs(store.getPackedAliases(alias) or {}) do
-            children[#children + 1] = {
-                alias = child.alias,
-                label = child.label or child.alias,
-                get = function() return uiState.view[child.alias] end,
-                set = function(value) uiState.set(child.alias, value) end,
-            }
-        end
-        if #children > 0 then
-            return children
-        end
-    end
-    for _, child in ipairs(aliasNode and aliasNode._bitAliases or {}) do
-        children[#children + 1] = {
-            alias = child.alias,
-            label = child.label or child.alias,
-            get = function() return uiState.view[child.alias] end,
-            set = function(value) uiState.set(child.alias, value) end,
-        }
-    end
-    return children
-end
 
 ---@param imgui table
 ---@param radioId string

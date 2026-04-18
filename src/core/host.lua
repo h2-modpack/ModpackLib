@@ -16,10 +16,6 @@ local host = public.host
 ---@field windowTitle string|nil
 ---@field drawTab fun(imgui: table, uiState: UiState|nil)|nil
 ---@field getDrawTab fun(): fun(imgui: table, uiState: UiState|nil)|nil|nil
----@field beforeDrawTab fun(imgui: table, uiState: UiState|nil)|nil
----@field getBeforeDrawTab fun(): fun(imgui: table, uiState: UiState|nil)|nil|nil
----@field afterDrawTab fun(imgui: table, uiState: UiState|nil)|nil
----@field getAfterDrawTab fun(): fun(imgui: table, uiState: UiState|nil)|nil|nil
 
 ---@class StandaloneRuntime
 ---@field renderWindow fun()
@@ -178,20 +174,6 @@ function host.standaloneUI(def, store, uiState, opts)
         return opts.drawTab
     end
 
-    local function getBeforeDrawTab()
-        if type(opts.getBeforeDrawTab) == "function" then
-            return opts.getBeforeDrawTab()
-        end
-        return opts.beforeDrawTab
-    end
-
-    local function getAfterDrawTab()
-        if type(opts.getAfterDrawTab) == "function" then
-            return opts.getAfterDrawTab()
-        end
-        return opts.afterDrawTab
-    end
-
     local function onStateFlushed()
         if public.mutation.mutatesRunData(def) and store.read("Enabled") == true then
             rom.game.SetupRunData()
@@ -235,19 +217,10 @@ function host.standaloneUI(def, store, uiState, opts)
             end
 
             local drawTab = getDrawTab()
-            local beforeDrawTab = getBeforeDrawTab()
-            local afterDrawTab = getAfterDrawTab()
-
             if drawTab then
                 imgui.Separator()
                 imgui.Spacing()
-                if beforeDrawTab then
-                    beforeDrawTab(imgui, uiState)
-                end
                 drawTab(imgui, uiState)
-                if afterDrawTab then
-                    afterDrawTab(imgui, uiState)
-                end
                 if uiState and uiState.isDirty() then
                     local ok = host.commitState(def, store, uiState)
                     if ok then

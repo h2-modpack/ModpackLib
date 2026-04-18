@@ -10,6 +10,7 @@ local GetPackedChoiceLabel = widgetHelpers.GetPackedChoiceLabel
 local ClassifyPackedChoice = widgetHelpers.ClassifyPackedChoice
 local ApplyPackedChoiceSelection = widgetHelpers.ApplyPackedChoiceSelection
 local ClearPackedChoiceSelection = widgetHelpers.ClearPackedChoiceSelection
+local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
 
 ---@class DropdownOpts
 ---@field label string|nil
@@ -54,42 +55,14 @@ local function ShowTooltip(imgui, tooltip)
     end
 end
 
-local function ResolvePackedChildren(uiState, alias, store)
-    local aliasNode = uiState and uiState.getAliasNode and uiState.getAliasNode(alias) or nil
-    local children = {}
-    if store and type(store.getPackedAliases) == "function" then
-        for _, child in ipairs(store.getPackedAliases(alias) or {}) do
-            children[#children + 1] = {
-                alias = child.alias,
-                label = child.label or child.alias,
-                get = function() return uiState.view[child.alias] end,
-                set = function(value) uiState.set(child.alias, value) end,
-            }
-        end
-        if #children > 0 then
-            return children
-        end
-    end
-    for _, child in ipairs(aliasNode and aliasNode._bitAliases or {}) do
-        children[#children + 1] = {
-            alias = child.alias,
-            label = child.label or child.alias,
-            get = function() return uiState.view[child.alias] end,
-            set = function(value) uiState.set(child.alias, value) end,
-        }
-    end
-    return children
-end
-
 ---@param imgui table
 ---@param opts DropdownOpts|MappedDropdownOpts|PackedDropdownOpts
----@param previewText string
 ---@param previewColor Color|nil
 ---@param drawControl fun(controlWidth: number|nil, previewColor: Color|nil): boolean
 ---@return boolean
-local function DrawLabeledDropdownControl(imgui, opts, previewText, previewColor, drawControl)
+local function DrawLabeledDropdownControl(imgui, opts, _, previewColor, drawControl)
     local labelText = tostring(opts.label or "")
-    local controlWidth = tonumber(opts.controlWidth)
+    local controlWidth = tonumber(opts.controlWidth) or 0
     local controlGap = tonumber(opts.controlGap)
     if controlGap == nil or controlGap < 0 then
         controlGap = imgui.GetStyle().ItemSpacing.x

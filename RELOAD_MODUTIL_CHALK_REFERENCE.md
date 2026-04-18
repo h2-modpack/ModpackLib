@@ -38,30 +38,28 @@ These are the main source files this document is based on:
 
 ## Layer Responsibilities
 
-The modpack stack has four layers. Each one owns a different part of the timing and bootstrap story.
+The stack still benefits from a separation of responsibilities, but this section is architecture guidance, not a hard library rule.
 
-**Lib** — service library, no timing ownership
-- no `reload.auto_single()` in Lib files
-- no `modutil.once_loaded.game(...)` in Lib files
-- file load defines and exports API only
+**Service libraries**
+- Lib and Framework should not own reload timing by default
+- avoid `reload.auto_single()` and `modutil.once_loaded.game(...)` inside library code
+- library file load should mainly define and export API
 
-**Framework** — service library, no timing ownership
-- no `reload.auto_single()` inside Framework
-- `Framework.init(...)` is a rerunnable builder called by the coordinator
-- Framework does not own game-readiness gating
+**Application entrypoints**
+- plugin `main.lua` files should own reload timing and game-readiness gating
+- they are the normal place for:
+  - `reload.auto_single()`
+  - `modutil.once_loaded.game(...)`
+  - stable GUI callback registration
 
-**Core coordinator** — owns timing and stable GUI registration
-- owns `modutil.once_loaded.game(...)` gating
-- registers stable GUI callbacks once, inside the game-readiness gate
-- calls `Framework.init(...)` on every `loader.load`
+**Imported module files**
+- may share `lib`, `store`, and other module-local globals
+- should not each create their own reload/config bootstrap unless they are true entrypoints
 
-**Submodules** — own their definition, store, and bootstrap logic
-- each submodule file is its own `reload.auto_single()` scope
-- `config`, `chalk`, and `reload` stay local to `main.lua`
-- `lib` and `store` may be shared across module files
-
-The coordinator is the only layer that should call `modutil.once_loaded.game(...)`.
-Lib and Framework are re-importable libraries — they should be boring.
+Current run-director pattern:
+- keep `chalk`, `reload`, and raw `config` local to `main.lua`
+- rebuild definition, store, and current UI/runtime state from there
+- keep imported files boring
 
 ---
 
@@ -388,22 +386,22 @@ Why:
 
 This is the current modpack pattern and it is the right default.
 
-## 2. Coordinator GUI registration
+## 2. Stable GUI registration
 
 Register stable GUI callbacks once, outside the reload body, but still behind the game-readiness gate:
 
 ```lua
 modutil.once_loaded.game(function()
-    rom.gui.add_imgui(Framework.getRenderer(PACK_ID))
-    rom.gui.add_to_menu_bar(Framework.getMenuBar(PACK_ID))
+    rom.gui.add_imgui(renderWindow)
+    rom.gui.add_to_menu_bar(addMenuBar)
     loader.load(init, init)
 end)
 ```
 
 Why:
 - GUI registration itself should not stack on reload
-- the returned callbacks late-bind to current framework state
-- `init` can rebuild framework state on every reload
+- the returned callbacks should late-bind to current module/framework state
+- `init` can rebuild current state on every reload
 
 ## 3. Use `auto_multiple()` only when one file has several distinct reload lifecycles
 
@@ -436,7 +434,7 @@ Good pattern:
 - `config = chalk.auto(...)`
 - recreate `store = lib.store.create(config, definition, dataDefaults)`
 - recreate `uiState`
-- recreate framework/module derived state
+- recreate module/framework derived state
 
 Do not try to preserve old wrapper objects just because they already exist.
 

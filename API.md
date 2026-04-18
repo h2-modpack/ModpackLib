@@ -14,6 +14,9 @@ Preferred usage is namespaced:
 
 Old flat `lib.*` names should be treated as obsolete compatibility only.
 
+The one top-level non-namespaced export that still matters is:
+- `lib.config`
+
 ## Core Model
 
 Modules now declare:
@@ -37,6 +40,13 @@ There is no supported new authoring based on:
 - `selectQuickUi`
 
 Those fields are ignored under the current lean contract and only exist as stale compatibility surface.
+
+## `lib.config`
+
+Live Lib config loaded from Chalk.
+
+Current meaningful field:
+- `lib.config.DebugMode`
 
 ## `lib.store`
 
@@ -70,7 +80,9 @@ Returned surface:
 Rules:
 - widgets and draw code should usually read staged values from `store.uiState.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
-- transient aliases are not readable or writable through `store.read/write`
+- transient aliases are not readable through `store.read(...)`
+- transient aliases are not writable through `store.write(...)`
+- both cases warn and should be treated as draw/UI-state mistakes
 
 ### `store.uiState`
 
@@ -93,6 +105,10 @@ Behavior:
 - persisted aliases stage in `uiState` and only hit config on flush/commit
 - transient aliases live only in `uiState`
 - packed child aliases re-encode their owning packed root automatically
+
+`uiState.get(alias)` returns:
+- current staged value
+- alias node metadata
 
 ## `lib.storage`
 
@@ -227,20 +243,19 @@ Returned surface:
 - `runtime.renderWindow()`
 - `runtime.addMenuBar()`
 
+Behavior:
+- suppresses the standalone window/menu when the module is coordinated
+- renders built-in controls for:
+  - `Enabled`
+  - `Debug Mode`
+  - `Audit + Resync UI State`
+- then calls the configured `DrawTab`
+- commits dirty `uiState` through `lib.host.commitState(...)`
+
 Current optional hooks in `opts`:
 - `getDrawTab`
-- `getDrawQuickContent`
-- `getBeforeDrawTab`
-- `getAfterDrawTab`
 - `drawTab`
-- `drawQuickContent`
-- `beforeDrawTab`
-- `afterDrawTab`
 - `windowTitle`
-
-Note:
-- framework-hosted modules no longer use before/after draw hooks
-- they still exist here for standalone callers that may still need them
 
 ## `lib.coordinator`
 

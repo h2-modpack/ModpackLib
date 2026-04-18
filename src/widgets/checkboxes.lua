@@ -4,6 +4,7 @@ local WidgetFns = public.widgets
 local widgetHelpers = internal.widgetHelpers
 local DrawWithValueColor = widgetHelpers.DrawWithValueColor
 local NormalizeColor = widgetHelpers.NormalizeColor
+local ResolvePackedChildren = widgetHelpers.ResolvePackedChildren
 
 local DEFAULT_PACKED_SLOT_COUNT = 32
 
@@ -26,39 +27,12 @@ local function ShowTooltip(imgui, tooltip)
     end
 end
 
-local function ResolveOptionGap(imgui, optionGap)
+local function ResolveOptionGap(_, optionGap)
     local normalizedGap = tonumber(optionGap)
     if normalizedGap == nil or normalizedGap < 0 then
         normalizedGap = 8
     end
     return normalizedGap
-end
-
-local function ResolvePackedChildren(uiState, alias, store)
-    local aliasNode = uiState and uiState.getAliasNode and uiState.getAliasNode(alias) or nil
-    local result = {}
-    if store and type(store.getPackedAliases) == "function" then
-        for _, child in ipairs(store.getPackedAliases(alias) or {}) do
-            result[#result + 1] = {
-                alias = child.alias,
-                label = child.label or child.alias,
-                get = function() return uiState.view[child.alias] end,
-                set = function(value) uiState.set(child.alias, value) end,
-            }
-        end
-        if #result > 0 then
-            return result
-        end
-    end
-    for _, child in ipairs(aliasNode and aliasNode._bitAliases or {}) do
-        result[#result + 1] = {
-            alias = child.alias,
-            label = child.label or child.alias,
-            get = function() return uiState.view[child.alias] end,
-            set = function(value) uiState.set(child.alias, value) end,
-        }
-    end
-    return result
 end
 
 ---@param imgui table
