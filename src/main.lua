@@ -10,6 +10,7 @@ mods['SGG_Modding-ENVY'].auto()
 rom = rom
 _PLUGIN = _PLUGIN
 
+modutil = mods['SGG_Modding-ModUtil']
 local chalk = mods['SGG_Modding-Chalk']
 local libConfig = chalk.auto('config.lua')
 public.config = libConfig
