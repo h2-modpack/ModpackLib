@@ -2,8 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-
 ## [Unreleased]
+
+## [1.0.0] - 2026-04-20
 
 Initial public release of the adamant Modpack Lib surface.
 
@@ -36,4 +37,5 @@ Initial public release of the adamant Modpack Lib surface.
 - this release documents the current immediate-mode Lib contract
 - legacy declarative UI authoring is not part of the supported public surface for this release
 
-[Unreleased]: https://github.com/h2-modpack/adamant-ModpackLib/compare/HEAD
+[unreleased]: https://github.com/h2-modpack/adamant-ModpackLib/compare/1.0.0...HEAD
+[1.0.0]: https://github.com/h2-modpack/adamant-ModpackLib/compare/39bee9364299ddbc4447ec92c0e33662dbb43ab5...1.0.0
