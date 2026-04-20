@@ -19,6 +19,9 @@ read_globals = {
     "import_as_fallback", 
     "import",
     "HUDScreen",
-    "ModifyTextBox"
+    "ImGuiTreeNodeFlags",
+    "ModifyTextBox",
+    "ImGuiComboFlags",
+    "ImGuiCol"
     }
 exclude_files = { "src/vendor/**/*.lua", "src/**/*template*.lua" }

@@ -1,5 +1,6 @@
 local internal = AdamantModpackLib_Internal
 local WidgetFns = public.widgets
+local imguiHelpers = public.imguiHelpers
 
 local widgetHelpers = internal.widgetHelpers
 local NormalizeChoiceValue = widgetHelpers.NormalizeChoiceValue
@@ -53,6 +54,42 @@ local function ShowTooltip(imgui, tooltip)
     if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
         imgui.SetTooltip(tooltip)
     end
+end
+
+local COMBO_FLAG_NO_PREVIEW = imguiHelpers.ImGuiComboFlags.NoPreview
+local IMGUI_COL_TEXT = imguiHelpers.ImGuiCol.Text
+
+local function DrawComboPreviewText(imgui, previewText, previewColor)
+    local drawList = imgui.GetWindowDrawList()
+    if drawList == nil then
+        return
+    end
+
+    local style = imgui.GetStyle()
+    local rectMinX, rectMinY = imgui.GetItemRectMin()
+    local rectMaxX, rectMaxY = imgui.GetItemRectMax()
+    local _, textHeight = imgui.CalcTextSize(previewText)
+    local framePaddingX = style.FramePadding.x
+    local itemInnerSpacingX = style.ItemInnerSpacing.x
+    local arrowWidth = imgui.GetFrameHeight()
+    local textMinX = rectMinX + framePaddingX
+    local textMaxX = rectMaxX - arrowWidth - itemInnerSpacingX
+    local textPosY = rectMinY + math.max(((rectMaxY - rectMinY) - textHeight) * 0.5, 0)
+    local colorU32
+
+    if textMaxX <= textMinX then
+        return
+    end
+
+    if type(previewColor) == "table" then
+        colorU32 = imgui.GetColorU32(previewColor[1], previewColor[2], previewColor[3], previewColor[4] or 1)
+    else
+        colorU32 = imgui.GetColorU32(IMGUI_COL_TEXT, 1)
+    end
+
+    imgui.PushClipRect(textMinX, rectMinY, textMaxX, rectMaxY, true)
+    imgui.ImDrawListAddText(drawList, textMinX, textPosY, colorU32, previewText)
+    imgui.PopClipRect()
 end
 
 ---@param imgui table
@@ -118,10 +155,13 @@ function WidgetFns.dropdown(imgui, session, alias, opts)
     local previewText = currentOption and currentOption.label or ""
     local previewColor = currentOption and currentOption.color or nil
 
-    return DrawLabeledDropdownControl(imgui, opts, previewText, previewColor, function()
-        local opened = DrawWithValueColor(imgui, previewColor, function()
-            return imgui.BeginCombo("##" .. tostring(alias), previewText)
-        end)
+    return DrawLabeledDropdownControl(imgui, opts, previewText, nil, function()
+        local opened = imgui.BeginCombo(
+            "##" .. tostring(alias),
+            "",
+            COMBO_FLAG_NO_PREVIEW
+        )
+        DrawComboPreviewText(imgui, previewText, previewColor)
         if not opened then
             return false
         end
@@ -156,10 +196,13 @@ function WidgetFns.mappedDropdown(imgui, session, alias, opts)
         and (opts.getOptions(session.view) or {})
         or {}
 
-    return DrawLabeledDropdownControl(imgui, opts, preview, previewColor, function()
-        local opened = DrawWithValueColor(imgui, previewColor, function()
-            return imgui.BeginCombo("##" .. tostring(alias), preview)
-        end)
+    return DrawLabeledDropdownControl(imgui, opts, preview, nil, function()
+        local opened = imgui.BeginCombo(
+            "##" .. tostring(alias),
+            "",
+            COMBO_FLAG_NO_PREVIEW
+        )
+        DrawComboPreviewText(imgui, preview, previewColor)
         if not opened then
             return false
         end
@@ -205,10 +248,13 @@ function WidgetFns.packedDropdown(imgui, session, alias, store, opts)
         preview = tostring(opts.multipleLabel or "Multiple")
     end
 
-    return DrawLabeledDropdownControl(imgui, opts, preview, previewColor, function()
-        local opened = DrawWithValueColor(imgui, previewColor, function()
-            return imgui.BeginCombo("##" .. tostring(alias), preview)
-        end)
+    return DrawLabeledDropdownControl(imgui, opts, preview, nil, function()
+        local opened = imgui.BeginCombo(
+            "##" .. tostring(alias),
+            "",
+            COMBO_FLAG_NO_PREVIEW
+        )
+        DrawComboPreviewText(imgui, preview, previewColor)
         if not opened then
             return false
         end

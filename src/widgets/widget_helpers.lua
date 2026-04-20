@@ -83,11 +83,8 @@ function widgetHelpers.DrawWithValueColor(imgui, color, drawFn)
 
     local textEnum = imgui.ImGuiCol and imgui.ImGuiCol.Text or 0
     imgui.PushStyleColor(textEnum, color[1], color[2], color[3], color[4])
-    local ok, a, b, c, d = pcall(drawFn)
+    local a, b, c, d = drawFn()
     imgui.PopStyleColor()
-    if not ok then
-        error(a)
-    end
     return a, b, c, d
 end
 

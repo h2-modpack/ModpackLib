@@ -32,12 +32,6 @@ function public.createModuleHost(opts)
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
 
-    local function onStateFlushed()
-        if public.lifecycle.mutatesRunData(def) and store.read("Enabled") == true then
-            rom.game.SetupRunData()
-        end
-    end
-
     local host = {}
 
     function host.getDefinition()
@@ -74,13 +68,10 @@ function public.createModuleHost(opts)
 
     function host.commitIfDirty()
         if not session.isDirty() then
-            return true, nil
+            return true, nil, false
         end
         local ok, err = public.lifecycle.commitSession(def, store, session)
-        if ok then
-            onStateFlushed()
-        end
-        return ok, err
+        return ok, err, ok == true
     end
 
     function host.isEnabled()
@@ -154,6 +145,21 @@ function public.standaloneHost(moduleHost, opts)
 
     local showWindow = false
     local didSeedWindowSize = false
+    local runDataDirty = false
+
+    local function markRunDataDirty()
+        if public.lifecycle.mutatesRunData(def) then
+            runDataDirty = true
+        end
+    end
+
+    local function flushPendingRunData()
+        if not runDataDirty then
+            return
+        end
+        rom.game.SetupRunData()
+        runDataDirty = false
+    end
 
     local function seedWindowSize(imgui)
         if didSeedWindowSize then
@@ -176,9 +182,7 @@ function public.standaloneHost(moduleHost, opts)
             if enabledChanged then
                 local ok, err = moduleHost.setEnabled(enabledValue)
                 if ok then
-                    if public.lifecycle.mutatesRunData(def) then
-                        rom.game.SetupRunData()
-                    end
+                    markRunDataDirty()
                 else
                     internal.logging.warn("%s %s failed: %s",
                         tostring(def.name or def.id or "module"),
@@ -200,11 +204,15 @@ function public.standaloneHost(moduleHost, opts)
                 imgui.Separator()
                 imgui.Spacing()
                 moduleHost.drawTab(imgui)
-                moduleHost.commitIfDirty()
+                local ok, _, committed = moduleHost.commitIfDirty()
+                if ok and committed and moduleHost.read("Enabled") == true then
+                    markRunDataDirty()
+                end
             end
 
             imgui.End()
         else
+            flushPendingRunData()
             showWindow = false
         end
     end
@@ -213,6 +221,9 @@ function public.standaloneHost(moduleHost, opts)
         if def.modpack and _coordinators[def.modpack] then return end
         if rom.ImGui.BeginMenu(def.name) then
             if rom.ImGui.MenuItem(def.name) then
+                if showWindow then
+                    flushPendingRunData()
+                end
                 showWindow = not showWindow
             end
             rom.ImGui.EndMenu()

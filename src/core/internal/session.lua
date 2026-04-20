@@ -90,6 +90,10 @@ function internal.store.createSession(modConfig, configBackend, storage)
 
     local function writeRootToStaging(root, value)
         local normalized = NormalizeStorageValue(root, value)
+        local current = staging[root.alias]
+        if storageInternal.valuesEqual(root, current, normalized) then
+            return false
+        end
         staging[root.alias] = normalized
         if root.type == "packedInt" then
             syncPackedChildren(root, normalized)
@@ -98,6 +102,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
             dirtyRoots[root.alias] = true
             dirty = true
         end
+        return true
     end
 
     local function loadPersistedRootIntoStaging(root)
@@ -198,8 +203,15 @@ function internal.store.createSession(modConfig, configBackend, storage)
                 packedValue = staging[parent.alias]
             end
             local normalized = NormalizeStorageValue(node, value)
+            if storageInternal.valuesEqual(node, staging[node.alias], normalized) then
+                return
+            end
             local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
             local nextPacked = storageInternal.writePackedBits(packedValue, node.offset, node.width, encoded)
+            if storageInternal.valuesEqual(parent, packedValue, nextPacked) then
+                staging[node.alias] = normalized
+                return
+            end
             writeRootToStaging(parent, nextPacked)
             staging[node.alias] = normalized
             return
