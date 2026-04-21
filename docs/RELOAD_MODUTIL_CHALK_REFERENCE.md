@@ -6,6 +6,8 @@ It is written for two audiences:
 - humans maintaining the modpack
 - future agentic tools that should not have to rediscover these library semantics from plugin source
 
+For the hot-reload contract of `adamant-ModpackLib`, `adamant-ModpackFramework`, coordinator shells, and modules built on top of these libraries, see [HOT_RELOAD_ARCHITECTURE.md](HOT_RELOAD_ARCHITECTURE.md).
+
 ## Scope
 
 This document focuses on:
@@ -14,6 +16,8 @@ This document focuses on:
 - `modutil.once_loaded.*`
 - `ModUtil.LoadOnce`
 - `chalk.auto`
+
+It does not define the stack-specific hot-reload architecture for Lib, Framework, Core, or module hosts.
 
 It also calls out a few important things these libraries do **not** do:
 - ModUtil wrap registration does **not** deduplicate by callback or mod
@@ -36,30 +40,11 @@ These are the main source files this document is based on:
 - `Hell2Modding/src/hades2/hades_lua.hpp`
 - `Hell2Modding/src/lua_extensions/bindings/hades/data.cpp`
 
-## Layer Responsibilities
+## Related Stack Doc
 
-The stack still benefits from a separation of responsibilities, but this section is architecture guidance, not a hard library rule.
+This file documents third-party library behavior.
 
-**Service libraries**
-- Lib and Framework should not own reload timing by default
-- avoid `reload.auto_single()` and `modutil.once_loaded.game(...)` inside library code
-- library file load should mainly define and export API
-
-**Application entrypoints**
-- plugin `main.lua` files should own reload timing and game-readiness gating
-- they are the normal place for:
-  - `reload.auto_single()`
-  - `modutil.once_loaded.game(...)`
-  - stable GUI callback registration
-
-**Imported module files**
-- may share `lib`, `store`, and other module-local globals
-- should not each create their own reload/config bootstrap unless they are true entrypoints
-
-Current run-director pattern:
-- keep `chalk`, `reload`, and raw `config` local to `main.lua`
-- rebuild definition, store, session, and current UI/runtime state from there
-- keep imported files boring
+The repo-specific hot-reload model built on top of those behaviors is documented in [HOT_RELOAD_ARCHITECTURE.md](HOT_RELOAD_ARCHITECTURE.md).
 
 ---
 
@@ -363,7 +348,7 @@ So:
 
 Practical consequence:
 - do not rely on ModUtil for hook dedupe
-- if wraps are safe across hot reload in practice, that safety is coming from target recreation/reset in the game/reload pipeline
+- if wraps are safe across hot reload in practice, that safety is coming from target recreation/reset in the game/reload pipeline or from a higher-level wrapper layer owning dedupe itself
 
 ## Best Practices
 
@@ -375,16 +360,18 @@ Use:
 local loader = reload.auto_single()
 
 modutil.once_loaded.game(function()
-    loader.load(init, init)
+    loader.load(nil, init)
 end)
 ```
 
 Why:
 - `once_loaded.game(...)` waits for game readiness
-- `auto_single()` gives one stable first-load gate for the file
-- `init` can safely be reused as both `on_ready` and `on_reload` when bootstrap is reload-safe
+- `auto_single()` gives one stable reload identity for the file
+- `init` becomes the steady-state bootstrap body that runs on each active load
 
-This is the current modpack pattern and it is the right default.
+If you truly need first-load-only work, split that into a separate `on_ready` function. Otherwise prefer `loader.load(nil, init)`.
+
+This is the normal steady-state plugin pattern when the active bootstrap body is reload-safe.
 
 ## 2. Stable GUI registration
 
@@ -394,7 +381,7 @@ Register stable GUI callbacks once, outside the reload body, but still behind th
 modutil.once_loaded.game(function()
     rom.gui.add_imgui(renderWindow)
     rom.gui.add_to_menu_bar(addMenuBar)
-    loader.load(init, init)
+    loader.load(nil, init)
 end)
 ```
 
@@ -441,7 +428,6 @@ Recreate wrapper objects during reload so they point at the rebuilt module state
 
 If a hook site must be one-time by construction:
 - make it one-time in your architecture
-- or ensure the wrapped target is recreated by reload semantics
 
 Do not assume `ModUtil.Wrap` will silently collapse duplicate registrations.
 
@@ -526,16 +512,13 @@ local function init()
 end
 
 modutil.once_loaded.game(function()
-    loader.load(init, init)
+    loader.load(nil, init)
 end)
 ```
 
 This is the best default unless you have a specific reason to deviate.
 
-For module files in the current stack:
-- keep `chalk`, `reload`, and raw `config` local to `main.lua`
-- `modutil`, `lib`, `store`, and `session` may be shared across the module's imported files
-- after `local dataDefaults = import("config.lua")`, `local config = chalk.auto("config.lua")`, and `public.store, public.session = lib.createStore(config, public.definition, dataDefaults)`, imported runtime files should use `store.read(...)` for persisted reads and UI files should use `session.view` / `session.write(...)` for staged reads and edits
+For the repo-specific module and coordinator patterns built on top of these libraries, see [HOT_RELOAD_ARCHITECTURE.md](HOT_RELOAD_ARCHITECTURE.md).
 
 ## Guidance For Future Agents
 
@@ -545,6 +528,7 @@ If you are an agent reading this later, assume the following unless local repo c
 - `once_loaded.game(...)` is a readiness gate, not a lifecycle system
 - `chalk.auto(...)` returns a fresh wrapper around persisted config each reload; that is normal
 - do not claim ModUtil deduplicates wraps unless you have new source evidence
+- if you need the repo's stack contract rather than raw library behavior, read [HOT_RELOAD_ARCHITECTURE.md](HOT_RELOAD_ARCHITECTURE.md)
 - when reviewing hot reload behavior, separate:
   - plugin file reload
   - game script import milestones
@@ -552,4 +536,3 @@ If you are an agent reading this later, assume the following unless local repo c
   - persisted config reloading
 
 If you need to revisit library behavior, start with the source files listed near the top of this document.
-

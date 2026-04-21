@@ -21,27 +21,33 @@ public.host = lib.createModuleHost({
     definition = public.definition,
     store = store,
     session = session,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
 ```
 
+`hookOwner` and `registerHooks` are the standard way to declare a module's runtime hooks when it uses `lib.hooks.*`.
+
 ## Docs
 
-- [GETTING_STARTED.md](GETTING_STARTED.md)
+- [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
   Start here for the core concepts, file roles, and first module flow.
 - [API.md](API.md)
   Public namespaces, functions, and data contracts.
-- [MODULE_AUTHORING.md](MODULE_AUTHORING.md)
+- [docs/MODULE_AUTHORING.md](docs/MODULE_AUTHORING.md)
   Deeper authoring guide for storage, sessions, lifecycle, and hosting.
-- [WIDGETS.md](WIDGETS.md)
+- [docs/WIDGETS.md](docs/WIDGETS.md)
   Widget and navigation helpers for module UIs.
-- [UI_PERFORMANCE.md](UI_PERFORMANCE.md)
+- [docs/UI_PERFORMANCE.md](docs/UI_PERFORMANCE.md)
   Render-path guidance for responsive ImGui screens.
-- [IMGUI_LUA_REFERENCE.md](IMGUI_LUA_REFERENCE.md)
+- [docs/IMGUI_LUA_REFERENCE.md](docs/IMGUI_LUA_REFERENCE.md)
   Notes on the Dear ImGui Lua binding used by the stack.
-- [RELOAD_MODUTIL_CHALK_REFERENCE.md](RELOAD_MODUTIL_CHALK_REFERENCE.md)
-  Stack reference for ReLoad, ModUtil, and Chalk behavior.
+- [docs/RELOAD_MODUTIL_CHALK_REFERENCE.md](docs/RELOAD_MODUTIL_CHALK_REFERENCE.md)
+  Third-party stack reference for ReLoad, ModUtil, and Chalk behavior.
+- [docs/HOT_RELOAD_ARCHITECTURE.md](docs/HOT_RELOAD_ARCHITECTURE.md)
+  Stack hot-reload contract for Lib, Framework, Core, and coordinated modules.
 - [CONTRIBUTING.md](CONTRIBUTING.md)
   Contributor expectations for changing the public Lib contract.
 
@@ -52,6 +58,7 @@ public.host = lib.createModuleHost({
 - `lib.lifecycle`
 - `lib.mutation`
 - `lib.hashing`
+- `lib.hooks`
 - `lib.widgets`
 - `lib.nav`
 
@@ -61,10 +68,11 @@ Common top-level helpers:
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
+- `lib.getModuleRegistryVersion(...)`
 - `lib.resetStorageToDefaults(...)`
 
 Most authors start with `lib.createStore(...)` and `lib.createModuleHost(...)`.
-See [GETTING_STARTED.md](GETTING_STARTED.md) for the recommended project shape.
+See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the recommended project shape.
 
 ## Validation
 

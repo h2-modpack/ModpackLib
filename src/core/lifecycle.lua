@@ -94,6 +94,11 @@ function lifecycleApi.applyOnLoad(def, store)
         if not ok then
             return false, err
         end
+    else
+        local ok, err = mutationInternal.revertActive(def, store)
+        if not ok then
+            return false, err
+        end
     end
 
     if lifecycleApi.mutatesRunData(def) and not public.isModuleCoordinated(def and def.modpack) then
@@ -196,4 +201,3 @@ end
 function lifecycleApi.setDebugMode(store, enabled)
     internal.store.writePersisted(store, "DebugMode", enabled == true)
 end
-

@@ -8,7 +8,7 @@ It explains:
 - how data moves through a module
 - how to build a minimal working module from the template
 
-For the exact API surface, use [API.md](API.md). For the fuller authoring contract, use [MODULE_AUTHORING.md](MODULE_AUTHORING.md).
+For the exact API surface, use [API.md](../API.md). For the fuller authoring contract, use [MODULE_AUTHORING.md](MODULE_AUTHORING.md).
 
 ## Starting A New Repo
 
@@ -48,9 +48,10 @@ Typical module flow:
 
 1. `main.lua` builds `public.definition`.
 2. `main.lua` creates `store, session = lib.createStore(...)`.
-3. UI code edits staged values through `session`.
-4. Host/framework plumbing commits staged persistent values when appropriate.
-5. Gameplay logic reads persisted state through `store.read(...)`.
+3. `main.lua` creates `public.host = lib.createModuleHost(...)`.
+4. UI code edits staged values through `session`.
+5. Host/framework plumbing commits staged persistent values when appropriate.
+6. Gameplay logic reads persisted state through `store.read(...)`.
 
 ## The Most Important Rule
 
@@ -201,6 +202,22 @@ end
 
 Use `patchPlan` when possible. Reach for manual `apply/revert` only when the mutation is not naturally expressed as reversible table edits.
 
+If the module installs runtime hooks, declare them through `lib.hooks.*` from `internal.RegisterHooks()`:
+
+```lua
+function internal.RegisterHooks()
+    lib.hooks.Wrap(internal, "SomeGameFunction", function(base, ...)
+        local result = base(...)
+
+        if internal.store.read("FeatureEnabled") then
+            -- apply module-specific logic to the wrapped call here
+        end
+
+        return result
+    end)
+end
+```
+
 ### 6. Expose the module host in `main.lua`
 
 ```lua
@@ -208,6 +225,8 @@ public.host = lib.createModuleHost({
     definition = public.definition,
     store = store,
     session = session,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
@@ -216,6 +235,8 @@ public.host = lib.createModuleHost({
 This is the main module export.
 
 Framework uses it for coordinated modules. Standalone hosting uses it for module windows and menu items.
+
+If the module has no runtime hooks, `hookOwner` and `registerHooks` may be omitted.
 
 ## Coordinated vs Standalone
 
@@ -308,5 +329,5 @@ That lets LuaLS infer the `AuthorSession` type through `internal.DrawTab = funct
 After this guide:
 
 1. Read [MODULE_AUTHORING.md](MODULE_AUTHORING.md) for the fuller authoring contract.
-2. Use [API.md](API.md) when you need exact function names and behavior.
+2. Use [API.md](../API.md) when you need exact function names and behavior.
 3. Use the template source files as the concrete code reference.

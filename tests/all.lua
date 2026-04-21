@@ -11,6 +11,7 @@ require('tests/TestStorageValidation')
 require('tests/TestSession')
 require('tests/TestIsEnabled')
 require('tests/TestDataDefaults')
+require('tests/TestHooks')
 
 local lu = require('luaunit')
 os.exit(lu.LuaUnit.run())

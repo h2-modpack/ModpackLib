@@ -267,6 +267,129 @@ function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()
     lu.assertEquals(target.Value, 1)
 end
 
+function TestDefinitionLifecycle:testPatchRuntimeSurvivesRecreatedStoreByModuleId()
+    local target = { Value = 1 }
+    local storeA = lib.createStore({ Enabled = true }, { storage = {} })
+    local defA = {
+        modpack = "test-pack",
+        id = "StablePatchRuntime",
+        patchPlan = function(plan)
+            plan:set(target, "Value", 7)
+        end,
+    }
+
+    local ok, err = lib.lifecycle.applyMutation(defA, storeA)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 7)
+
+    local storeB = lib.createStore({ Enabled = true }, { storage = {} })
+    local defB = {
+        modpack = "test-pack",
+        id = "StablePatchRuntime",
+        patchPlan = function(plan)
+            plan:set(target, "Value", 9)
+        end,
+    }
+
+    ok, err = lib.lifecycle.applyMutation(defB, storeB)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 9)
+
+    ok, err = lib.lifecycle.revertMutation(defB, storeB)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 1)
+end
+
+function TestDefinitionLifecycle:testApplyOnLoadRevertsStablePatchWhenReloadedDisabled()
+    local target = { Value = 1 }
+    local storeA = lib.createStore({ Enabled = true }, { storage = {} })
+    local def = {
+        modpack = "test-pack",
+        id = "DisabledReloadPatchRuntime",
+        affectsRunData = true,
+        patchPlan = function(plan)
+            plan:set(target, "Value", 7)
+        end,
+    }
+
+    local ok, err = lib.lifecycle.applyMutation(def, storeA)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 7)
+
+    local storeB = lib.createStore({ Enabled = false }, { storage = {} })
+
+    ok, err = lib.lifecycle.applyOnLoad(def, storeB)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 1)
+end
+
+function TestDefinitionLifecycle:testManualRuntimeSurvivesRecreatedStoreByModuleId()
+    local target = { Value = 0 }
+    local storeA = lib.createStore({ Enabled = true }, { storage = {} })
+    local defA = {
+        modpack = "test-pack",
+        id = "StableManualRuntime",
+        apply = function()
+            target.Value = target.Value + 1
+        end,
+        revert = function()
+            target.Value = target.Value - 1
+        end,
+    }
+
+    local ok, err = lib.lifecycle.applyMutation(defA, storeA)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 1)
+
+    local storeB = lib.createStore({ Enabled = true }, { storage = {} })
+    local defB = {
+        modpack = "test-pack",
+        id = "StableManualRuntime",
+        apply = function()
+            target.Value = target.Value + 10
+        end,
+        revert = function()
+            target.Value = target.Value - 10
+        end,
+    }
+
+    ok, err = lib.lifecycle.applyMutation(defB, storeB)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 10)
+
+    ok, err = lib.lifecycle.revertMutation(defB, storeB)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 0)
+end
+
+function TestDefinitionLifecycle:testApplyOnLoadDisabledDoesNotCallInactiveManualRevert()
+    local store = lib.createStore({ Enabled = false }, { storage = {} })
+    local revertCalls = 0
+    local def = {
+        modpack = "test-pack",
+        id = "InactiveManualRevert",
+        affectsRunData = true,
+        apply = function() end,
+        revert = function()
+            revertCalls = revertCalls + 1
+        end,
+    }
+
+    local ok, err = lib.lifecycle.applyOnLoad(def, store)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(revertCalls, 0)
+end
+
 function TestDefinitionLifecycle:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunDataUnaffected()
     local store = lib.createStore({ Enabled = false }, { storage = {} })
     local def = {
@@ -418,7 +541,5 @@ function TestDefinitionLifecycle:testHybridOrderingIsPatchThenManualOnApplyAndMa
     lu.assertEquals(order, { "build", "manual-apply", "manual-revert" })
     lu.assertEquals(target.Value, 0)
 end
-
-
 
 

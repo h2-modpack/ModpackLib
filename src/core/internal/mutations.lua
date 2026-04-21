@@ -1,9 +1,12 @@
 local mutationPlan = ...
 local internal = AdamantModpackLib_Internal
 internal.mutation = internal.mutation or {}
+internal.mutationRuntime = internal.mutationRuntime or {}
 
 local mutationInternal = internal.mutation
-local mutationRuntime = setmetatable({}, { __mode = "k" })
+local mutationRuntime = internal.mutationRuntime
+mutationRuntime.byKey = mutationRuntime.byKey or {}
+mutationRuntime.byStore = mutationRuntime.byStore or setmetatable({}, { __mode = "k" })
 
 ---@alias MutationShape "patch"|"manual"|"hybrid"
 
@@ -13,20 +16,112 @@ local mutationRuntime = setmetatable({}, { __mode = "k" })
 ---@field hasRevert boolean
 ---@field hasManual boolean
 
-local function GetActiveMutationPlan(store)
-    local runtime = store and mutationRuntime[store]
-    return runtime and runtime.plan or nil
+local function GetRuntimeBucket(def, store)
+    if def and type(def.id) == "string" and def.id ~= "" then
+        local packId = (type(def.modpack) == "string" and def.modpack ~= "")
+            and def.modpack
+            or "_standalone"
+        return mutationRuntime.byKey, packId .. "::" .. def.id
+    end
+
+    if store then
+        return mutationRuntime.byStore, store
+    end
 end
 
-local function SetActiveMutationPlan(store, plan)
-    if not store then
+local function GetRuntimeEntry(def, store, create)
+    local bucket, key = GetRuntimeBucket(def, store)
+    if not bucket then
+        return nil, nil, nil
+    end
+
+    local entry = bucket[key]
+    if not entry and create then
+        entry = {}
+        bucket[key] = entry
+    end
+
+    return entry, bucket, key
+end
+
+local function ClearRuntimeEntryIfEmpty(entry, bucket, key)
+    if entry and not entry.plan and not entry.manualRevert then
+        bucket[key] = nil
+    end
+end
+
+local function GetActiveMutationPlan(def, store)
+    local entry = GetRuntimeEntry(def, store, false)
+    return entry and entry.plan or nil
+end
+
+local function SetActiveMutationPlan(def, store, plan)
+    local entry, bucket, key = GetRuntimeEntry(def, store, plan ~= nil)
+    if not entry then
         return
     end
-    if plan == nil then
-        mutationRuntime[store] = nil
+
+    entry.plan = plan
+    ClearRuntimeEntryIfEmpty(entry, bucket, key)
+end
+
+local function GetActiveManualRevert(def, store)
+    local entry = GetRuntimeEntry(def, store, false)
+    return entry and entry.manualRevert or nil
+end
+
+local function SetActiveManualRevert(def, store, revertFn)
+    local entry, bucket, key = GetRuntimeEntry(def, store, revertFn ~= nil)
+    if not entry then
         return
     end
-    mutationRuntime[store] = { plan = plan }
+
+    entry.manualRevert = revertFn
+    ClearRuntimeEntryIfEmpty(entry, bucket, key)
+end
+
+local function RevertActiveManual(def, store)
+    local revertFn = GetActiveManualRevert(def, store)
+    if not revertFn then
+        return true, nil, false
+    end
+
+    local ok, err = pcall(revertFn)
+    if not ok then
+        return false, err, true
+    end
+
+    SetActiveManualRevert(def, store, nil)
+    return true, nil, true
+end
+
+local function RevertActivePlan(def, store)
+    local activePlan = GetActiveMutationPlan(def, store)
+    if not activePlan then
+        return true, nil, false
+    end
+
+    local ok, err = pcall(activePlan.revert, activePlan)
+    if not ok then
+        return false, err, true
+    end
+
+    SetActiveMutationPlan(def, store, nil)
+    return true, nil, true
+end
+
+local function RevertActiveMutation(def, store)
+    local okManual, errManual, didManual = RevertActiveManual(def, store)
+    if not okManual then
+        return false, errManual
+    end
+
+    local okPlan, errPlan, didPlan = RevertActivePlan(def, store)
+    if not okPlan then
+        return false, errPlan
+    end
+
+    return true, nil, didManual or didPlan
 end
 
 local function BuildMutationPlan(def, store)
@@ -84,20 +179,17 @@ end
 ---@return string|nil err Error message when the apply step fails.
 function mutationInternal.apply(def, store)
     local inferred, info = mutationInternal.inferMutation(def)
+
+    local okActive, errActive = RevertActiveMutation(def, store)
+    if not okActive then
+        return false, errActive
+    end
+
     if not inferred then
         if not mutationInternal.mutatesRunData(def) then
             return true, nil
         end
         return false, "no supported mutation lifecycle found"
-    end
-
-    local activePlan = GetActiveMutationPlan(store)
-    if activePlan then
-        local okRevert, errRevert = pcall(activePlan.revert, activePlan)
-        if not okRevert then
-            return false, errRevert
-        end
-        SetActiveMutationPlan(store, nil)
     end
 
     local builtPlan = nil
@@ -112,7 +204,7 @@ function mutationInternal.apply(def, store)
             if not okApply then
                 return false, errApply
             end
-            SetActiveMutationPlan(store, builtPlan)
+            SetActiveMutationPlan(def, store, builtPlan)
         end
     end
 
@@ -121,13 +213,24 @@ function mutationInternal.apply(def, store)
         if not okManual then
             if builtPlan then
                 pcall(builtPlan.revert, builtPlan)
-                SetActiveMutationPlan(store, nil)
+                SetActiveMutationPlan(def, store, nil)
             end
             return false, errManual
         end
+        SetActiveManualRevert(def, store, def.revert)
     end
 
     return true, nil
+end
+
+--- Reverts any active tracked mutation state without invoking fallback lifecycle hooks.
+---@param def ModuleDefinition Module definition declaring mutation behavior.
+---@param store ManagedStore|nil Managed module store associated with the definition.
+---@return boolean ok True when active mutation state was absent or reverted successfully.
+---@return string|nil err Error message when active cleanup fails.
+function mutationInternal.revertActive(def, store)
+    local ok, err = RevertActiveMutation(def, store)
+    return ok, err
 end
 
 --- Reverts a module definition's current mutation lifecycle from live run data.
@@ -138,7 +241,11 @@ end
 function mutationInternal.revert(def, store)
     local inferred, info = mutationInternal.inferMutation(def)
     if not inferred then
-        if not mutationInternal.mutatesRunData(def) then
+        local okActive, errActive, didActive = RevertActiveMutation(def, store)
+        if not okActive then
+            return false, errActive
+        end
+        if didActive or not mutationInternal.mutatesRunData(def) then
             return true, nil
         end
         return false, "no supported mutation lifecycle found"
@@ -147,19 +254,20 @@ function mutationInternal.revert(def, store)
     local firstErr = nil
 
     if info.hasManual then
-        local okManual, errManual = pcall(def.revert)
-        if not okManual and not firstErr then
-            firstErr = errManual
+        local okActiveManual, errActiveManual, didActiveManual = RevertActiveManual(def, store)
+        if not okActiveManual and not firstErr then
+            firstErr = errActiveManual
+        elseif not didActiveManual then
+            local okManual, errManual = pcall(def.revert)
+            if not okManual and not firstErr then
+                firstErr = errManual
+            end
         end
     end
 
-    local activePlan = GetActiveMutationPlan(store)
-    if activePlan then
-        local okPlan, errPlan = pcall(activePlan.revert, activePlan)
-        SetActiveMutationPlan(store, nil)
-        if not okPlan and not firstErr then
-            firstErr = errPlan
-        end
+    local okPlan, errPlan = RevertActivePlan(def, store)
+    if not okPlan and not firstErr then
+        firstErr = errPlan
     end
 
     if firstErr then

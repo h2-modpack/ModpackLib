@@ -8,8 +8,10 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.standaloneHost(...)`
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
+- `lib.getModuleRegistryVersion(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hashing.*`
+- `lib.hooks.*`
 - `lib.mutation.*`
 - `lib.lifecycle.*`
 - `lib.logging.*`
@@ -132,6 +134,60 @@ Returns:
 
 Options:
 - `exclude = { Alias = true }` skips specific root aliases.
+
+## `lib.hooks`
+
+Reload-stable wrappers around ModUtil path hooks.
+
+Use a persistent owner table, typically the module's `internal` table.
+
+### `lib.hooks.Wrap(owner, path, handler)`
+
+Registers or updates a stable `modutil.mod.Path.Wrap(...)` dispatcher.
+
+Also supports:
+- `lib.hooks.Wrap(owner, path, key, handler)`
+
+Use the keyed form when one owner registers more than one wrap against the same path.
+
+### `lib.hooks.Override(owner, path, replacement)`
+
+Registers or updates a stable `modutil.mod.Path.Override(...)`.
+
+Also supports:
+- `lib.hooks.Override(owner, path, key, replacement)`
+
+Function replacements are dispatched through a stable wrapper so reloading updates behavior without stacking another override.
+
+### `lib.hooks.Context.Wrap(owner, path, context)`
+
+Registers or updates a stable `modutil.mod.Path.Context.Wrap(...)` dispatcher.
+
+Also supports:
+- `lib.hooks.Context.Wrap(owner, path, key, context)`
+
+### Typical module pattern
+
+```lua
+function internal.RegisterHooks()
+    lib.hooks.Wrap(internal, "GetEligibleLootNames", function(base, ...)
+        local result = base(...)
+        -- inspect or transform the wrapped call here
+        return result
+    end)
+end
+
+public.host = lib.createModuleHost({
+    definition = public.definition,
+    store = store,
+    session = session,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
+    drawTab = internal.DrawTab,
+})
+```
+
+When `createModuleHost(...)` receives `hookOwner` and `registerHooks`, it runs the registration pass as part of host creation and deactivates hooks omitted by a later pass for the same owner.
 
 ## `lib.hashing`
 
@@ -263,6 +319,8 @@ Creates a behavior-only host object around:
 - `definition`
 - `store`
 - `session`
+- optional `hookOwner`
+- optional `registerHooks`
 - `drawTab`
 - optional `drawQuickContent`
 
@@ -273,6 +331,11 @@ Creates a behavior-only host object around:
 - `session.reset(alias)`
 
 Commit and reload behavior stays on the host object.
+
+If `registerHooks` is provided:
+- `hookOwner` must be a persistent table
+- the host runs `registerHooks()` during host creation
+- hook declarations made through `lib.hooks.*` are refreshed as one registration pass for that owner
 
 Returned surface:
 - `host.getDefinition()`
@@ -297,6 +360,12 @@ Returned surface:
 Use this as the bridge between module state and either:
 - Framework hosting
 - standalone window/menu hosting
+
+### `lib.getModuleRegistryVersion(packId)`
+
+Returns the current coordinated-module host registry version for a pack.
+
+This is primarily a framework/coordinator helper. A host created for a coordinated module increments the registry version for `definition.modpack`.
 
 ### `lib.standaloneHost(moduleHost, opts?)`
 
@@ -399,8 +468,6 @@ Supported forms:
 - `"AliasName"`
 - `{ alias = "AliasName", value = ... }`
 - `{ alias = "AliasName", anyOf = { ... } }`
-
-
 
 
 

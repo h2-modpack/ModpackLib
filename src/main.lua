@@ -15,12 +15,12 @@ local chalk = mods['SGG_Modding-Chalk']
 local libConfig = chalk.auto('config.lua')
 public.config = libConfig
 
-local _coordinators = {}
 AdamantModpackLib_Internal = AdamantModpackLib_Internal or {}
 local internal = AdamantModpackLib_Internal
 internal.libConfig = libConfig
-internal.coordinators = _coordinators
+internal.coordinators = internal.coordinators or {}
 internal.logging = internal.logging or {}
+internal.moduleRegistry = internal.moduleRegistry or { versions = {}, hosts = {} }
 local fallbackHud = import 'core/private/fallback_hud.lua'
 
 ---@class AdamantModpackLib
@@ -31,11 +31,13 @@ local fallbackHud = import 'core/private/fallback_hud.lua'
 ---@field standaloneHost fun(moduleHost: ModuleHost, opts: StandaloneOpts|nil): StandaloneRuntime
 ---@field isModuleCoordinated fun(packId: string|nil): boolean
 ---@field isModuleEnabled fun(store: ManagedStore, packId: string|nil): boolean
+---@field getModuleRegistryVersion fun(packId: string): number
 ---@field lifecycle table
 ---@field mutation table
 ---@field logging table
 ---@field hashing table
 ---@field imguiHelpers table
+---@field hooks table
 ---@field widgets table
 ---@field nav table
 
@@ -45,7 +47,7 @@ import 'widgets/init.lua'
 -- Standalone framework debug toggle - hidden when Core/Framework registers coordinators.
 ---@diagnostic disable-next-line: redundant-parameter
 rom.gui.add_to_menu_bar(function()
-    if next(_coordinators) ~= nil then return end
+    if next(internal.coordinators) ~= nil then return end
     if rom.ImGui.BeginMenu("adamant-lib") then
         local val, chg = rom.ImGui.Checkbox("Lib Debug", libConfig.DebugMode == true)
         if chg then libConfig.DebugMode = val end

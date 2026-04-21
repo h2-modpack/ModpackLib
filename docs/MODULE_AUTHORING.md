@@ -16,6 +16,7 @@ Module code should use:
 - `lib.isModuleEnabled(...)`
 - `lib.isModuleCoordinated(...)`
 - `lib.resetStorageToDefaults(...)`
+- `lib.hooks.*`
 - `lib.hashing.*`
 - `lib.mutation.*`
 - `lib.lifecycle.*`
@@ -72,6 +73,8 @@ public.host = lib.createModuleHost({
     definition = public.definition,
     store = store,
     session = session,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
@@ -79,6 +82,7 @@ public.host = lib.createModuleHost({
 
 This example assumes coordinated/framework hosting.
 For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
+If the module does not register runtime hooks, omit `hookOwner` and `registerHooks`.
 
 ## Definition Rules
 
@@ -205,6 +209,38 @@ Framework Quick Setup reads:
 
 `DrawQuickContent` is a Framework Quick Setup hook.
 
+## Runtime Hooks
+
+Modules that register ModUtil path hooks should do that through `lib.hooks.*`.
+
+Typical shape:
+
+```lua
+function internal.RegisterHooks()
+    lib.hooks.Wrap(internal, "GetEligibleLootNames", function(base, ...)
+        local result = base(...)
+        -- inspect or transform the wrapped call here
+        return result
+    end)
+end
+
+public.host = lib.createModuleHost({
+    definition = public.definition,
+    store = store,
+    session = session,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
+    drawTab = internal.DrawTab,
+    drawQuickContent = internal.DrawQuickContent,
+})
+```
+
+Rules:
+- use a persistent owner table such as the module `internal`
+- declare hook sites inside `RegisterHooks()`
+- let `createModuleHost(...)` own the registration pass
+- use the keyed overload when one owner needs several hooks on the same path
+
 ## Mutation Lifecycle
 
 Use `affectsRunData = true` only when the module actually mutates live run data.
@@ -258,6 +294,8 @@ public.host = lib.createModuleHost({
     definition = public.definition,
     store = store,
     session = session,
+    hookOwner = internal,
+    registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
@@ -307,6 +345,7 @@ local PACK_ID = "example-pack"
 ---@class ExampleModuleInternal
 ---@field store ManagedStore|nil
 ---@field standaloneUi StandaloneRuntime|nil
+---@field RegisterHooks fun()|nil
 ---@field DrawTab fun(imgui: table, session: AuthorSession)|nil
 ---@field DrawQuickContent fun(imgui: table, session: AuthorSession)|nil
 ExampleModule_Internal = ExampleModule_Internal or {}
@@ -375,6 +414,10 @@ function internal.DrawQuickContent(ui, session)
     })
 end
 
+function internal.RegisterHooks()
+    -- Optional: register runtime hooks here through lib.hooks.*
+end
+
 local function init()
     import_as_fallback(rom.game)
 
@@ -385,6 +428,8 @@ local function init()
         definition = public.definition,
         store = store,
         session = session,
+        hookOwner = internal,
+        registerHooks = internal.RegisterHooks,
         drawTab = internal.DrawTab,
         drawQuickContent = internal.DrawQuickContent,
     })
@@ -394,20 +439,22 @@ end
 
 local loader = reload.auto_single()
 
-modutil.once_loaded.game(function()
-    loader.load(init, init)
-end)
-
-rom.gui.add_imgui(function()
+local function renderWindow()
     if internal.standaloneUi and internal.standaloneUi.renderWindow then
         internal.standaloneUi.renderWindow()
     end
-end)
+end
 
-rom.gui.add_to_menu_bar(function()
+local function addMenuBar()
     if internal.standaloneUi and internal.standaloneUi.addMenuBar then
         internal.standaloneUi.addMenuBar()
     end
+end
+
+modutil.once_loaded.game(function()
+    rom.gui.add_imgui(renderWindow)
+    rom.gui.add_to_menu_bar(addMenuBar)
+    loader.load(nil, init)
 end)
 ```
 
@@ -416,8 +463,7 @@ Notes on the example:
 - `store` is recreated on every reload
 - `session` stays local to `main.lua`; draw callbacks receive the restricted author session through `public.host`
 - `public.host` owns the behavior contract used by framework or standalone hosting
+- `internal.RegisterHooks()` is the normal place for `lib.hooks.*` declarations
 - `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `DrawQuickContent` is optional
 - packed widgets need the module `store`
-
-

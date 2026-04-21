@@ -1,5 +1,5 @@
 local internal = AdamantModpackLib_Internal
-local _coordinators = internal.coordinators
+local moduleRegistry = internal.moduleRegistry
 
 ---@class StandaloneOpts
 ---@field windowTitle string|nil
@@ -18,6 +18,8 @@ local _coordinators = internal.coordinators
 ---@field definition ModuleDefinition
 ---@field store ManagedStore
 ---@field session Session
+---@field hookOwner table|nil
+---@field registerHooks fun()|nil
 ---@field drawTab fun(imgui: table, session: AuthorSession)|nil
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession)|nil
 
@@ -57,6 +59,14 @@ function public.createModuleHost(opts)
 
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
+    local registerHooks = opts.registerHooks
+    local hookOwner = opts.hookOwner
+
+    if registerHooks ~= nil then
+        assert(type(registerHooks) == "function", "createModuleHost: registerHooks must be a function")
+        assert(type(hookOwner) == "table", "createModuleHost: hookOwner is required when registerHooks is provided")
+        internal.hooks.refresh(hookOwner, registerHooks)
+    end
 
     ---@type AuthorSession
     local authorSession = {
@@ -153,7 +163,25 @@ function public.createModuleHost(opts)
         end
     end
 
+    local packId = def.modpack
+    local moduleId = def.id
+    if type(packId) == "string" and packId ~= "" and type(moduleId) == "string" and moduleId ~= "" then
+        moduleRegistry.hosts[packId] = moduleRegistry.hosts[packId] or {}
+        moduleRegistry.hosts[packId][moduleId] = {
+            definition = def,
+            host = host,
+        }
+        moduleRegistry.versions[packId] = (moduleRegistry.versions[packId] or 0) + 1
+    end
+
     return host
+end
+
+--- Returns the current module-host registry version for a pack.
+---@param packId string
+---@return number version
+function public.getModuleRegistryVersion(packId)
+    return moduleRegistry.versions[packId] or 0
 end
 
 --- Initializes standalone module hosting and returns window/menu-bar renderers.
@@ -169,7 +197,7 @@ function public.standaloneHost(moduleHost, opts)
     local DEFAULT_WINDOW_WIDTH = 960
     local DEFAULT_WINDOW_HEIGHT = 720
 
-    if not (def.modpack and _coordinators[def.modpack]) then
+    if not (def.modpack and internal.coordinators[def.modpack]) then
         local ok, err = moduleHost.applyOnLoad()
         if not ok then
             internal.logging.warn("%s startup lifecycle failed: %s",
@@ -205,7 +233,7 @@ function public.standaloneHost(moduleHost, opts)
     end
 
     local function renderWindow()
-        if def.modpack and _coordinators[def.modpack] then return end
+        if def.modpack and internal.coordinators[def.modpack] then return end
         if not showWindow then return end
 
         local imgui = rom.ImGui
@@ -254,7 +282,7 @@ function public.standaloneHost(moduleHost, opts)
     end
 
     local function addMenuBar()
-        if def.modpack and _coordinators[def.modpack] then return end
+        if def.modpack and internal.coordinators[def.modpack] then return end
         if rom.ImGui.BeginMenu(def.name) then
             if rom.ImGui.MenuItem(def.name) then
                 if showWindow then

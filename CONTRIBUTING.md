@@ -12,8 +12,9 @@ Keep the public surface:
 
 - [README.md](README.md)
 - [API.md](API.md)
-- [MODULE_AUTHORING.md](MODULE_AUTHORING.md)
-- [WIDGETS.md](WIDGETS.md)
+- [docs/MODULE_AUTHORING.md](docs/MODULE_AUTHORING.md)
+- [docs/HOT_RELOAD_ARCHITECTURE.md](docs/HOT_RELOAD_ARCHITECTURE.md)
+- [docs/WIDGETS.md](docs/WIDGETS.md)
 
 ## Contribution Rules
 
