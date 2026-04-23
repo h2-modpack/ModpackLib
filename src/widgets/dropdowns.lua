@@ -77,6 +77,19 @@ local function DrawComboPreviewText(imgui, previewText, previewColor)
     imgui.PopClipRect()
 end
 
+local function BeginPreviewCombo(imgui, id, previewText, previewColor)
+    local hasPreviewColor = type(previewColor) == "table"
+    local opened = imgui.BeginCombo(
+        id,
+        hasPreviewColor and "" or tostring(previewText or ""),
+        COMBO_FLAG_NONE
+    )
+    if hasPreviewColor then
+        DrawComboPreviewText(imgui, tostring(previewText or ""), previewColor)
+    end
+    return opened
+end
+
 ---@param imgui table
 ---@param opts DropdownOpts|MappedDropdownOpts|PackedDropdownOpts
 ---@param previewColor Color|nil
@@ -127,12 +140,7 @@ function WidgetFns.dropdown(imgui, session, alias, opts)
     local previewColor = currentOption and currentOption.color or nil
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
-        local opened = imgui.BeginCombo(
-            "##" .. tostring(alias),
-            "",
-            COMBO_FLAG_NONE
-        )
-        DrawComboPreviewText(imgui, previewText, previewColor)
+        local opened = BeginPreviewCombo(imgui, "##" .. tostring(alias), previewText, previewColor)
         if not opened then
             return false
         end
@@ -168,12 +176,7 @@ function WidgetFns.mappedDropdown(imgui, session, alias, opts)
         or {}
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
-        local opened = imgui.BeginCombo(
-            "##" .. tostring(alias),
-            "",
-            COMBO_FLAG_NONE
-        )
-        DrawComboPreviewText(imgui, preview, previewColor)
+        local opened = BeginPreviewCombo(imgui, "##" .. tostring(alias), preview, previewColor)
         if not opened then
             return false
         end
@@ -220,12 +223,7 @@ function WidgetFns.packedDropdown(imgui, session, alias, store, opts)
     end
 
     return DrawLabeledDropdownControl(imgui, opts, nil, function()
-        local opened = imgui.BeginCombo(
-            "##" .. tostring(alias),
-            "",
-            COMBO_FLAG_NONE
-        )
-        DrawComboPreviewText(imgui, preview, previewColor)
+        local opened = BeginPreviewCombo(imgui, "##" .. tostring(alias), preview, previewColor)
         if not opened then
             return false
         end

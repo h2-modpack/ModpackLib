@@ -268,9 +268,13 @@ function public.standaloneHost(moduleHost, opts)
                 imgui.Separator()
                 imgui.Spacing()
                 moduleHost.drawTab(imgui)
-                local ok, _, committed = moduleHost.commitIfDirty()
+                local ok, err, committed = moduleHost.commitIfDirty()
                 if ok and committed and moduleHost.read("Enabled") == true then
                     markRunDataDirty()
+                elseif ok == false then
+                    internal.logging.warn("%s session commit failed; restored previous config where possible: %s",
+                        tostring(def.name or def.id or "module"),
+                        tostring(err))
                 end
             end
         end
