@@ -145,7 +145,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
             { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
         },
     })
-    definition._pendingCoordinatorRebuildReason = {
+    AdamantModpackLib_Internal.pendingCoordinatorRebuilds[definition] = {
         kind = "structural_definition_changed",
         moduleId = "ReloadHost",
         modpack = packId,
@@ -170,5 +170,6 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
 
     lib.lifecycle.applyOnLoad = originalApplyOnLoad
     lib.lifecycle.registerCoordinator(packId, nil)
+    AdamantModpackLib_Internal.pendingCoordinatorRebuilds[definition] = nil
     lu.assertEquals(applyCalls, 0)
 end

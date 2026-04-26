@@ -166,7 +166,7 @@ function TestPrepareDefinition:testFinalizeModuleHostWarnsWhenCoordinatedRebuild
     lu.assertFalse(requested)
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
-    lu.assertNotNil(prepared._pendingCoordinatorRebuildReason)
+    lu.assertNotNil(AdamantModpackLib_Internal.pendingCoordinatorRebuilds[prepared])
 end
 
 function TestPrepareDefinition:testFinalizeModuleHostKeepsPendingReasonWhenRebuildRequestIsRejected()
@@ -211,7 +211,7 @@ function TestPrepareDefinition:testFinalizeModuleHostKeepsPendingReasonWhenRebui
 
     lu.assertTrue(owner.requiresFullReload)
     lu.assertFalse(requested)
-    lu.assertNotNil(prepared._pendingCoordinatorRebuildReason)
+    lu.assertNotNil(AdamantModpackLib_Internal.pendingCoordinatorRebuilds[prepared])
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
 end

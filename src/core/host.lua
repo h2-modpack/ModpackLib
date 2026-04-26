@@ -201,7 +201,7 @@ function public.createModuleHost(opts)
     local identity = host.getIdentity()
     local meta = host.getMeta()
     local packId = identity.modpack
-    local pendingCoordinatorRebuild = type(def._pendingCoordinatorRebuildReason) == "table"
+    local pendingCoordinatorRebuild = type(internal.pendingCoordinatorRebuilds[def]) == "table"
     if not pendingCoordinatorRebuild
         and type(packId) == "string"
         and packId ~= ""
@@ -228,7 +228,7 @@ function public.finalizeModuleHost(moduleHost)
         "finalizeModuleHost: moduleHost metadata accessors are required")
 
     local definition = moduleHost.getDefinition()
-    local reason = type(definition) == "table" and definition._pendingCoordinatorRebuildReason or nil
+    local reason = type(definition) == "table" and internal.pendingCoordinatorRebuilds[definition] or nil
     if type(reason) ~= "table" then
         return false
     end
@@ -237,7 +237,7 @@ function public.finalizeModuleHost(moduleHost)
     local meta = moduleHost.getMeta() or {}
     local requested = public.lifecycle.requestCoordinatorRebuild(identity.modpack, reason)
     if requested then
-        definition._pendingCoordinatorRebuildReason = nil
+        internal.pendingCoordinatorRebuilds[definition] = nil
     else
         internal.logging.warn("%s structural definition changed during hot reload; full reload required",
             tostring(meta.name or identity.id or "module"))
