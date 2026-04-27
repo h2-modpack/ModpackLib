@@ -245,10 +245,10 @@ function TestDefinitionLifecycle:testInferMutationShapeHybrid()
 end
 
 function TestDefinitionLifecycle:testAffectsRunDataIgnoresDeprecatedFlag()
-    lu.assertTrue(lib.lifecycle.mutatesRunData({ affectsRunData = true }))
-    lu.assertFalse(lib.lifecycle.mutatesRunData({ affectsRunData = false }))
-    lu.assertFalse(lib.lifecycle.mutatesRunData({ dataMutation = true }))
-    lu.assertFalse(lib.lifecycle.mutatesRunData({}))
+    lu.assertTrue(lib.lifecycle.affectsRunData({ affectsRunData = true }))
+    lu.assertFalse(lib.lifecycle.affectsRunData({ affectsRunData = false }))
+    lu.assertFalse(lib.lifecycle.affectsRunData({ dataMutation = true }))
+    lu.assertFalse(lib.lifecycle.affectsRunData({}))
 end
 
 function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()

@@ -50,8 +50,8 @@ function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
         affectsRunData = function()
             return false
         end,
-        getDefinition = function()
-            return { id = "StandaloneTest", name = "Standalone Test" }
+        getStorage = function()
+            return nil
         end,
         applyOnLoad = function()
             return true, nil
@@ -69,9 +69,6 @@ function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
             return true, nil
         end,
         setDebugMode = noop,
-        hasDrawTab = function()
-            return true
-        end,
         drawTab = function()
             drawCalls = drawCalls + 1
         end,
@@ -145,31 +142,33 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
             { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
         },
     })
-    AdamantModpackLib_Internal.pendingCoordinatorRebuilds[definition] = {
-        kind = "structural_definition_changed",
-        moduleId = "ReloadHost",
-        modpack = packId,
-    }
-
     local store, session = lib.createStore({
         Enabled = true,
         DebugMode = false,
         EnabledFlag = false,
     }, definition)
+    local host = lib.createModuleHost({
+        definition = definition,
+        store = store,
+        session = session,
+        drawTab = function() end,
+    })
+    AdamantModpackLib_Internal.pendingCoordinatorRebuildHosts[host] = {
+        kind = "structural_definition_changed",
+        moduleId = "ReloadHost",
+        modpack = packId,
+    }
+
     local originalApplyOnLoad = lib.lifecycle.applyOnLoad
     lib.lifecycle.applyOnLoad = function(...)
         applyCalls = applyCalls + 1
         return originalApplyOnLoad(...)
     end
 
-    lib.createModuleHost({
-        definition = definition,
-        store = store,
-        session = session,
-    })
+    lib.finalizeModuleHost(host)
 
     lib.lifecycle.applyOnLoad = originalApplyOnLoad
     lib.lifecycle.registerCoordinator(packId, nil)
-    AdamantModpackLib_Internal.pendingCoordinatorRebuilds[definition] = nil
+    AdamantModpackLib_Internal.pendingCoordinatorRebuildHosts[host] = nil
     lu.assertEquals(applyCalls, 0)
 end

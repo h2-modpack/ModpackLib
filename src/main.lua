@@ -24,6 +24,8 @@ internal.coordinators = _coordinators
 internal.coordinatorRebuilds = _coordinatorRebuilds
 internal.pendingCoordinatorRebuilds = internal.pendingCoordinatorRebuilds
     or setmetatable({}, { __mode = "k" })
+internal.pendingCoordinatorRebuildHosts = internal.pendingCoordinatorRebuildHosts
+    or setmetatable({}, { __mode = "k" })
 internal.logging = internal.logging or {}
 local fallbackHud = import 'core/private/fallback_hud.lua'
 

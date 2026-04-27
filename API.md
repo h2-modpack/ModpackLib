@@ -397,7 +397,7 @@ Transitions persisted enabled state and applies/reverts mutation state as needed
 
 Writes the persisted debug-mode flag for a module store.
 
-### `lib.lifecycle.mutatesRunData(def)`
+### `lib.lifecycle.affectsRunData(def)`
 
 Returns whether the module definition opts into live run-data mutation behavior.
 
@@ -461,7 +461,7 @@ Returned surface:
 - `host.getMeta()`
 - `host.affectsRunData()`
 - `host.getHashHints()`
-- `host.getDefinition()`
+- `host.getStorage()`
 - `host.read(aliasOrKey)`
 - `host.writeAndFlush(aliasOrKey, value)`
 - `host.stage(aliasOrKey, value)`
@@ -476,9 +476,7 @@ Returned surface:
 - `host.applyOnLoad()`
 - `host.applyMutation()`
 - `host.revertMutation()`
-- `host.hasDrawTab()`
 - `host.drawTab(imgui)`
-- `host.hasQuickContent()`
 - `host.drawQuickContent(imgui)`
 
 Use this as the bridge between module state and either:

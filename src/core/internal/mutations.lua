@@ -150,10 +150,10 @@ function mutationInternal.inferMutation(def)
     }
 end
 
---- Returns whether a module definition declares that it mutates live run data.
+--- Returns whether a module definition declares that it affects live run data.
 ---@param def ModuleDefinition|nil Candidate module definition table.
----@return boolean mutates True when the definition opts into run-data mutation behavior.
-function mutationInternal.mutatesRunData(def)
+---@return boolean affects True when the definition opts into run-data mutation behavior.
+function mutationInternal.affectsRunData(def)
     if not def then
         return false
     end
@@ -174,7 +174,7 @@ function mutationInternal.apply(def, store)
     end
 
     if not inferred then
-        if not mutationInternal.mutatesRunData(def) then
+        if not mutationInternal.affectsRunData(def) then
             return true, nil
         end
         return false, "no supported mutation lifecycle found"
@@ -233,7 +233,7 @@ function mutationInternal.revert(def, store)
         if not okActive then
             return false, errActive
         end
-        if didActive or not mutationInternal.mutatesRunData(def) then
+        if didActive or not mutationInternal.affectsRunData(def) then
             return true, nil
         end
         return false, "no supported mutation lifecycle found"

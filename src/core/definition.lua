@@ -163,7 +163,7 @@ function definitionInternal.validate(definition, label)
     if info.hasApply ~= info.hasRevert then
         warn("%s: manual lifecycle requires both definition.apply and definition.revert", prefix)
     end
-    if mutationInternal.mutatesRunData(definition) and not inferred then
+    if mutationInternal.affectsRunData(definition) and not inferred then
         warn("%s: affectsRunData=true but module exposes neither patchPlan nor apply/revert", prefix)
     end
 end
@@ -205,6 +205,12 @@ function definitionInternal.prepare(owner, dataDefaultsOrDefinition, definitionO
     if type(prepared.storage) == "table" then
         storageInternal.validate(prepared.storage, label)
     end
+
+    local inferredMutationShape, mutationInfo = mutationInternal.inferMutation(prepared)
+    assert(not (prepared.affectsRunData == true and not inferredMutationShape),
+        string.format("%s: affectsRunData=true requires patchPlan or apply/revert", label))
+    assert(not (mutationInfo.hasApply ~= mutationInfo.hasRevert),
+        string.format("%s: manual lifecycle requires both definition.apply and definition.revert", label))
 
     local fingerprint = definitionInternal.getStructuralFingerprint(prepared)
     prepared._preparedDefinition = true

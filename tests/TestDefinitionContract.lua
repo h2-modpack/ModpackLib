@@ -47,16 +47,17 @@ function TestDefinitionContract:testValidateDefinitionWarnsOnOldVocabularyKeysAs
     lu.assertStrContains(joined, "unknown definition key 'selectQuickUi'")
 end
 
-function TestDefinitionContract:testValidateDefinitionWarnsOnIncompleteLifecycle()
-    lib.prepareDefinition({}, {
-        id = "Example",
-        name = "Example",
-        affectsRunData = true,
-        apply = function() end,
-    })
+function TestDefinitionContract:testPrepareDefinitionRejectsIncompleteLifecycleWhenRunDataIsAffected()
+    local ok, err = pcall(function()
+        lib.prepareDefinition({}, {
+            id = "Example",
+            name = "Example",
+            affectsRunData = true,
+            apply = function() end,
+        })
+    end)
 
-    lu.assertEquals(#Warnings, 2)
-    lu.assertStrContains(Warnings[1], "manual lifecycle requires both definition.apply and definition.revert")
-    lu.assertStrContains(Warnings[2], "affectsRunData=true")
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "affectsRunData=true requires patchPlan or apply/revert")
 end
 

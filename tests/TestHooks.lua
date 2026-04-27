@@ -111,6 +111,7 @@ local function createHostWithHooks(owner, registerHooks)
                 return {}
             end,
         },
+        drawTab = function() end,
         hookOwner = owner,
         registerHooks = registerHooks,
     })
@@ -367,6 +368,7 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
                 return {}
             end,
         },
+        drawTab = function() end,
     })
 
     lu.assertEquals(applyCalls, 1)
@@ -424,6 +426,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         },
         store = store,
         session = createSession(),
+        drawTab = function() end,
     })
 
     lib.createModuleHost({
@@ -442,6 +445,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         },
         store = store,
         session = createSession(),
+        drawTab = function() end,
     })
 
     lu.assertEquals(firstApplyCalls, 1)

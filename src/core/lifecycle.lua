@@ -75,11 +75,11 @@ function lifecycleApi.inferMutation(def)
     return mutationInternal.inferMutation(def)
 end
 
---- Returns whether a module definition declares that it mutates live run data.
+--- Returns whether a module definition declares that it affects live run data.
 ---@param def ModuleDefinition|nil Candidate module definition table.
----@return boolean mutates True when the definition opts into run-data mutation behavior.
-function lifecycleApi.mutatesRunData(def)
-    return mutationInternal.mutatesRunData(def)
+---@return boolean affects True when the definition opts into run-data mutation behavior.
+function lifecycleApi.affectsRunData(def)
+    return mutationInternal.affectsRunData(def)
 end
 
 --- Applies a module definition's current mutation lifecycle to live run data.
@@ -128,7 +128,7 @@ function lifecycleApi.applyOnLoad(def, store)
         end
     end
 
-    if lifecycleApi.mutatesRunData(def) and not public.isModuleCoordinated(def and def.modpack) then
+    if lifecycleApi.affectsRunData(def) and not public.isModuleCoordinated(def and def.modpack) then
         rom.game.SetupRunData()
     end
 
@@ -165,7 +165,7 @@ function lifecycleApi.commitSession(def, store, session)
     local snapshot = session._captureDirtyConfigSnapshot()
     session._flushToConfig()
 
-    local shouldReapply = lifecycleApi.mutatesRunData(def)
+    local shouldReapply = lifecycleApi.affectsRunData(def)
         and store.read("Enabled") == true
 
     if not shouldReapply then

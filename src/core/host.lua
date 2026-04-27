@@ -20,7 +20,7 @@ local internal = AdamantModpackLib_Internal
 ---@field session Session
 ---@field hookOwner table|nil
 ---@field registerHooks fun()|nil
----@field drawTab fun(imgui: table, session: AuthorSession)|nil
+---@field drawTab fun(imgui: table, session: AuthorSession)
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession)|nil
 
 ---@class ModuleHost
@@ -28,7 +28,7 @@ local internal = AdamantModpackLib_Internal
 ---@field getMeta fun(): table
 ---@field affectsRunData fun(): boolean
 ---@field getHashHints fun(): table|nil
----@field getDefinition fun(): ModuleDefinition
+---@field getStorage fun(): StorageSchema|nil
 ---@field read fun(aliasOrKey: ConfigPath): any
 ---@field writeAndFlush fun(aliasOrKey: ConfigPath, value: any): boolean
 ---@field stage fun(aliasOrKey: ConfigPath, value: any): boolean
@@ -43,10 +43,8 @@ local internal = AdamantModpackLib_Internal
 ---@field applyOnLoad fun(): boolean, string|nil
 ---@field applyMutation fun(): boolean, string|nil
 ---@field revertMutation fun(): boolean, string|nil
----@field hasDrawTab fun(): boolean
 ---@field drawTab fun(imgui: table)
----@field hasQuickContent fun(): boolean
----@field drawQuickContent fun(imgui: table)
+---@field drawQuickContent fun(imgui: table)|nil
 
 --- Creates a behavior-only host object for Framework and standalone hosting.
 --- The host closes over store/session without exposing those state handles publicly.
@@ -66,6 +64,8 @@ function public.createModuleHost(opts)
     local drawQuickContent = opts.drawQuickContent
     local registerHooks = opts.registerHooks
     local hookOwner = opts.hookOwner
+
+    assert(type(drawTab) == "function", "createModuleHost: drawTab is required")
 
     if registerHooks ~= nil then
         assert(type(registerHooks) == "function", "createModuleHost: registerHooks must be a function")
@@ -103,15 +103,15 @@ function public.createModuleHost(opts)
     end
 
     function host.affectsRunData()
-        return public.lifecycle.mutatesRunData(def)
+        return public.lifecycle.affectsRunData(def)
     end
 
     function host.getHashHints()
         return def.hashGroupPlan
     end
 
-    function host.getDefinition()
-        return def
+    function host.getStorage()
+        return def.storage
     end
 
     function host.read(aliasOrKey)
@@ -178,22 +178,12 @@ function public.createModuleHost(opts)
         return public.lifecycle.revertMutation(def, store)
     end
 
-    function host.hasDrawTab()
-        return type(drawTab) == "function"
-    end
-
     function host.drawTab(imgui)
-        if type(drawTab) == "function" then
-            return drawTab(imgui, authorSession)
-        end
+        return drawTab(imgui, authorSession)
     end
 
-    function host.hasQuickContent()
-        return type(drawQuickContent) == "function"
-    end
-
-    function host.drawQuickContent(imgui)
-        if type(drawQuickContent) == "function" then
+    if type(drawQuickContent) == "function" then
+        function host.drawQuickContent(imgui)
             return drawQuickContent(imgui, authorSession)
         end
     end
@@ -201,8 +191,12 @@ function public.createModuleHost(opts)
     local identity = host.getIdentity()
     local meta = host.getMeta()
     local packId = identity.modpack
-    local pendingCoordinatorRebuild = type(internal.pendingCoordinatorRebuilds[def]) == "table"
-    if not pendingCoordinatorRebuild
+    local pendingCoordinatorRebuild = internal.pendingCoordinatorRebuilds[def]
+    if type(pendingCoordinatorRebuild) == "table" then
+        internal.pendingCoordinatorRebuildHosts[host] = pendingCoordinatorRebuild
+    end
+    local hasPendingCoordinatorRebuild = type(pendingCoordinatorRebuild) == "table"
+    if not hasPendingCoordinatorRebuild
         and type(packId) == "string"
         and packId ~= ""
         and public.isModuleCoordinated(packId) then
@@ -224,11 +218,10 @@ end
 function public.finalizeModuleHost(moduleHost)
     assert(type(moduleHost) == "table", "finalizeModuleHost: moduleHost is required")
     assert(type(moduleHost.getIdentity) == "function" and type(moduleHost.getMeta) == "function"
-        and type(moduleHost.getDefinition) == "function",
+        and type(moduleHost.getStorage) == "function",
         "finalizeModuleHost: moduleHost metadata accessors are required")
 
-    local definition = moduleHost.getDefinition()
-    local reason = type(definition) == "table" and internal.pendingCoordinatorRebuilds[definition] or nil
+    local reason = internal.pendingCoordinatorRebuildHosts[moduleHost]
     if type(reason) ~= "table" then
         return false
     end
@@ -237,7 +230,7 @@ function public.finalizeModuleHost(moduleHost)
     local meta = moduleHost.getMeta() or {}
     local requested = public.lifecycle.requestCoordinatorRebuild(identity.modpack, reason)
     if requested then
-        internal.pendingCoordinatorRebuilds[definition] = nil
+        internal.pendingCoordinatorRebuildHosts[moduleHost] = nil
     else
         internal.logging.warn("%s structural definition changed during hot reload; full reload required",
             tostring(meta.name or identity.id or "module"))
@@ -336,18 +329,16 @@ function public.standaloneHost(moduleHost, opts)
                 moduleHost.resync()
             end
 
-            if moduleHost.hasDrawTab() then
-                imgui.Separator()
-                imgui.Spacing()
-                moduleHost.drawTab(imgui)
-                local ok, err, committed = moduleHost.commitIfDirty()
-                if ok and committed and moduleHost.read("Enabled") == true then
-                    markRunDataDirty()
-                elseif ok == false then
-                    internal.logging.warn("%s session commit failed; restored previous config where possible: %s",
-                        tostring(meta.name or identity.id or "module"),
-                        tostring(err))
-                end
+            imgui.Separator()
+            imgui.Spacing()
+            moduleHost.drawTab(imgui)
+            local ok, err, committed = moduleHost.commitIfDirty()
+            if ok and committed and moduleHost.read("Enabled") == true then
+                markRunDataDirty()
+            elseif ok == false then
+                internal.logging.warn("%s session commit failed; restored previous config where possible: %s",
+                    tostring(meta.name or identity.id or "module"),
+                    tostring(err))
             end
         end
         imgui.End()
