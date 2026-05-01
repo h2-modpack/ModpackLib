@@ -83,6 +83,10 @@ This example assumes coordinated/framework hosting.
 For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
 If the module does not register runtime hooks, omit `hookOwner` and `registerHooks`.
 
+`store` and `session` are a matched ownership pair for one prepared definition
+and config table. Pass them together to `lib.createModuleHost(...)`; do not mix a
+store from one `createStore(...)` call with a session from another.
+
 ## Definition Rules
 
 Meaningful prepared definition fields:

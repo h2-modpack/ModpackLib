@@ -154,6 +154,18 @@ The invariant is:
 
 This keeps Core from accumulating duplicate GUI callbacks while still letting Framework code changes rebuild pack-level state.
 
+Framework reload is an infrastructure path, not the fast module-authoring path.
+Rebuilding a pack is allowed to recreate Framework UI state from scratch. The
+mod window may close, the selected tab may reset, and transient profile/import
+feedback may be lost. Persist only correctness-critical state across Framework
+reloads; module behavior state should refresh through Lib hosts instead.
+
+HUD marker text is safe to refresh in place. HUD marker layout is not: the game
+creates retained HUD components from `ScreenData.HUD.ComponentData`, so changing
+that table only affects future HUD construction. A Framework change that moves
+or restyles the marker structurally must recreate the HUD component or wait for a
+game HUD refresh.
+
 ## Hook Model
 
 Raw ModUtil path hooks do not deduplicate. The stack solves that through `lib.hooks`.

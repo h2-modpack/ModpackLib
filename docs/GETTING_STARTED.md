@@ -62,6 +62,11 @@ Use the right state object for the right job:
 
 If you ignore that boundary, the module will still often "work", but you will create drift between the UI and the persisted state model.
 
+`store` and `session` are also an ownership pair. Create them together from the
+same prepared `definition`, pass that same pair to `lib.createModuleHost(...)`,
+and recreate both together during module reload. Never combine a store from one
+`createStore(...)` call with a session from another.
+
 ## File Roles
 
 The template is split into four files on purpose.
@@ -161,7 +166,7 @@ local store, session = lib.createStore(config, definition)
 internal.store = store
 ```
 
-Keep `session` local to `main.lua`. The draw path will receive the restricted author-facing session through the live host.
+Keep `session` local to `main.lua`. The draw path will receive the restricted author-facing session through the live host. If the module reloads, recreate `store` and `session` as a pair before creating the replacement host.
 
 ### 4. Build the UI in `ui.lua`
 

@@ -35,3 +35,7 @@ helpers.ImGuiTreeNodeFlags = {
 function helpers.unpackColor(color)
     return color[1], color[2], color[3], color[4]
 end
+
+function helpers.textColored(ui, color, text)
+    ui.TextColored(color[1], color[2], color[3], color[4], text)
+end

@@ -188,6 +188,11 @@ Typical use:
 local store, session = lib.createStore(config, definition)
 ```
 
+Ownership rule: `store` and `session` are a matched pair created for one prepared
+`definition` and one backing config table. Pass them together to
+`lib.createModuleHost(...)`, and do not mix a store from one `createStore(...)`
+call with a session from another. Recreate the pair together on module reload.
+
 Returned surface:
 - `store.read(keyOrAlias)`
 
@@ -201,6 +206,7 @@ lib.lifecycle.setDebugMode(store, enabled)
 Use `setEnabled` for module enabled toggles. It persists the `Enabled` flag and applies/reverts mutation state as needed. Use `setDebugMode` for module debug toggles. Module/host plumbing can use `session.write(...)` plus `session._flushToConfig()` for immediate persisted writes such as profile/hash import. Ordinary draw-code edits stay staged and commit through the host/framework flow.
 
 Rules:
+- keep each `store, session` pair together for its lifetime
 - widgets and draw code should usually read staged values from `session.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
 - enabled toggles should write through `lib.lifecycle.setEnabled(def, store, enabled)`
@@ -598,5 +604,4 @@ Supported forms:
 - `"AliasName"`
 - `{ alias = "AliasName", value = ... }`
 - `{ alias = "AliasName", anyOf = { ... } }`
-
 

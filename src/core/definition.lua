@@ -192,7 +192,7 @@ function definitionInternal.prepare(owner, dataDefaultsOrDefinition, definitionO
     local inferredMutationShape, mutationInfo = mutationInternal.inferMutation(prepared)
     assert(not (prepared.affectsRunData == true and not inferredMutationShape),
         string.format("%s: affectsRunData=true requires patchPlan or apply/revert", label))
-    assert(not (mutationInfo.hasApply ~= mutationInfo.hasRevert),
+    assert(mutationInfo.hasApply == mutationInfo.hasRevert,
         string.format("%s: manual lifecycle requires both definition.apply and definition.revert", label))
 
     local fingerprint = definitionInternal.getStructuralFingerprint(prepared)

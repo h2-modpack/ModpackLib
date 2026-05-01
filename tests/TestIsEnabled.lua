@@ -102,3 +102,18 @@ function TestRegisterCoordinator:testMultiplePacksIndependent()
     lu.assertFalse(lib.isModuleEnabled(makeStore(true), "pack-b"))
 end
 
+function TestRegisterCoordinator:testCoordinatorRegistrySurvivesLibReload()
+    lib.lifecycle.registerCoordinator("pack-a", { ModEnabled = false })
+    lib.lifecycle.registerCoordinatorRebuild("pack-a", function()
+        return true
+    end)
+
+    dofile("src/main.lua")
+    lib = public
+
+    lu.assertTrue(lib.isModuleCoordinated("pack-a"))
+    lu.assertFalse(lib.isModuleEnabled(makeStore(true), "pack-a"))
+    lu.assertTrue(lib.lifecycle.requestCoordinatorRebuild("pack-a", {
+        kind = "test",
+    }))
+end
