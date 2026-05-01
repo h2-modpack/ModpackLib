@@ -13,15 +13,12 @@ local mutation = public.mutation
 ---@field apply fun(): boolean
 ---@field revert fun(): boolean
 
---- Creates backup and restore helpers for reversible table mutations.
----@return function backup Captures original values on a table before mutation.
----@return function restore Restores all captured values back onto their original tables.
+---@return function backup, function restore
 function mutation.createBackup()
     return mutationPlan.createBackup()
 end
 
---- Creates a reversible mutation plan that can batch table updates and roll them back later.
----@return MutationPlan plan Mutable mutation plan with operation builders plus apply/revert methods.
+---@return MutationPlan
 function mutation.createPlan()
     return mutationPlan.createPlan() --[[@as MutationPlan]]
 end

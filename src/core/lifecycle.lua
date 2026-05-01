@@ -128,6 +128,7 @@ function lifecycleApi.applyOnLoad(def, store)
         end
     end
 
+    -- Standalone only; Framework.init handles this centrally for coordinated packs.
     if lifecycleApi.affectsRunData(def) and not public.isModuleCoordinated(def and def.modpack) then
         rom.game.SetupRunData()
     end
