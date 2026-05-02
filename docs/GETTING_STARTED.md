@@ -216,7 +216,8 @@ local definition = lib.prepareDefinition(internal, dataDefaults, {
 })
 ```
 
-Use `patchPlan` when possible. Reach for manual `apply/revert` only when the mutation is not naturally expressed as reversible table edits.
+Use `patchPlan` when possible. Reach for manual `apply(store)` / `revert(store)`
+only when the mutation is not naturally expressed as reversible table edits.
 
 If the module installs runtime hooks, declare them through `lib.hooks.*` from `internal.RegisterHooks()`:
 

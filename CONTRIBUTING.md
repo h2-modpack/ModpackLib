@@ -28,5 +28,5 @@ Keep the public surface:
 
 ```bash
 cd adamant-ModpackLib
-lua5.2 tests/all.lua
+lua52.exe tests/all.lua
 ```

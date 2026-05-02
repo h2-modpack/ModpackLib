@@ -87,5 +87,5 @@ That includes optional `hashGroupPlan` declarations for complex grouped hash lay
 
 ```bash
 cd adamant-ModpackLib
-lua5.2 tests/all.lua
+lua52.exe tests/all.lua
 ```

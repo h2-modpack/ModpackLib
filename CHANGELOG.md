@@ -29,7 +29,7 @@ Initial public release of the adamant Modpack Lib surface.
 - coordinated-pack enable-state support through `lib.isModuleCoordinated(...)` and `lib.isModuleEnabled(...)`
 - standalone and framework-friendly module authoring contract based on:
   - `lib.prepareDefinition(...)`
-  - `public.host`
+  - `lib.createModuleHost(...)`
   - direct draw functions such as `DrawTab(imgui, session)`
 - reload-stable ModUtil hook registration through:
   - `lib.hooks.Wrap(...)`
@@ -40,8 +40,10 @@ Initial public release of the adamant Modpack Lib surface.
 ### Changed
 
 - `lib.createModuleHost(...)` now supports `hookOwner` and `registerHooks` for host-owned hook refresh
+- `lib.createModuleHost(...)` now owns live-host publication through Lib's registry
 - coordinated module hosts now self-sync live runtime state on host creation when the coordinator is already registered
 - mutation runtime tracking now persists across recreated stores and reloads keyed by stable module identity when available
+- manual lifecycle hooks now receive the active `store` as `apply(store)` / `revert(store)`
 - `lib.lifecycle.applyOnLoad(...)` now reverts active tracked mutation state when a module reloads disabled
 - long-form guides and reference docs now live under `docs/`
 

@@ -106,7 +106,7 @@ What it does:
 - clones the authored definition into a Lib-owned table
 - hydrates missing persistent storage defaults from `dataDefaults` when provided
 - validates top-level definition keys and types
-- prepares `definition.storage` metadata when present
+- prepares `definition.storage` metadata for later `createStore(...)` use
 - preserves optional `definition.hashGroupPlan` hash-compaction hints as structural contract data
 - records a structural fingerprint on the persistent `owner` table when provided
 - warns and marks `owner.requiresFullReload = true` when a later hot reload changes structural definition shape
@@ -175,6 +175,7 @@ Rules:
 ### `lib.createStore(config, definition)`
 
 Creates the managed store facade around persisted module config.
+`definition.storage` is required.
 
 What it does:
 - warns on malformed top-level definition fields
@@ -411,10 +412,12 @@ Returns whether the module definition opts into live run-data mutation behavior.
 ### `lib.lifecycle.applyMutation(def, store)`
 
 Applies the module's mutation lifecycle.
+Manual lifecycle hooks receive the same store as `apply(store)`.
 
 ### `lib.lifecycle.revertMutation(def, store)`
 
 Reverts the module's mutation lifecycle.
+Manual lifecycle hooks receive the same store as `revert(store)`.
 
 ### `lib.lifecycle.reapplyMutation(def, store)`
 

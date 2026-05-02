@@ -91,7 +91,7 @@ local function RevertActiveManual(def, store)
         return true, nil, false
     end
 
-    local okManual, errManual = pcall(revertFn)
+    local okManual, errManual = pcall(revertFn, store)
     runtime.manualRevert = nil
     SetRuntimeState(def, store, runtime)
     if not okManual then
@@ -197,7 +197,7 @@ function mutationInternal.apply(def, store)
     end
 
     if info.hasManual then
-        local okManual, errManual = pcall(def.apply)
+        local okManual, errManual = pcall(def.apply, store)
         if not okManual then
             if builtPlan then
                 pcall(builtPlan.revert, builtPlan)
@@ -246,7 +246,7 @@ function mutationInternal.revert(def, store)
         if not okActiveManual and not firstErr then
             firstErr = errActiveManual
         elseif not didActiveManual then
-            local okManual, errManual = pcall(def.revert)
+            local okManual, errManual = pcall(def.revert, store)
             if not okManual and not firstErr then
                 firstErr = errManual
             end

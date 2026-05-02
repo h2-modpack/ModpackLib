@@ -38,7 +38,7 @@ Safe to rebuild on every module `init`:
 - `definition`
 - `store`
 - `session`
-- `public.host`
+- live module host created by `lib.createModuleHost(...)`
 - UI draw closures
 - lookup tables derived from current imports
 
@@ -47,7 +47,6 @@ Expected to persist across reloads:
 - Lib mutation runtime state
 - Lib hook registries keyed by persistent hook owner tables
 - Framework pack registry and stable GUI callbacks
-- Framework generation counter
 - module-local hook owner tables
 
 Do not replace an entire persistent `*_Internal` table during reload. Mutate fields on the existing table instead. Replacing the table breaks hook ownership, mutation tracking, and any live closures that intentionally point at the persistent owner.
@@ -71,10 +70,10 @@ Framework owns pack-level coordinator state:
 - HUD
 - coordinator UI
 
-Framework also owns pack freshness checks:
-- it stores the init params used to build each pack session
-- it rebuilds a pack when Framework itself reloads
-- it does not rebuild a pack for ordinary coordinated module behavior reloads
+Framework owns the current pack object for each `packId`.
+Coordinator/Core code owns the init parameters and re-calls `Framework.init(...)`
+when the coordinator/framework layer reloads or when Lib requests a coordinated
+structural rebuild.
 
 ### Lib
 
@@ -88,7 +87,7 @@ Lib owns the shared reload-sensitive plumbing:
 ### Modules
 
 Modules own their local rebuild:
-- recreate `definition`, `store`, `session`, and `public.host` in `init`
+- recreate `definition`, `store`, `session`, and the Lib-created live host in `init`
 - keep `chalk`, `reload`, and raw config local to `main.lua`
 - keep persisted runtime reads on `store`
 - keep staged UI edits on the author-facing `session`
@@ -133,26 +132,19 @@ That means one coordinated module reload refreshes its live runtime behavior imm
 
 ## Framework Pack Refresh
 
-Framework stores two things per pack session:
-- `initParams`
-- `frameworkGeneration`
+Framework replaces the current pack object when the coordinator calls
+`Framework.init(params)` again for the same `packId`. The replacement keeps the
+pack's stable HUD/index slot while rebuilding discovery, HUD, hash, and UI state
+from the current live module hosts.
 
-Its renderer, menu-bar callback, and always-draw callback all run a freshness check before using the pack.
-
-Framework rebuilds the pack when:
-- Framework reloaded and its generation changed
-
-The rebuild path reruns `Framework.init(pack.initParams)` and refreshes discovery, HUD, hash, and UI state from the latest framework surfaces.
-
-The re-entry is intentional. Core registers GUI callbacks once, and those callback closures remain valid across reloads. Before drawing, the callback asks Framework whether the pack object was created by the current Framework generation. If not, Framework calls the latest `rom.mods["adamant-ModpackFramework"].init(...)` using the remembered `initParams`.
+Core registers GUI callbacks once and those callback closures remain valid across
+reloads by late-reading the current Framework renderer/menu factories from
+`rom.mods`.
 
 The invariant is:
 - stable callbacks survive reloads
-- pack objects are generation-scoped
-- the latest Framework code is always reached through `rom.mods`
-- ordinary coordinated module reloads do not require a pack rebuild
-
-This keeps Core from accumulating duplicate GUI callbacks while still letting Framework code changes rebuild pack-level state.
+- coordinator/Core owns `Framework.init(params)` re-entry
+- ordinary coordinated module behavior reloads do not require a pack rebuild
 
 Framework reload is an infrastructure path, not the fast module-authoring path.
 Rebuilding a pack is allowed to recreate Framework UI state from scratch. The
@@ -251,17 +243,20 @@ Module reload replaces the module's live host surface. Framework snapshots that 
 
 Supported.
 
-Persistent Lib registries survive Lib reload. Core late-reads Framework callbacks. Framework rebuilds pack state when its generation changes.
+Persistent Lib registries survive Lib reload. Core late-reads Framework callbacks.
+Coordinator/Core re-calls `Framework.init(params)` to rebuild pack state.
 
 ### Developer reloading Lib and modules in one session
 
 Supported.
 
-The coordinator registry, mutation runtime, and Framework freshness checks are designed to converge back to the latest live surfaces.
+The coordinator registry, mutation runtime, live-host registry, and coordinator
+rebuild callback are designed to converge back to the latest live surfaces.
 
 ### Structural edits
 
-Not hot-reload resilient by design.
+Handled by coordinated rebuild when a coordinator rebuild callback is registered;
+otherwise full reload is required.
 
 Changes to:
 - `definition.id`
@@ -271,12 +266,14 @@ Changes to:
 - `definition.hashGroupPlan` / host hash hints
 - module presence or discovery shape
 
-should be handled by a full reload.
+should be treated as structural compatibility work. In coordinated packs, Lib can
+request a Framework rebuild after the replacement host is created. Outside that
+coordinated path, use a full reload.
 
 ## Practical Rules
 
 - keep `chalk`, `reload`, and raw config local to `main.lua`
-- recreate `definition`, `store`, `session`, and `public.host` in `init`
+- recreate `definition`, `store`, `session`, and the Lib-created live host in `init`
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
 - register runtime hooks through `internal.RegisterHooks()` and `lib.hooks.*`
 - pass `hookOwner` and `registerHooks` to `lib.createModuleHost(...)` when the module owns runtime hooks

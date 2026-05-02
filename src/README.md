@@ -13,26 +13,25 @@ Lib now owns:
 Lib does not own a declarative UI tree/runtime anymore.
 New module UI should be written directly in module draw functions such as
 `internal.DrawTab(ui, session)` and optional `internal.DrawQuickContent(ui, session)`,
-then exposed through `public.host = lib.createModuleHost(...)`.
+then published through `lib.createModuleHost(...)`.
 
-## Docs
+## For Players
 
-- [GETTING_STARTED.md](GETTING_STARTED.md)
-  First-time author guide: core concepts, file roles, and your first module.
-- [API.md](API.md)
-  Reference for the current public namespaces and functions.
-- [MODULE_AUTHORING.md](MODULE_AUTHORING.md)
-  How to author a module against the current immediate-mode contract.
-- [WIDGETS.md](WIDGETS.md)
-  Widgets, nav, and storage notes for the live surface.
-- [UI_PERFORMANCE.md](UI_PERFORMANCE.md)
-  Render-path guidance for immediate-mode module UIs.
-- [IMGUI_LUA_REFERENCE.md](IMGUI_LUA_REFERENCE.md)
-  Notes on the Dear ImGui Lua binding used by the stack.
-- [RELOAD_MODUTIL_CHALK_REFERENCE.md](RELOAD_MODUTIL_CHALK_REFERENCE.md)
-  Stack reference for ReLoad, ModUtil, and Chalk behavior.
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-  Contributor expectations for changing the public Lib contract.
+Install this when a mod or modpack lists it as a dependency. Most mod managers
+install it automatically.
+
+This package does not add gameplay content by itself. It provides shared runtime
+helpers used by other adamant mods.
+
+## For Mod Authors
+
+Author-facing docs live in the repository root:
+- `README.md`
+- `API.md`
+- `docs/GETTING_STARTED.md`
+- `docs/MODULE_AUTHORING.md`
+- `docs/WIDGETS.md`
+- `docs/HOT_RELOAD_ARCHITECTURE.md`
 
 ## Current Public Namespaces
 
@@ -41,8 +40,11 @@ then exposed through `public.host = lib.createModuleHost(...)`.
 - `lib.lifecycle`
 - `lib.mutation`
 - `lib.hashing`
+- `lib.hooks`
+- `lib.integrations`
 - `lib.widgets`
 - `lib.nav`
+- `lib.imguiHelpers`
 
 Common top-level helpers:
 - `lib.createStore(...)`
@@ -52,9 +54,5 @@ Common top-level helpers:
 - `lib.isModuleCoordinated(...)`
 - `lib.resetStorageToDefaults(...)`
 
-## Validation
-
-```bash
-cd adamant-ModpackLib
-lua5.2 tests/all.lua
-```
+This packaged README is intentionally short so it remains useful inside mod
+manager package views.
