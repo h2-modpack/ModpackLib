@@ -1,4 +1,6 @@
-local fallbackHud = {}
+local internal = AdamantModpackLib_Internal
+internal.fallbackHud = internal.fallbackHud or {}
+local fallbackHud = internal.fallbackHud
 
 local COMPONENT_NAME = "ModpackMark_StandaloneLib"
 local HUD_Y = 250

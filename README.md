@@ -53,6 +53,8 @@ lib.createModuleHost({
   Third-party stack reference for ReLoad, ModUtil, and Chalk behavior.
 - [docs/HOT_RELOAD_ARCHITECTURE.md](docs/HOT_RELOAD_ARCHITECTURE.md)
   Stack hot-reload contract for Lib, Framework, Core, and coordinated modules.
+- [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
+  Accepted architecture boundaries and runtime constraints.
 - [CONTRIBUTING.md](CONTRIBUTING.md)
   Contributor expectations for changing the public Lib contract.
 

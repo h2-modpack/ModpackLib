@@ -17,7 +17,7 @@ LuaENVY-ENVY = "1.2.0"
 
 [build]
 icon = "./icon.png"
-readme = "./README.md"
+readme = "./THUNDERSTORE_README.md"
 outdir = "./build"
 
 [[build.copy]]

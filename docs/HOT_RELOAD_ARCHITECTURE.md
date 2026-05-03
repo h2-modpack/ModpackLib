@@ -10,7 +10,7 @@ For the raw behavior of `SGG_Modding-ReLoad`, `SGG_Modding-ModUtil`, and `SGG_Mo
 
 - keep normal player sessions safe without requiring code edits
 - support module development with live module reloads
-- support Lib and Framework development without leaving the stack on stale hosts or stale callbacks
+- document Lib and Framework reloads as infrastructure development paths with a full restart as the correctness boundary
 - keep ownership of reload-sensitive responsibilities explicit
 
 ## Process Model
@@ -44,7 +44,6 @@ Safe to rebuild on every module `init`:
 
 Expected to persist across reloads:
 - Lib coordinator registrations
-- Lib mutation runtime state
 - Lib hook registries keyed by persistent hook owner tables
 - Framework pack registry and stable GUI callbacks
 - module-local hook owner tables
@@ -59,8 +58,16 @@ Core owns coordinator bootstrap and stable GUI callback registration.
 
 Core responsibilities:
 - register stable `rom.gui` callbacks once behind `modutil.once_loaded.game(...)`
+- register coordinator metadata from `mods.on_all_mods_loaded(...)`
 - call `Framework.init(...)` from the reload body
 - late-read Framework factories so a Framework reload does not leave Core holding stale closures
+
+`mods.on_all_mods_loaded(...)` is intentional coordinator timing, not a generic
+readiness gate. ROM calls these callbacks after the full mod graph loads, and it
+also replays a module's callbacks when that module hot reloads after the
+all-mods-loaded milestone. That gives Core both properties the coordinator
+beacon needs: initial registration happens after coordinated modules have loaded,
+and later Core reloads refresh Lib's stored rebuild callback closure.
 
 ### Framework
 
@@ -81,7 +88,7 @@ Lib owns the shared reload-sensitive plumbing:
 - coordinator registration
 - coordinated module startup/runtime sync
 - stable ModUtil hook dispatch
-- mutation runtime persistence
+- mutation runtime tracking for module reloads
 - standalone host suppression for coordinated modules
 
 ### Modules
@@ -152,6 +159,10 @@ mod window may close, the selected tab may reset, and transient profile/import
 feedback may be lost. Persist only correctness-critical state across Framework
 reloads; module behavior state should refresh through Lib hosts instead.
 
+A Framework file reload does not, by itself, rebuild an existing pack object.
+The coordinator must call `Framework.init(params)` again, either from its reload
+body or through a coordinated structural rebuild request.
+
 HUD marker text is safe to refresh in place. HUD marker layout is not: the game
 creates retained HUD components from `ScreenData.HUD.ComponentData`, so changing
 that table only affects future HUD construction. A Framework change that moves
@@ -202,15 +213,20 @@ The stack does not currently engineer around that case.
 
 ## Mutation Model
 
-Mutation runtime is persisted on `AdamantModpackLib_Internal`, not on recreated store objects.
+Mutation runtime is durable across module reloads, not across arbitrary Lib
+implementation reloads.
 
 Important properties:
-- active tracked mutation state survives store recreation
+- active tracked mutation state survives store recreation during module reload
 - active state is keyed by stable module identity when available
 - `applyOnLoad` synchronizes live mutation state to the module's effective enabled state
 - if a module is disabled on reload, tracked active mutation state is reverted
 
 This keeps run-data patch lifecycles coherent across reloads.
+
+Lib reload is an infrastructure development path. If Lib's mutation internals
+reload while mutations are already active, use a full game process restart as the
+correctness boundary before validating mutation rollback behavior.
 
 ## Coordinator And Standalone Behavior
 
@@ -241,17 +257,24 @@ Module reload replaces the module's live host surface. Framework snapshots that 
 
 ### Developer doing Lib or Framework work
 
-Supported.
+Best-effort infrastructure development path.
 
-Persistent Lib registries survive Lib reload. Core late-reads Framework callbacks.
-Coordinator/Core re-calls `Framework.init(params)` to rebuild pack state.
+Persistent Lib registries survive Lib reload, and Core late-reads Framework
+callbacks. Existing module hosts may still close over old Lib implementation
+closures until the owning module reloads. Coordinator/Core must re-call
+`Framework.init(params)` to rebuild Framework pack state after Framework changes.
+Use a full process restart as the correctness boundary for infrastructure
+changes that affect mutation internals, top-level registration, or retained HUD
+layout.
 
 ### Developer reloading Lib and modules in one session
 
-Supported.
+Best-effort.
 
-The coordinator registry, mutation runtime, live-host registry, and coordinator
-rebuild callback are designed to converge back to the latest live surfaces.
+The coordinator registry, live-host registry, and coordinator rebuild callback
+are designed to converge back to the latest live surfaces after the relevant
+modules rebuild their hosts. Active mutation runtime is not a Lib reload
+persistence guarantee.
 
 ### Structural edits
 
