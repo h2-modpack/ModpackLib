@@ -17,6 +17,7 @@ local WidgetFns = public.widgets
 
 local function MakeStepperConfig(opts)
     return {
+        id = tostring(opts.id or ""),
         label = tostring(opts.label or ""),
         default = opts.default,
         min = opts.min,
@@ -53,7 +54,7 @@ local function CommitStepperValue(node, nextValue)
     if maxValue ~= nil and normalized > maxValue then normalized = maxValue end
     if normalized ~= ctx.renderedValue then
         ctx.renderedValue = normalized
-        ctx.boundValue:set(normalized)
+        ctx.boundValue.set(normalized)
         return true
     end
     return false
@@ -69,7 +70,8 @@ end
 local function DrawCenteredValue(imgui, node)
     local valueText = GetValueText(node)
     local valueWidth = tonumber(node.valueWidth)
-    local textWidth = imgui.CalcTextSize(tostring(valueText or "")).x
+    local measuredWidth = imgui.CalcTextSize(tostring(valueText or ""))
+    local textWidth = type(measuredWidth) == "table" and measuredWidth.x or measuredWidth
 
     imgui.AlignTextToFramePadding()
     if valueWidth and valueWidth > 0 then
@@ -92,7 +94,7 @@ local function DrawStepperControl(imgui, node)
     local renderedValue = node._stepperCtx.renderedValue
     local minValue, maxValue = GetStepperLimits(node)
 
-    if imgui.Button("-") and (minValue == nil or renderedValue > minValue) then
+    if imgui.Button("-##" .. tostring(node.id) .. "_dec") and (minValue == nil or renderedValue > minValue) then
         changed = CommitStepperValue(node, renderedValue - (node.step or 1)) or changed
     end
 
@@ -100,7 +102,7 @@ local function DrawStepperControl(imgui, node)
     DrawCenteredValue(imgui, node)
 
     helpers.SameLineWithGap(imgui, gap)
-    if imgui.Button("+") and (maxValue == nil or renderedValue < maxValue) then
+    if imgui.Button("+##" .. tostring(node.id) .. "_inc") and (maxValue == nil or renderedValue < maxValue) then
         changed = CommitStepperValue(node, renderedValue + (node.step or 1)) or changed
     end
 
@@ -115,6 +117,7 @@ end
 function WidgetFns.stepper(imgui, session, alias, opts)
     opts = opts or {}
     local cfg = MakeStepperConfig(opts)
+    cfg.id = cfg.id ~= "" and cfg.id or alias
     local boundValue = {
         get = function() return session.read(alias) end,
         set = function(value) session.write(alias, value) end,
@@ -141,6 +144,7 @@ end
 function WidgetFns.steppedRange(imgui, session, minAlias, maxAlias, opts)
     opts = opts or {}
     local minStepper = MakeStepperConfig({
+        id = tostring(minAlias) .. "_min",
         label = "",
         default = opts.default,
         min = opts.min,
@@ -150,6 +154,7 @@ function WidgetFns.steppedRange(imgui, session, minAlias, maxAlias, opts)
         buttonSpacing = opts.buttonSpacing,
     })
     local maxStepper = MakeStepperConfig({
+        id = tostring(maxAlias) .. "_max",
         label = "",
         default = opts.defaultMax or opts.default,
         min = opts.min,

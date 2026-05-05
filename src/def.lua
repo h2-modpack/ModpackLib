@@ -29,6 +29,7 @@ local lib = {}
 ---@field tooltip? string UI tooltip.
 ---@field default? any Default value for this storage node.
 ---@field lifetime? "persisted"|"transient" Storage lifetime; omitted means persisted.
+---@field runtime? boolean Persisted runtime-only state excluded from session/hash/profile surfaces.
 ---@field visibleIf? string|AdamantModpackLib.VisibilityCondition Visibility condition used by UI helpers.
 ---@field min? number Integer lower bound.
 ---@field max? number Integer upper bound.
@@ -51,6 +52,11 @@ local lib = {}
 
 ---@class AdamantModpackLib.ManagedStore
 ---@field read fun(keyOrAlias: AdamantModpackLib.ConfigPath): any
+---@field getRuntimeState fun(): AdamantModpackLib.RuntimeState
+
+---@class AdamantModpackLib.RuntimeState
+---@field read fun(alias: string): any
+---@field write fun(alias: string, value: any)
 
 ---@class AdamantModpackLib.Session
 ---@field view table<string, any>
@@ -83,6 +89,7 @@ local lib = {}
 ---@field patchPlan? fun(plan: AdamantModpackLib.MutationPlan, store: AdamantModpackLib.ManagedStore)
 ---@field apply? fun(store: AdamantModpackLib.ManagedStore)
 ---@field revert? fun(store: AdamantModpackLib.ManagedStore)
+---@field onSettingsCommitted? fun(store: AdamantModpackLib.ManagedStore) Post-commit observer for rebuilding derived runtime/UI structures.
 
 ---@class AdamantModpackLib.PreparedDefinition: AdamantModpackLib.ModuleDefinition
 
@@ -159,6 +166,11 @@ local lib = {}
 ---@class AdamantModpackLib.IntegrationProvider
 ---@field providerId string
 ---@field api table
+
+---@class AdamantModpackLib.GameObjectApi
+---@field get fun(object: table, packId: string, moduleId: string, key: string, factory?: fun(): table): table
+---@field peek fun(object: table, packId: string, moduleId: string, key: string): table?
+---@field clear fun(object: table, packId: string, moduleId: string, key: string): boolean
 
 ---@class AdamantModpackLib.VisibilityCondition
 ---@field alias string
@@ -356,6 +368,13 @@ function lib.lifecycle.applyOnLoad(def, store)
 end
 
 ---@param def AdamantModpackLib.ModuleDefinition
+---@param store AdamantModpackLib.ManagedStore
+---@return boolean ok
+---@return string? err
+function lib.lifecycle.notifySettingsCommitted(def, store)
+end
+
+---@param def AdamantModpackLib.ModuleDefinition
 ---@param session AdamantModpackLib.Session
 ---@return string[] mismatches
 function lib.lifecycle.resyncSession(def, session)
@@ -455,6 +474,114 @@ end
 ---@param id string
 ---@return AdamantModpackLib.IntegrationProvider[] providers
 function lib.integrations.list(id)
+end
+
+---@type AdamantModpackLib.GameObjectApi
+lib.gameObject = {}
+
+---@param object table
+---@param packId string
+---@param moduleId string
+---@param key string
+---@param factory? fun(): table
+---@return table state
+function lib.gameObject.get(object, packId, moduleId, key, factory)
+end
+
+---@param object table
+---@param packId string
+---@param moduleId string
+---@param key string
+---@return table? state
+function lib.gameObject.peek(object, packId, moduleId, key)
+end
+
+---@param object table
+---@param packId string
+---@param moduleId string
+---@param key string
+---@return boolean cleared
+function lib.gameObject.clear(object, packId, moduleId, key)
+end
+
+---@class AdamantModpackLib.HudTextOverlayOpts
+---@field id string Stable overlay id.
+---@field owner? string Optional module/plugin owner id used for scoped UI suppression.
+---@field componentName? string Explicit retained HUD component name.
+---@field layout? table Hades II HUD component layout fields such as `RightOffset`, `BottomOffset`, `X`, and `Y`.
+---@field textArgs? table Text format overrides.
+---@field text? string|fun(): string
+---@field visible? boolean|fun(): boolean
+
+---@class AdamantModpackLib.HudTextOverlayHandle
+---@field setText fun(text: string|fun(): string)
+---@field setVisible fun(visible: boolean|fun(): boolean)
+---@field refresh fun()
+---@field unregister fun()
+
+---@class AdamantModpackLib.StackedTextOverlayHandle : AdamantModpackLib.HudTextOverlayHandle
+---@field refreshText fun()
+
+---@class AdamantModpackLib.StackedRowOverlayHandle
+---@field setColumnText fun(key: string, text: string|fun(): string): boolean
+---@field setVisible fun(visible: boolean|fun(): boolean)
+---@field refresh fun()
+---@field refreshText fun()
+---@field unregister fun()
+
+---@class AdamantModpackLib.StackedTextOverlayOpts : AdamantModpackLib.HudTextOverlayOpts
+---@field region? string Stack region name. Defaults to `middleRightStack`.
+---@field order? integer Sort key within the region.
+---@field textArgs? table Text style overrides. Stacked regions own size, justification, and offsets.
+
+---@class AdamantModpackLib.StackedRowColumnOpts
+---@field key? string Stable column key used by row handles.
+---@field componentName? string Explicit retained HUD component name for this column.
+---@field minWidth? number Reserved layout width used to keep following columns aligned; text is not clipped.
+---@field justify? "Left"|"Center"|"Right" Column text justification. Defaults to the stack region justification.
+---@field text? string|fun(): string
+---@field textArgs? table Text style overrides. Stacked regions own `FontSize`, `VerticalJustification`, `OffsetX`, and `OffsetY`.
+
+---@class AdamantModpackLib.StackedRowOverlayOpts
+---@field id string Stable overlay row id.
+---@field owner? string Optional module/plugin owner id used for scoped UI suppression.
+---@field componentName? string Base retained HUD component name.
+---@field region? string Stack region name. Defaults to `middleRightStack`.
+---@field order? integer Sort key within the region.
+---@field columnGap? number Reserved space between columns.
+---@field columns AdamantModpackLib.StackedRowColumnOpts[] Ordered columns, declared left-to-right.
+---@field visible? boolean|fun(): boolean
+
+---@class AdamantModpackLib.OverlaysApi
+---@field order table<string, integer> Shared overlay order bands.
+---@type AdamantModpackLib.OverlaysApi
+lib.overlays = {}
+
+---@param opts AdamantModpackLib.HudTextOverlayOpts
+---@return AdamantModpackLib.HudTextOverlayHandle handle
+function lib.overlays.registerHudText(opts)
+end
+
+---@param opts AdamantModpackLib.StackedTextOverlayOpts
+---@return AdamantModpackLib.StackedTextOverlayHandle handle
+function lib.overlays.registerStackedText(opts)
+end
+
+---@param opts AdamantModpackLib.StackedRowOverlayOpts
+---@return AdamantModpackLib.StackedRowOverlayHandle handle
+function lib.overlays.registerStackedRow(opts)
+end
+
+function lib.overlays.refreshHudText()
+end
+
+---@param regionName? string Optional stack region to refresh.
+function lib.overlays.refreshStackedText(regionName)
+end
+
+---@param owner string Module/plugin owner id.
+---@param suppressed boolean Whether overlays owned by `owner` should be hidden and removed from managed stack layout.
+function lib.overlays.setOwnerSuppressed(owner, suppressed)
 end
 
 ---@class AdamantModpackLib.HashingApi

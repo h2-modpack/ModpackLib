@@ -12,7 +12,9 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.resetStorageToDefaults(...)`
 - `lib.hashing.*`
 - `lib.hooks.*`
+- `lib.overlays.*`
 - `lib.integrations.*`
+- `lib.gameObject.*`
 - `lib.mutation.*`
 - `lib.lifecycle.*`
 - `lib.logging.*`
@@ -34,6 +36,8 @@ Modules declare:
   - `patchPlan`
   - `apply`
   - `revert`
+- optional post-commit observer:
+  - `onSettingsCommitted`
 
 Modules create a behavior host:
 - `lib.createModuleHost(...)`
@@ -96,6 +100,35 @@ Rules:
 - consumers should prefer `invoke(...)` so Lib resolves current provider behavior at call time
 - when multiple providers exist, `get(id)` returns the most recently registered provider
 
+## `lib.gameObject`
+
+Namespaced state buckets attached to live game object tables such as `CurrentRun`, room data, or loot data.
+
+Use this for object-owned runtime state whose lifetime should follow that game table. It is not persisted, staged, hashed, profiled, or reset by Lib.
+
+Typical use:
+
+```lua
+local state = lib.gameObject.get(CurrentRun, PACK_ID, MODULE_ID, "run", function()
+    return {
+        ForcedNPCPending = {},
+        NPCEncounterSeen = {},
+    }
+end)
+```
+
+Surface:
+- `lib.gameObject.get(object, packId, moduleId, key, factory?)`
+- `lib.gameObject.peek(object, packId, moduleId, key)`
+- `lib.gameObject.clear(object, packId, moduleId, key)`
+
+Rules:
+- `object` must be a table
+- `packId`, `moduleId`, and `key` must be non-empty strings
+- `factory` runs only when the bucket is missing
+- `factory` must return a table when provided
+- state is namespaced under one Lib-owned root on the object
+
 ## Store And Session
 
 ### `lib.prepareDefinition(owner, dataDefaultsOrDefinition, definition?)`
@@ -124,6 +157,7 @@ Behavior-only fields such as:
 - `patchPlan`
 - `apply`
 - `revert`
+- `onSettingsCommitted`
 
 do not trigger a structural reload warning.
 
@@ -196,6 +230,7 @@ call with a session from another. Recreate the pair together on module reload.
 
 Returned surface:
 - `store.read(keyOrAlias)`
+- `store.getRuntimeState()`
 
 Persisted writes happen through semantic helpers or session flushes:
 
@@ -210,11 +245,35 @@ Rules:
 - keep each `store, session` pair together for its lifetime
 - widgets and draw code should usually read staged values from `session.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
+- module-owned runtime markers declared with `runtime = true` should write through `store.getRuntimeState()`
 - enabled toggles should write through `lib.lifecycle.setEnabled(def, store, enabled)`
 - debug toggles should write through `lib.lifecycle.setDebugMode(store, enabled)`
 - profile/hash plumbing should stage values through `session.write(...)` and flush them through `session._flushToConfig()`
 - transient aliases are read from `session`
 - transient aliases stay out of persisted config
+- runtime aliases are excluded from session, hash, profile, and reset-to-defaults surfaces
+
+Runtime-only persisted storage is declared on ordinary storage nodes:
+
+```lua
+{
+    type = "bool",
+    alias = "BatchRecordingArmed",
+    configKey = "BatchRecordingArmed",
+    default = false,
+    runtime = true,
+}
+```
+
+Use it for module-owned runtime intent or small reload/restart markers that should not affect UI staging, profiles, or config hashes:
+
+```lua
+local runtime = store.getRuntimeState()
+runtime.write("BatchRecordingArmed", true)
+local armed = runtime.read("BatchRecordingArmed") == true
+```
+
+`runtime.write(alias, value)` only accepts aliases declared with `runtime = true`.
 
 ### `session`
 
@@ -318,6 +377,75 @@ lib.createModuleHost({
 ```
 
 When `createModuleHost(...)` receives `hookOwner` and `registerHooks`, it runs the registration pass as part of host creation and deactivates hooks omitted by a later pass for the same owner.
+
+## `lib.overlays`
+
+Retained HUD text helpers for shared overlay placement.
+
+Overlay visibility has two layers:
+- Lib applies a global game-HUD gate, currently based on `ShowingCombatUI`.
+- Each overlay can also provide its own `visible` boolean or callback.
+- Overlays can declare an `owner`; callers can suppress that owner while its configuration UI is being drawn.
+
+When the global gate is closed, lib hides all retained overlay components even if their own `visible` callback returns true. Text callbacks may still be refreshed so the display is current when the game HUD returns.
+
+Current managed region:
+- `middleRightStack`: a right-anchored vertical stack used for framework markers and module status text.
+
+Order bands:
+- `lib.overlays.order.framework`
+- `lib.overlays.order.module`
+- `lib.overlays.order.debug`
+
+### `lib.overlays.registerStackedText(opts)`
+
+Registers one text box in a managed stack region.
+
+Useful for single-line overlays where the whole line can share one font and alignment.
+
+### `lib.overlays.registerStackedRow(opts)`
+
+Registers one multi-column row in a managed stack region.
+
+Columns are declared left-to-right:
+
+```lua
+lib.overlays.registerStackedRow({
+    id = "example.timer",
+    owner = PLUGIN_GUID,
+    region = "middleRightStack",
+    order = lib.overlays.order.module,
+    columnGap = 6,
+    columns = {
+        {
+            key = "label",
+            minWidth = 42,
+            justify = "Right",
+            text = "IGT:",
+            textArgs = { Font = "P22UndergroundSCMedium" },
+        },
+        {
+            key = "time",
+            minWidth = 96,
+            justify = "Right",
+            text = function() return "00:00.00" end,
+            textArgs = { Font = "MonospaceTypewriterBold" },
+        },
+    },
+})
+```
+
+`minWidth` reserves layout space so columns line up across rows. It does not clip text.
+
+Stacked handles expose two refresh paths:
+- `refresh()` recomputes region layout, visibility, and text.
+- `refreshText()` updates retained text only and is intended for hot paths where row visibility/order is known to be stable.
+
+### `lib.overlays.setOwnerSuppressed(owner, suppressed)`
+
+Hides or restores every overlay registered with `owner = owner`. Suppressed overlays are also removed from managed stack layout, so remaining entries close the gap.
+
+Framework uses this to hide a module's runtime overlay while that module's `drawTab` or `drawQuickContent` surface is being drawn.
 
 ## `lib.hashing`
 
@@ -441,7 +569,14 @@ Transactional commit helper for staged `session`.
 Behavior:
 - flushes staged persisted values to config
 - if the module is enabled and `affectsRunData`, reapplies mutation state
+- calls `definition.onSettingsCommitted(store)` after a successful dirty commit when present
 - on failure, restores the previous config snapshot and reloads `session`
+
+`onSettingsCommitted` is a post-commit observer for rebuilding derived runtime/UI structures. It is not transactional; callback errors are warned and do not roll back the committed config.
+
+### `lib.lifecycle.notifySettingsCommitted(def, store)`
+
+Runs `definition.onSettingsCommitted(store)` when present. Host flush paths use this after direct staged writes, so profile/hash imports and normal UI commits share the same observer boundary.
 
 ## Standalone Host
 

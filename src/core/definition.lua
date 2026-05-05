@@ -17,6 +17,7 @@ local KnownDefinitionKeys = {
     patchPlan = true,
     apply = true,
     revert = true,
+    onSettingsCommitted = true,
 }
 
 definitionInternal.KnownKeys = KnownDefinitionKeys
@@ -134,7 +135,7 @@ function definitionInternal.validate(definition, label)
     warnType("affectsRunData", "boolean")
     warnType("storage", "table")
     warnType("hashGroupPlan", "table")
-    for _, key in ipairs({ "patchPlan", "apply", "revert" }) do
+    for _, key in ipairs({ "patchPlan", "apply", "revert", "onSettingsCommitted" }) do
         warnType(key, "function")
     end
 

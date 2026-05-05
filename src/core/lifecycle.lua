@@ -4,6 +4,25 @@ public.lifecycle = public.lifecycle or {}
 local lifecycleApi = public.lifecycle
 local mutationInternal = internal.mutation
 
+function lifecycleApi.notifySettingsCommitted(def, store)
+    if type(def) ~= "table" or type(def.onSettingsCommitted) ~= "function" then
+        return true, nil
+    end
+
+    local ok, result = pcall(def.onSettingsCommitted, store)
+    if not ok then
+        internal.libWarn("%s: onSettingsCommitted failed: %s",
+            tostring(def.name or def.id or "module"),
+            tostring(result))
+        return true, nil
+    end
+    if result == false then
+        internal.libWarn("%s: onSettingsCommitted returned false",
+            tostring(def.name or def.id or "module"))
+    end
+    return true, nil
+end
+
 ---@class CoordinatorConfig
 ---@field ModEnabled boolean
 
@@ -170,12 +189,12 @@ function lifecycleApi.commitSession(def, store, session)
         and store.read("Enabled") == true
 
     if not shouldReapply then
-        return true, nil
+        return lifecycleApi.notifySettingsCommitted(def, store)
     end
 
     local ok, err = lifecycleApi.reapplyMutation(def, store)
     if ok then
-        return true, nil
+        return lifecycleApi.notifySettingsCommitted(def, store)
     end
 
     session._restoreConfigSnapshot(snapshot)

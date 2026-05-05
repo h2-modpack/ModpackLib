@@ -9,7 +9,9 @@ local mutationPlan = import 'core/private/mutation_plan.lua'
 
 import 'core/logging.lua'
 import 'core/integrations.lua'
+import 'core/game_object.lua'
 import 'core/hooks.lua'
+import 'core/overlays.lua'
 import 'core/host.lua'
 import('core/mutations.lua', nil, mutationPlan)
 import('core/internal/mutations.lua', nil, mutationPlan)

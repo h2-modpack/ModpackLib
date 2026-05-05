@@ -251,6 +251,44 @@ function TestDefinitionLifecycle:testAffectsRunDataIgnoresDeprecatedFlag()
     lu.assertFalse(lib.lifecycle.affectsRunData({}))
 end
 
+function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlush()
+    local calls = 0
+    local observedValue = nil
+    local config = {
+        Enabled = true,
+        Value = false,
+    }
+    local definition = lib.prepareDefinition({}, {
+        storage = {
+            {
+                type = "bool",
+                alias = "Value",
+                configKey = "Value",
+                default = false,
+            },
+        },
+        onSettingsCommitted = function(store)
+            calls = calls + 1
+            observedValue = store.read("Value")
+        end,
+    })
+    local store, session = lib.createStore(config, definition)
+
+    session.write("Value", true)
+    local ok, err = lib.lifecycle.commitSession(definition, store, session)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(calls, 1)
+    lu.assertTrue(observedValue)
+    lu.assertTrue(config.Value)
+
+    ok, err = lib.lifecycle.commitSession(definition, store, session)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(calls, 1)
+end
+
 function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()
     local store = makeStore(false)
     local target = { Value = 1 }

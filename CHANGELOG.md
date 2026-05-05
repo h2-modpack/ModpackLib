@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
 - Added coordinated pack rebuild callbacks through `lib.lifecycle.registerCoordinatorRebuild(...)` and `lib.lifecycle.requestCoordinatorRebuild(...)`.
 - Added optional cross-module integration registration through `lib.integrations.*`.
 - Added `lib.imguiHelpers.*` enum/value helpers for low-level ImGui binding use.
+- Added `lib.overlays.*` retained HUD overlay helpers with managed `middleRightStack` layout, stacked text, stacked rows, owner suppression, and framework/module/debug order bands.
+- Added `lib.gameObject.*` helpers for namespaced runtime state attached to live game object tables.
+- Added runtime-only persisted storage aliases through `runtime = true` plus `store.getRuntimeState()`.
+- Added `definition.onSettingsCommitted(store)` as a post-commit observer for rebuilding derived runtime/UI structures after staged config commits.
 - Added docs for hot-reload architecture and known limitations under `docs/`.
 - Added player-facing `THUNDERSTORE_README.md` packaging support.
 
@@ -29,6 +33,9 @@ All notable changes to this project will be documented in this file.
 - Mutation lifecycle state is tracked by stable module identity where available, making reload/reapply behavior more robust.
 - `lib.lifecycle.applyOnLoad(...)` now reverts active tracked mutation state when a module reloads disabled.
 - Store creation now requires prepared definitions with explicit storage.
+- Runtime-only storage aliases are excluded from session staging, profile/hash surfaces, and reset-to-defaults flows.
+- Host `writeAndFlush(...)`, `flush()`, and lifecycle `commitSession(...)` now notify `onSettingsCommitted` after successful dirty commits.
+- The fallback HUD marker now participates in the shared overlay layout instead of owning a separate HUD placement path.
 - Internal helper duplication was consolidated into shared internal value/store utilities.
 - Widget packed dropdown/radio helpers avoid repeated packed-choice classification work per frame.
 - Long-form guides and reference docs now live under `docs/`.

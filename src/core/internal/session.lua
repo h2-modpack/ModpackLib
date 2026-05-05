@@ -145,6 +145,11 @@ function internal.store.createSession(modConfig, configBackend, storage)
     })
 
     local function readStagingValue(alias)
+        local node = aliasNodes[alias]
+        if node and node._runtime == true then
+            internal.libWarnIf("session.read: alias '%s' is runtime-only; use store.getRuntimeState()", tostring(alias))
+            return nil
+        end
         return staging[alias]
     end
 
@@ -153,6 +158,9 @@ function internal.store.createSession(modConfig, configBackend, storage)
         if not node then
             internal.libWarnIf("session.write: unknown alias '%s'; value will not be persisted", tostring(alias))
             return
+        end
+        if node._runtime == true then
+            error(string.format("session.write: alias '%s' is runtime-only; use store.getRuntimeState()", tostring(alias)), 2)
         end
 
         if node._isBitAlias then

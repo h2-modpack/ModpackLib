@@ -43,9 +43,15 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@field patchPlan fun(store: ManagedStore): table|nil
 ---@field apply fun(store: ManagedStore)|nil
 ---@field revert fun(store: ManagedStore)|nil
+---@field onSettingsCommitted fun(store: ManagedStore)|nil
 
 ---@class ManagedStore
 ---@field read fun(keyOrAlias: ConfigPath): any
+---@field getRuntimeState fun(): RuntimeState
+
+---@class RuntimeState
+---@field read fun(alias: string): any
+---@field write fun(alias: string, value: any)
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })
 
@@ -156,6 +162,12 @@ function public.createStore(modConfig, definition)
 
     local aliasNodes = storageInternal.getAliases(storage)
     local rootByKey = rawget(storage, "_rootByKey") or {}
+    local runtimeAliases = {}
+    for _, node in ipairs(storageInternal.getRuntimeRoots(storage)) do
+        if type(node.alias) == "string" and node.alias ~= "" then
+            runtimeAliases[node.alias] = node
+        end
+    end
 
     local function readRaw(configKey)
         local raw
@@ -249,6 +261,36 @@ function public.createStore(modConfig, definition)
             end
         end
         writeRaw(keyOrAlias, value)
+    end
+
+    local runtimeState = {}
+
+    local function assertRuntimeAlias(alias)
+        local node = runtimeAliases[alias]
+        if not node then
+            error(string.format(
+                "runtime state alias '%s' is not declared with runtime = true",
+                tostring(alias)
+            ), 3)
+        end
+        return node
+    end
+
+    --- Returns a narrow writer for declared runtime-only persisted aliases.
+    --- Runtime aliases are excluded from session, hash, and profile surfaces.
+    ---@return RuntimeState runtimeState Runtime-only read/write facade.
+    function store.getRuntimeState()
+        return runtimeState
+    end
+
+    function runtimeState.read(alias)
+        assertRuntimeAlias(alias)
+        return store.read(alias)
+    end
+
+    function runtimeState.write(alias, value)
+        assertRuntimeAlias(alias)
+        writeStoreValue(alias, value)
     end
 
     local function getPackedAliases(alias)

@@ -44,6 +44,30 @@ function TestStorageValidation:testTransientRootRegistersAliasButNotPersistedRoo
     lu.assertEquals(#Warnings, 0)
 end
 
+function TestStorageValidation:testRuntimeRootRegistersAliasButNotHashRoot()
+    local storage = {
+        { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
+        { type = "bool", alias = "RecordingArmed", configKey = "RecordingArmed", default = false, runtime = true },
+    }
+
+    AdamantModpackLib_Internal.storage.validate(storage, "RuntimeRoot")
+
+    lu.assertEquals(#lib.hashing.getRoots(storage), 1)
+    lu.assertEquals(lib.hashing.getRoots(storage)[1].alias, "Enabled")
+    lu.assertNotNil(lib.hashing.getAliases(storage).RecordingArmed)
+    lu.assertEquals(#AdamantModpackLib_Internal.storage.getRuntimeRoots(storage), 1)
+    lu.assertEquals(#Warnings, 0)
+end
+
+function TestStorageValidation:testRuntimePackedIntWarns()
+    AdamantModpackLib_Internal.storage.validate({
+        { type = "packedInt", alias = "RuntimePacked", configKey = "RuntimePacked", runtime = true },
+    }, "RuntimePacked")
+
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "runtime packedInt roots are not supported")
+end
+
 function TestStorageValidation:testPackedIntDerivesChildAliasesAndDefault()
     local storage = {
         {

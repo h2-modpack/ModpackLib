@@ -24,7 +24,6 @@ internal.coordinatorRebuilds = internal.coordinatorRebuilds or {}
 internal.liveModuleHosts = internal.liveModuleHosts or _liveModuleHosts
 internal.pendingCoordinatorRebuilds = internal.pendingCoordinatorRebuilds
     or setmetatable({}, { __mode = "k" })
-local fallbackHud = import 'core/private/fallback_hud.lua'
 
 ---@class AdamantModpackLib
 ---@field config table
@@ -38,13 +37,17 @@ local fallbackHud = import 'core/private/fallback_hud.lua'
 ---@field lifecycle table
 ---@field mutation table
 ---@field logging table
+---@field gameObject table
 ---@field hashing table
 ---@field imguiHelpers table
+---@field overlays table
 ---@field widgets table
 ---@field nav table
 
 import 'core/init.lua'
 import 'widgets/init.lua'
+
+local fallbackHud = import 'core/private/fallback_hud.lua'
 
 -- Standalone framework debug toggle - hidden when Core/Framework registers coordinators.
 rom.gui.add_to_menu_bar(function()

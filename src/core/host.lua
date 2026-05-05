@@ -131,7 +131,7 @@ function public.createModuleHost(opts)
     function host.writeAndFlush(aliasOrKey, value)
         session.write(aliasOrKey, value)
         session._flushToConfig()
-        return true
+        return public.lifecycle.notifySettingsCommitted(def, store)
     end
 
     function host.stage(aliasOrKey, value)
@@ -140,8 +140,11 @@ function public.createModuleHost(opts)
     end
 
     function host.flush()
+        if not session.isDirty() then
+            return true
+        end
         session._flushToConfig()
-        return true
+        return public.lifecycle.notifySettingsCommitted(def, store)
     end
 
     function host.reloadFromConfig()
@@ -289,14 +292,21 @@ function public.standaloneHost(pluginGuid)
     local function renderWindow()
         local identity = getIdentity()
         local meta = getMeta()
-        if identity.modpack and internal.coordinators[identity.modpack] then return end
-        if not showWindow then return end
+        if identity.modpack and internal.coordinators[identity.modpack] then
+            public.overlays.setOwnerSuppressed(pluginGuid, false)
+            return
+        end
+        if not showWindow then
+            public.overlays.setOwnerSuppressed(pluginGuid, false)
+            return
+        end
 
         local imgui = rom.ImGui
         local title = tostring(meta.name or identity.id or "Module") .. "###" .. tostring(identity.id)
         seedWindowSize(imgui)
         local open, shouldDraw = imgui.Begin(title, showWindow)
         if shouldDraw then
+            public.overlays.setOwnerSuppressed(pluginGuid, true)
             local enabled = moduleHost.read("Enabled") == true
             local enabledValue, enabledChanged = imgui.Checkbox("Enabled", enabled)
             if enabledChanged then
@@ -331,10 +341,13 @@ function public.standaloneHost(pluginGuid)
                     tostring(meta.name or identity.id or "module"),
                     tostring(err))
             end
+        else
+            public.overlays.setOwnerSuppressed(pluginGuid, false)
         end
         imgui.End()
         if open == false then
             flushPendingRunData()
+            public.overlays.setOwnerSuppressed(pluginGuid, false)
             showWindow = false
         end
     end
@@ -347,6 +360,7 @@ function public.standaloneHost(pluginGuid)
             if rom.ImGui.MenuItem(meta.name) then
                 if showWindow then
                     flushPendingRunData()
+                    public.overlays.setOwnerSuppressed(pluginGuid, false)
                 end
                 showWindow = not showWindow
             end

@@ -27,6 +27,8 @@ local function makeDropdownImgui()
         IsItemHovered = function() return false end,
         SetTooltip = function() end,
         SameLine = function() end,
+        Button = function() return false end,
+        Dummy = function() end,
         PushItemWidth = function() end,
         PopItemWidth = function() end,
         BeginCombo = function(_, preview)
@@ -54,6 +56,16 @@ local function makeDropdownImgui()
     }
 
     return imgui, state
+end
+
+local function makeStepperImgui(clickedLabel)
+    local clickedButtons = {}
+    local imgui = makeDropdownImgui()
+    imgui.Button = function(label)
+        clickedButtons[#clickedButtons + 1] = label
+        return label == clickedLabel
+    end
+    return imgui, clickedButtons
 end
 
 function TestWidgets:testPlainDropdownUsesNativePreview()
@@ -93,4 +105,36 @@ function TestWidgets:testColoredDropdownUsesCustomPreview()
 
     lu.assertEquals(state.beginComboPreview, "")
     lu.assertEquals(state.customPreviewCalls, 1)
+end
+
+function TestWidgets:testStepperSupportsCalcTextSizeNumberReturn()
+    local imgui = makeDropdownImgui()
+
+    local ok = pcall(function()
+        lib.widgets.stepper(imgui, makeSession(3), "Runs", {
+            label = "Runs",
+            min = 1,
+            max = 10,
+            valueWidth = 24,
+        })
+    end)
+
+    lu.assertTrue(ok)
+end
+
+function TestWidgets:testStepperUsesStableButtonIdsAndWritesIncrement()
+    local imgui, clickedButtons = makeStepperImgui("+##Runs_inc")
+    local session = makeSession(3)
+
+    local changed = lib.widgets.stepper(imgui, session, "Runs", {
+        label = "Runs",
+        min = 1,
+        max = 10,
+        valueWidth = 24,
+    })
+
+    lu.assertTrue(changed)
+    lu.assertEquals(session.read("Runs"), 4)
+    lu.assertEquals(clickedButtons[1], "-##Runs_dec")
+    lu.assertEquals(clickedButtons[2], "+##Runs_inc")
 end

@@ -52,6 +52,16 @@ local function makeTransientDefinition()
     })
 end
 
+local function makeRuntimeDefinition()
+    return prepareDefinition({
+        storage = {
+            { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
+            { type = "bool", alias = "RecordingArmed", configKey = "RecordingArmed", default = false, runtime = true },
+            { type = "int", alias = "RunMarker", configKey = "RunMarker", default = 0, min = 0, max = 99, runtime = true },
+        },
+    })
+end
+
 TestStore = {}
 
 function TestStore:testCreateStoreReadsAndWritesScalarAliasesAndRawKeys()
@@ -107,6 +117,44 @@ function TestStore:testTransientAliasesAreNotReadableThroughStore()
     RestoreWarnings()
 
     lu.assertTrue(sawReadWarning)
+end
+
+function TestStore:testRuntimeAliasesUseNarrowStoreAccessor()
+    local config = { Enabled = true, RecordingArmed = false, RunMarker = 2 }
+    local store, session = lib.createStore(config, makeRuntimeDefinition())
+    local runtime = store.getRuntimeState()
+
+    lu.assertTrue(store.read("Enabled"))
+    lu.assertFalse(runtime.read("RecordingArmed"))
+    lu.assertEquals(runtime.read("RunMarker"), 2)
+    lu.assertNil(session.read("RecordingArmed"))
+
+    runtime.write("RecordingArmed", true)
+    runtime.write("RunMarker", 120)
+
+    lu.assertTrue(config.RecordingArmed)
+    lu.assertEquals(config.RunMarker, 99)
+    lu.assertFalse(session.isDirty())
+
+    local ok, err = pcall(function()
+        runtime.write("Enabled", false)
+    end)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "runtime = true")
+end
+
+function TestStore:testSessionRejectsRuntimeWrites()
+    local config = { Enabled = true, RecordingArmed = false }
+    local _, session = lib.createStore(config, makeRuntimeDefinition())
+
+    local ok, err = pcall(function()
+        session.write("RecordingArmed", true)
+    end)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "runtime-only")
+    lu.assertFalse(config.RecordingArmed)
 end
 
 TestSession = {}

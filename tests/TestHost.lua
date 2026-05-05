@@ -94,6 +94,40 @@ function TestHost:testStandaloneHostCanResolveCurrentModuleHostFromLibRegistry()
     lu.assertEquals(lib.getLiveModuleHost(pluginGuid), host)
 end
 
+function TestHost:testHostFlushNotifiesSettingsObserver()
+    local calls = 0
+    local observedValue = nil
+    local definition = lib.prepareDefinition({}, {
+        id = "SettingsObserverHost",
+        name = "Settings Observer Host",
+        storage = {
+            { type = "bool", alias = "Value", configKey = "Value", default = false },
+        },
+        onSettingsCommitted = function(store)
+            calls = calls + 1
+            observedValue = store.read("Value")
+        end,
+    })
+    local store, session = lib.createStore({
+        Value = false,
+    }, definition)
+    local host = lib.createModuleHost({
+        pluginGuid = "test-settings-observer-host",
+        definition = definition,
+        store = store,
+        session = session,
+        drawTab = function() end,
+    })
+
+    host.stage("Value", true)
+    local ok, err = host.flush()
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(calls, 1)
+    lu.assertTrue(observedValue)
+end
+
 function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
     local capturedAuthorSession = nil
     local definition = lib.prepareDefinition({}, {
