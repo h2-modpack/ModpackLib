@@ -274,3 +274,15 @@ function WidgetFns.packedDropdown(imgui, session, alias, store, opts)
         return changed
     end)
 end
+
+---@param session Session
+---@param alias string
+---@param store ManagedStore|nil
+---@param opts PackedDropdownOpts|PackedRadioOpts|nil
+---@return string|nil selectedAlias
+function WidgetFns.getPackedChoiceAlias(session, alias, store, opts)
+    opts = opts or {}
+    local children = helpers.ResolvePackedChildren(session, alias, store)
+    local selection = helpers.ClassifyPackedChoice(opts, children)
+    return selection.selectedChild and selection.selectedChild.alias or nil
+end

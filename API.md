@@ -707,6 +707,7 @@ Built-ins:
 - `lib.widgets.dropdown(imgui, session, alias, opts?)`
 - `lib.widgets.mappedDropdown(imgui, session, alias, opts?)`
 - `lib.widgets.packedDropdown(imgui, session, alias, store, opts?)`
+- `lib.widgets.getPackedChoiceAlias(session, alias, store, opts?)`
 - `lib.widgets.radio(imgui, session, alias, opts?)`
 - `lib.widgets.mappedRadio(imgui, session, alias, opts?)`
 - `lib.widgets.packedRadio(imgui, session, alias, store, opts?)`
@@ -716,6 +717,8 @@ Built-ins:
 - `lib.widgets.packedCheckboxList(imgui, session, alias, store, opts?)`
 
 These are direct immediate-mode helpers.
+
+`getPackedChoiceAlias(...)` returns the selected child alias for packed dropdown/radio use cases, or `nil` when the current choice is none or multiple. It uses the same `selectionMode` option as `packedDropdown(...)` and `packedRadio(...)`.
 
 ## `lib.imguiHelpers`
 

@@ -753,6 +753,14 @@ end
 function lib.widgets.packedDropdown(imgui, session, alias, store, opts)
 end
 
+---@param session AdamantModpackLib.Session
+---@param alias string
+---@param store AdamantModpackLib.ManagedStore?
+---@param opts? AdamantModpackLib.PackedDropdownOpts|AdamantModpackLib.PackedRadioOpts
+---@return string? selectedAlias Selected child alias when exactly one packed choice is active; otherwise `nil`.
+function lib.widgets.getPackedChoiceAlias(session, alias, store, opts)
+end
+
 ---@param imgui table
 ---@param session AdamantModpackLib.Session
 ---@param alias string
