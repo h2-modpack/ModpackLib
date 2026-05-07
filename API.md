@@ -30,7 +30,7 @@ Modules declare:
 - `definition.modpack`
 - `definition.id`
 - `definition.name`
-- `definition.storage`
+- optional `definition.storage`
 - optional mutation lifecycle fields:
   - `affectsRunData`
   - `patchPlan`
@@ -97,7 +97,7 @@ Rules:
 - integration ids should describe domain behavior, not consumer names
 - absence means the optional enhancement is inactive
 - provider APIs should be safe to call when their module is disabled
-- consumers should prefer `invoke(...)` so Lib resolves current provider behavior at call time
+- consumers should prefer `invoke(...)` so Lib resolves active provider behavior at call time
 - when multiple providers exist, `get(id)` returns the most recently registered provider
 
 ## `lib.gameObject`
@@ -131,15 +131,18 @@ Rules:
 
 ## Store And Session
 
-### `lib.prepareDefinition(owner, dataDefaultsOrDefinition, definition?)`
+### `lib.prepareDefinition(owner, definition)`
 
 Creates the canonical definition object for a module from a raw authored definition table.
 
 What it does:
 - clones the authored definition into a Lib-owned table
-- hydrates missing persistent storage defaults from `dataDefaults` when provided
 - validates top-level definition keys and types
 - prepares `definition.storage` metadata for later `createStore(...)` use
+- injects Lib-owned built-in storage aliases:
+  - `Enabled`
+  - `DebugMode`
+- requires persisted storage roots to have explicit effective defaults in the storage declaration
 - preserves optional `definition.hashGroupPlan` hash-compaction hints as structural contract data
 - records a structural fingerprint on the persistent `owner` table when provided
 - warns and marks `owner.requiresFullReload = true` when a later hot reload changes structural definition shape
@@ -164,23 +167,13 @@ do not trigger a structural reload warning.
 Typical use:
 
 ```lua
-local definition = lib.prepareDefinition(internal, dataDefaults, {
+local definition = lib.prepareDefinition(internal, {
     modpack = PACK_ID,
     id = "ExampleModule",
     name = "Example Module",
-    storage = internal.BuildStorage(dataDefaults),
+    storage = internal.BuildStorage(),
     hashGroupPlan = internal.BuildHashGroupPlan(),
     patchPlan = internal.BuildPatchPlan,
-})
-```
-
-When a module does not need `dataDefaults`, the two-argument form is still valid:
-
-```lua
-local definition = lib.prepareDefinition(internal, {
-    id = "ExampleModule",
-    name = "Example Module",
-    storage = internal.BuildStorage(),
 })
 ```
 
@@ -209,8 +202,6 @@ Rules:
 ### `lib.createStore(config, definition)`
 
 Creates the managed store facade around persisted module config.
-`definition.storage` is required.
-
 What it does:
 - warns on malformed top-level definition fields
 - validates and prepares `definition.storage`
@@ -229,7 +220,7 @@ Ownership rule: `store` and `session` are a matched pair created for one prepare
 call with a session from another. Recreate the pair together on module reload.
 
 Returned surface:
-- `store.read(keyOrAlias)`
+- `store.read(alias)`
 - `store.getRuntimeState()`
 
 Persisted writes happen through semantic helpers or session flushes:
@@ -241,27 +232,32 @@ lib.lifecycle.setDebugMode(store, enabled)
 
 Use `setEnabled` for module enabled toggles. It persists the `Enabled` flag and applies/reverts mutation state as needed. Use `setDebugMode` for module debug toggles. Module/host plumbing can use `session.write(...)` plus `session._flushToConfig()` for immediate persisted writes such as profile/hash import. Ordinary draw-code edits stay staged and commit through the host/framework flow.
 
+`Enabled` and `DebugMode` are ordinary prepared storage aliases injected by Lib.
+Do not declare them in module storage or module `config.lua`.
+`Enabled` is the module behavior toggle. Framework serializes it through the
+module-level hash key. `DebugMode` is diagnostic-only and has `hash = false`.
+
 Rules:
 - keep each `store, session` pair together for its lifetime
 - widgets and draw code should usually read staged values from `session.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
-- module-owned runtime markers declared with `runtime = true` should write through `store.getRuntimeState()`
+- module-owned runtime markers declared with `stage = false, hash = false` should write through `store.getRuntimeState()`
 - enabled toggles should write through `lib.lifecycle.setEnabled(def, store, enabled)`
 - debug toggles should write through `lib.lifecycle.setDebugMode(store, enabled)`
 - profile/hash plumbing should stage values through `session.write(...)` and flush them through `session._flushToConfig()`
 - transient aliases are read from `session`
-- transient aliases stay out of persisted config
-- runtime aliases are excluded from session, hash, profile, and reset-to-defaults surfaces
+- transient aliases declare `persist = false, hash = false` and stay out of persisted config
+- runtime-cache aliases declare `stage = false, hash = false` and are excluded from session, hash, profile, and reset-to-defaults surfaces
 
-Runtime-only persisted storage is declared on ordinary storage nodes:
+Persistent runtime cache storage is declared on ordinary storage nodes:
 
 ```lua
 {
     type = "bool",
     alias = "BatchRecordingArmed",
-    configKey = "BatchRecordingArmed",
     default = false,
-    runtime = true,
+    stage = false,
+    hash = false,
 }
 ```
 
@@ -273,7 +269,28 @@ runtime.write("BatchRecordingArmed", true)
 local armed = runtime.read("BatchRecordingArmed") == true
 ```
 
-`runtime.write(alias, value)` only accepts aliases declared with `runtime = true`.
+`runtime.write(alias, value)` only accepts aliases declared with `stage = false`.
+
+Aliases are direct flat storage identifiers. Managed storage reads and writes the
+declared alias key directly; future composite storage should own any generated
+backing keys internally.
+
+Storage axis defaults:
+
+| Declaration | Persisted config | Session/staged UI | Hash/profile |
+| --- | --- | --- | --- |
+| omitted flags | yes | yes | yes |
+| `persist = false, hash = false` | no | yes | no |
+| `stage = false, hash = false` | yes | no | no |
+| `hash = false` | yes | yes | no |
+
+Invalid combinations currently warn during storage validation:
+- `hash = true` requires `persist = true`
+- `hash = true` requires `stage = true`
+
+Reserved aliases:
+- `Enabled`
+- `DebugMode`
 
 ### `session`
 
@@ -306,7 +323,7 @@ Behavior:
 - packed child aliases re-encode their owning packed root automatically
 
 `session.read(alias)` returns:
-- current staged value
+- staged value
 
 ## Reset Helpers
 
@@ -388,12 +405,12 @@ Overlay visibility has two layers:
 - Lib-hosted ImGui configuration windows acquire a UI suppression token while
   open. Any active token hides the entire overlay layer until released.
 
-When the global gate is closed, lib hides all retained overlay components even if their own `visible` callback returns true. Text callbacks may still be refreshed so the display is current when the game HUD returns.
+When the global gate is closed, lib hides all retained overlay components even if their own `visible` callback returns true. Text callbacks may still be refreshed so the display is fresh when the game HUD returns.
 
 Framework and standalone module UIs use this gate so configuration UI and
 gameplay overlays are mutually exclusive on screen.
 
-Current managed region:
+Managed region:
 - `middleRightStack`: a right-anchored vertical stack used for framework markers and module status text.
 
 Order bands:
@@ -464,15 +481,16 @@ Hash/profile serialization and packed-bit helpers.
 
 ### `lib.hashing.getRoots(storage)`
 
-Returns prepared persisted root nodes for hash/profile serialization.
+Returns prepared root nodes that participate in hash/profile serialization.
 
 ### `lib.hashing.getAliases(storage)`
 
 Returns the prepared alias map.
 
 Includes:
-- persisted root aliases
-- transient root aliases
+- hash/profile root aliases
+- non-hash staged aliases
+- runtime-cache aliases
 - packed child aliases
 
 ### `lib.hashing.valuesEqual(node, a, b)`
@@ -622,9 +640,9 @@ Returned surface:
 - `host.affectsRunData()`
 - `host.getHashHints()`
 - `host.getStorage()`
-- `host.read(aliasOrKey)`
-- `host.writeAndFlush(aliasOrKey, value)`
-- `host.stage(aliasOrKey, value)`
+- `host.read(alias)`
+- `host.writeAndFlush(alias, value)`
+- `host.stage(alias, value)`
 - `host.flush()`
 - `host.reloadFromConfig()`
 - `host.resync()`
@@ -718,7 +736,7 @@ Built-ins:
 
 These are direct immediate-mode helpers.
 
-`getPackedChoiceAlias(...)` returns the selected child alias for packed dropdown/radio use cases, or `nil` when the current choice is none or multiple. It uses the same `selectionMode` option as `packedDropdown(...)` and `packedRadio(...)`.
+`getPackedChoiceAlias(...)` returns the selected child alias for packed dropdown/radio use cases, or `nil` when the selected choice is none or multiple. It uses the same `selectionMode` option as `packedDropdown(...)` and `packedRadio(...)`.
 
 ## `lib.imguiHelpers`
 

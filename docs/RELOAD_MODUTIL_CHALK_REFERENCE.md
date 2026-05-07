@@ -420,7 +420,6 @@ Because after the milestone is already reached, `once_loaded.*` executes immedia
 ## 6. Recreate runtime wrappers from persisted config on reload
 
 Good pattern:
-- `local dataDefaults = import("config.lua")`
 - `config = chalk.auto(...)`
 - recreate `store, session = lib.createStore(config, definition)`
 - recreate module/framework derived state

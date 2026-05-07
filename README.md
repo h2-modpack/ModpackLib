@@ -17,7 +17,7 @@ The library is designed around immediate-mode UI. Module authors write normal
 draw functions, then expose them through a module host:
 
 ```lua
-local definition = lib.prepareDefinition(internal, dataDefaults, {
+local definition = lib.prepareDefinition(internal, {
     ...
 })
 

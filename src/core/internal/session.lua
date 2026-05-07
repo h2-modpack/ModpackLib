@@ -1,8 +1,6 @@
 local internal = AdamantModpackLib_Internal
 local storageInternal = internal.storage
 local storeInternal = internal.store
-local readNestedPath = storeInternal.readNestedPath
-local writeNestedPath = storeInternal.writeNestedPath
 local ClonePersistedValue = storeInternal.ClonePersistedValue
 local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 
@@ -11,8 +9,7 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@param storage StorageSchema
 ---@return Session
 function internal.store.createSession(modConfig, configBackend, storage)
-    local persistedRootNodes = storageInternal.getRoots(storage)
-    local transientRootNodes = type(storage) == "table" and (rawget(storage, "_transientRootNodes") or {}) or {}
+    local stageRootNodes = storageInternal.getStageRoots(storage)
     local aliasNodes = storageInternal.getAliases(storage)
     local staging = {}
     local dirty = false
@@ -20,28 +17,36 @@ function internal.store.createSession(modConfig, configBackend, storage)
     local configEntries = {}
 
     if configBackend then
-        for _, root in ipairs(persistedRootNodes) do
-            configEntries[root.alias] = configBackend.getEntry(root.configKey)
+        for _, root in ipairs(stageRootNodes) do
+            if root._persist then
+                configEntries[root.alias] = configBackend.getEntry(root._storageKey)
+            end
         end
     else
         configEntries = nil
     end
 
     local function readConfigValue(root)
+        if not root._persist then
+            return nil
+        end
         local entry = configEntries and configEntries[root.alias] or nil
         if entry then
             return entry:get()
         end
-        return readNestedPath(modConfig, root.configKey)
+        return modConfig[root._storageKey]
     end
 
     local function writeConfigValue(root, value)
+        if not root._persist then
+            return
+        end
         local entry = configEntries and configEntries[root.alias] or nil
         if entry then
             entry:set(value)
             return
         end
-        writeNestedPath(modConfig, root.configKey, value)
+        modConfig[root._storageKey] = value
     end
 
     local function syncPackedChildren(root, packedValue)
@@ -64,14 +69,14 @@ function internal.store.createSession(modConfig, configBackend, storage)
         if root.type == "packedInt" then
             syncPackedChildren(root, normalized)
         end
-        if root._lifetime ~= "transient" then
+        if root._persist then
             dirtyRoots[root.alias] = true
             dirty = true
         end
         return true
     end
 
-    local function loadPersistedRootIntoStaging(root)
+    local function loadStageRootIntoStaging(root)
         local value = readConfigValue(root)
         if value == nil then
             value = ClonePersistedValue(root.default)
@@ -83,25 +88,14 @@ function internal.store.createSession(modConfig, configBackend, storage)
         end
     end
 
-    local function loadTransientRootIntoStaging(root)
-        local value = ClonePersistedValue(root.default)
-        staging[root.alias] = NormalizeStorageValue(root, value)
-    end
-
     local function copyConfigToStaging()
-        for _, root in ipairs(persistedRootNodes) do
-            loadPersistedRootIntoStaging(root)
-        end
-    end
-
-    local function resetTransientToDefaults()
-        for _, root in ipairs(transientRootNodes) do
-            loadTransientRootIntoStaging(root)
+        for _, root in ipairs(stageRootNodes) do
+            loadStageRootIntoStaging(root)
         end
     end
 
     local function copyStagingToConfig()
-        for _, root in ipairs(persistedRootNodes) do
+        for _, root in ipairs(stageRootNodes) do
             if dirtyRoots[root.alias] then
                 writeConfigValue(root, staging[root.alias])
             end
@@ -110,7 +104,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
 
     local function captureDirtyConfigSnapshot()
         local snapshot = {}
-        for _, root in ipairs(persistedRootNodes) do
+        for _, root in ipairs(stageRootNodes) do
             if dirtyRoots[root.alias] then
                 table.insert(snapshot, {
                     root = root,
@@ -146,8 +140,8 @@ function internal.store.createSession(modConfig, configBackend, storage)
 
     local function readStagingValue(alias)
         local node = aliasNodes[alias]
-        if node and node._runtime == true then
-            internal.libWarnIf("session.read: alias '%s' is runtime-only; use store.getRuntimeState()", tostring(alias))
+        if node and not node._stage then
+            internal.libWarnIf("session.read: alias '%s' is not staged; use store.getRuntimeState()", tostring(alias))
             return nil
         end
         return staging[alias]
@@ -159,19 +153,15 @@ function internal.store.createSession(modConfig, configBackend, storage)
             internal.libWarnIf("session.write: unknown alias '%s'; value will not be persisted", tostring(alias))
             return
         end
-        if node._runtime == true then
-            error(string.format("session.write: alias '%s' is runtime-only; use store.getRuntimeState()", tostring(alias)), 2)
+        if not node._stage then
+            error(string.format("session.write: alias '%s' is not staged; use store.getRuntimeState()", tostring(alias)), 2)
         end
 
         if node._isBitAlias then
             local parent = node.parent
             local packedValue = staging[parent.alias]
             if packedValue == nil then
-                if parent._lifetime == "transient" then
-                    loadTransientRootIntoStaging(parent)
-                else
-                    loadPersistedRootIntoStaging(parent)
-                end
+                loadStageRootIntoStaging(parent)
                 packedValue = staging[parent.alias]
             end
             local normalized = NormalizeStorageValue(node, value)
@@ -204,7 +194,6 @@ function internal.store.createSession(modConfig, configBackend, storage)
     end
 
     copyConfigToStaging()
-    resetTransientToDefaults()
     clearDirty()
 
     return {
@@ -220,7 +209,6 @@ function internal.store.createSession(modConfig, configBackend, storage)
         end,
         _reloadFromConfig = function()
             copyConfigToStaging()
-            resetTransientToDefaults()
             clearDirty()
         end,
         _flushToConfig = function()
@@ -234,7 +222,10 @@ function internal.store.createSession(modConfig, configBackend, storage)
         end,
         auditMismatches = function()
             local mismatches = {}
-            for _, root in ipairs(persistedRootNodes) do
+            for _, root in ipairs(stageRootNodes) do
+                if not root._persist then
+                    goto continue_root
+                end
                 local persistedValue = readConfigValue(root)
                 if persistedValue == nil then
                     persistedValue = ClonePersistedValue(root.default)
@@ -255,6 +246,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
                         end
                     end
                 end
+                ::continue_root::
             end
             return mismatches
         end,

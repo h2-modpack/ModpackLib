@@ -12,28 +12,18 @@ end
 
 function TestStorageValidation:testDuplicateAliasWarns()
     AdamantModpackLib_Internal.storage.validate({
-        { type = "bool", alias = "Flag", configKey = "FlagA", default = false },
-        { type = "bool", alias = "Flag", configKey = "FlagB", default = false },
+        { type = "bool", alias = "Flag", default = false },
+        { type = "bool", alias = "Flag", default = false },
     }, "DuplicateAlias")
 
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "duplicate alias 'Flag'")
 end
 
-function TestStorageValidation:testDuplicateConfigKeyWarns()
-    AdamantModpackLib_Internal.storage.validate({
-        { type = "bool", alias = "FlagA", configKey = "Shared", default = false },
-        { type = "bool", alias = "FlagB", configKey = "Shared", default = false },
-    }, "DuplicateKey")
-
-    lu.assertEquals(#Warnings, 1)
-    lu.assertStrContains(Warnings[1], "duplicate configKey 'Shared'")
-end
-
 function TestStorageValidation:testTransientRootRegistersAliasButNotPersistedRoots()
     local storage = {
-        { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
-        { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+        { type = "bool", alias = "Enabled", default = false },
+        { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
     }
 
     AdamantModpackLib_Internal.storage.validate(storage, "TransientRoot")
@@ -44,28 +34,28 @@ function TestStorageValidation:testTransientRootRegistersAliasButNotPersistedRoo
     lu.assertEquals(#Warnings, 0)
 end
 
-function TestStorageValidation:testRuntimeRootRegistersAliasButNotHashRoot()
+function TestStorageValidation:testRuntimeCacheRootRegistersAliasButNotHashRoot()
     local storage = {
-        { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
-        { type = "bool", alias = "RecordingArmed", configKey = "RecordingArmed", default = false, runtime = true },
+        { type = "bool", alias = "Enabled", default = false },
+        { type = "bool", alias = "RecordingArmed", default = false, stage = false, hash = false },
     }
 
-    AdamantModpackLib_Internal.storage.validate(storage, "RuntimeRoot")
+    AdamantModpackLib_Internal.storage.validate(storage, "RuntimeCacheRoot")
 
     lu.assertEquals(#lib.hashing.getRoots(storage), 1)
     lu.assertEquals(lib.hashing.getRoots(storage)[1].alias, "Enabled")
     lu.assertNotNil(lib.hashing.getAliases(storage).RecordingArmed)
-    lu.assertEquals(#AdamantModpackLib_Internal.storage.getRuntimeRoots(storage), 1)
+    lu.assertEquals(#AdamantModpackLib_Internal.storage.getRuntimeCacheRoots(storage), 1)
     lu.assertEquals(#Warnings, 0)
 end
 
 function TestStorageValidation:testRuntimePackedIntWarns()
     AdamantModpackLib_Internal.storage.validate({
-        { type = "packedInt", alias = "RuntimePacked", configKey = "RuntimePacked", runtime = true },
+        { type = "packedInt", alias = "RuntimePacked", stage = false, hash = false },
     }, "RuntimePacked")
 
     lu.assertEquals(#Warnings, 1)
-    lu.assertStrContains(Warnings[1], "runtime packedInt roots are not supported")
+    lu.assertStrContains(Warnings[1], "stage=false packedInt roots are not supported")
 end
 
 function TestStorageValidation:testPackedIntDerivesChildAliasesAndDefault()
@@ -73,7 +63,6 @@ function TestStorageValidation:testPackedIntDerivesChildAliasesAndDefault()
         {
             type = "packedInt",
             alias = "Packed",
-            configKey = "Packed",
             bits = {
                 { alias = "EnabledBit", offset = 0, width = 1, type = "bool", default = true },
                 { alias = "ModeBits", offset = 1, width = 2, type = "int", default = 2 },
@@ -90,7 +79,7 @@ function TestStorageValidation:testPackedIntDerivesChildAliasesAndDefault()
 end
 
 function TestStorageValidation:testBoolStorageRoundTripsHash()
-    local node = { type = "bool", alias = "Enabled", configKey = "Enabled", default = false }
+    local node = { type = "bool", alias = "Enabled", default = false }
     local storage = { node }
     AdamantModpackLib_Internal.storage.validate(storage, "BoolHash")
 
@@ -103,9 +92,9 @@ function TestStorageValidation:testResetSessionToDefaultsResetsChangedPersistent
     local config = { Flag = true, Count = 3, Filter = "ignored" }
     local definition = lib.prepareDefinition({}, {
         storage = {
-            { type = "bool", alias = "Flag", configKey = "Flag", default = false },
-            { type = "int", alias = "Count", configKey = "Count", default = 1, min = 0, max = 5 },
-            { type = "string", alias = "Filter", lifetime = "transient", default = "", maxLen = 32 },
+            { type = "bool", alias = "Flag", default = false },
+            { type = "int", alias = "Count", default = 1, min = 0, max = 5 },
+            { type = "string", alias = "Filter", persist = false, hash = false, default = "", maxLen = 32 },
         },
     })
     local _, session = lib.createStore(config, definition)
@@ -124,8 +113,8 @@ function TestStorageValidation:testResetSessionToDefaultsCanExcludeAliases()
     local config = { Flag = true, ViewRegion = "Surface" }
     local definition = lib.prepareDefinition({}, {
         storage = {
-            { type = "bool", alias = "Flag", configKey = "Flag", default = false },
-            { type = "string", alias = "ViewRegion", configKey = "ViewRegion", default = "Underworld" },
+            { type = "bool", alias = "Flag", default = false },
+            { type = "string", alias = "ViewRegion", default = "Underworld" },
         },
     })
     local _, session = lib.createStore(config, definition)

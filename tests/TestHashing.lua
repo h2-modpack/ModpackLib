@@ -4,15 +4,14 @@ TestHashing = {}
 
 local function prepareStorage()
     local storage = {
-        { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
-        { type = "int", alias = "Count", configKey = "Count", default = 1, min = 0, max = 7 },
-        { type = "string", alias = "Name", configKey = "Name", default = "A", maxLen = 32 },
-        { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 32 },
-        { type = "bool", alias = "RecordingArmed", configKey = "RecordingArmed", default = false, runtime = true },
+        { type = "bool", alias = "EnabledFlag", default = false },
+        { type = "int", alias = "Count", default = 1, min = 0, max = 7 },
+        { type = "string", alias = "Name", default = "A", maxLen = 32 },
+        { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 32 },
+        { type = "bool", alias = "RecordingArmed", default = false, stage = false, hash = false },
         {
             type = "packedInt",
             alias = "Packed",
-            configKey = "Packed",
             bits = {
                 { alias = "EnabledBit", offset = 0, width = 1, type = "bool", default = true },
                 { alias = "ModeBits", offset = 1, width = 2, type = "int", default = 2, min = 0, max = 3 },

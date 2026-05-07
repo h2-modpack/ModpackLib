@@ -260,7 +260,7 @@ Module reload replaces the module's live host surface. Framework snapshots that 
 Best-effort infrastructure development path.
 
 Persistent Lib registries survive Lib reload, and Core late-reads Framework
-callbacks. Existing module hosts may still close over old Lib implementation
+callbacks. Existing module hosts may still close over prior Lib implementation
 closures until the owning module reloads. Coordinator/Core must re-call
 `Framework.init(params)` to rebuild Framework pack state after Framework changes.
 Use a full process restart as the correctness boundary for infrastructure

@@ -5,7 +5,6 @@
 local lib = {}
 
 ---@alias AdamantModpackLib.Color number[]
----@alias AdamantModpackLib.ConfigPath string|string[]
 ---@alias AdamantModpackLib.ChoiceValue any
 ---@alias AdamantModpackLib.ChoiceDisplayValues table<any, string>
 ---@alias AdamantModpackLib.ValueColorMap table<any, AdamantModpackLib.Color>
@@ -23,13 +22,13 @@ local lib = {}
 
 ---@class AdamantModpackLib.StorageNode
 ---@field type "bool"|"int"|"string"|"packedInt"
----@field alias? string Public alias used by store/session/widget APIs.
----@field configKey? AdamantModpackLib.ConfigPath Backing persisted config key/path.
+---@field alias string Public alias used by store/session/widget APIs and as the persisted backing key.
 ---@field label? string UI label.
 ---@field tooltip? string UI tooltip.
 ---@field default? any Default value for this storage node.
----@field lifetime? "persisted"|"transient" Storage lifetime; omitted means persisted.
----@field runtime? boolean Persisted runtime-only state excluded from session/hash/profile surfaces.
+---@field persist? boolean Whether the alias persists through config; defaults true.
+---@field stage? boolean Whether the alias participates in staged session UI; defaults true.
+---@field hash? boolean Whether the alias participates in hash/profile surfaces; defaults true.
 ---@field visibleIf? string|AdamantModpackLib.VisibilityCondition Visibility condition used by UI helpers.
 ---@field min? number Integer lower bound.
 ---@field max? number Integer upper bound.
@@ -51,7 +50,7 @@ local lib = {}
 ---@alias AdamantModpackLib.StorageSchema AdamantModpackLib.StorageNode[]
 
 ---@class AdamantModpackLib.ManagedStore
----@field read fun(keyOrAlias: AdamantModpackLib.ConfigPath): any
+---@field read fun(alias: string): any
 ---@field getRuntimeState fun(): AdamantModpackLib.RuntimeState
 
 ---@class AdamantModpackLib.RuntimeState
@@ -109,9 +108,9 @@ local lib = {}
 ---@field affectsRunData fun(): boolean
 ---@field getHashHints fun(): AdamantModpackLib.HashGroupPlan?
 ---@field getStorage fun(): AdamantModpackLib.StorageSchema?
----@field read fun(aliasOrKey: AdamantModpackLib.ConfigPath): any
----@field writeAndFlush fun(aliasOrKey: AdamantModpackLib.ConfigPath, value: any): boolean
----@field stage fun(aliasOrKey: AdamantModpackLib.ConfigPath, value: any): boolean
+---@field read fun(alias: string): any
+---@field writeAndFlush fun(alias: string, value: any): boolean
+---@field stage fun(alias: string, value: any): boolean
 ---@field flush fun(): boolean
 ---@field reloadFromConfig fun()
 ---@field resync fun(): string[]
@@ -839,12 +838,10 @@ end
 ---@type AdamantModpackLib.Config
 lib.config = {}
 
----@overload fun(owner: table?, definition: AdamantModpackLib.ModuleDefinition): AdamantModpackLib.PreparedDefinition
 ---@param owner table?
----@param dataDefaults table|AdamantModpackLib.ModuleDefinition
----@param definition? AdamantModpackLib.ModuleDefinition
+---@param definition AdamantModpackLib.ModuleDefinition
 ---@return AdamantModpackLib.PreparedDefinition definition
-function lib.prepareDefinition(owner, dataDefaults, definition)
+function lib.prepareDefinition(owner, definition)
 end
 
 ---@param modConfig table

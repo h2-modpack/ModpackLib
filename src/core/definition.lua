@@ -22,6 +22,16 @@ local KnownDefinitionKeys = {
 
 definitionInternal.KnownKeys = KnownDefinitionKeys
 
+local BuiltInStorageNodes = {
+    { type = "bool", alias = "Enabled", default = false },
+    { type = "bool", alias = "DebugMode", default = false, hash = false },
+}
+
+local BuiltInStorageAliases = {
+    Enabled = true,
+    DebugMode = true,
+}
+
 local function CompareKeys(a, b)
     local typeA = type(a)
     local typeB = type(b)
@@ -165,30 +175,39 @@ function definitionInternal.getStructuralFingerprint(definition)
     return SerializeStructuralValue(structuralState)
 end
 
-function definitionInternal.prepare(owner, dataDefaultsOrDefinition, definitionOrNil)
+local function InjectBuiltInStorage(definition, label)
+    if definition.storage == nil then
+        definition.storage = {}
+    end
+    assert(type(definition.storage) == "table",
+        string.format("%s: definition.storage must be a table", label))
+
+    for _, node in ipairs(definition.storage) do
+        assert(not BuiltInStorageAliases[node.alias],
+            string.format("%s: storage alias '%s' is reserved by Lib", label, tostring(node.alias)))
+    end
+
+    for index = #BuiltInStorageNodes, 1, -1 do
+        table.insert(definition.storage, 1, values.deepCopy(BuiltInStorageNodes[index]))
+    end
+end
+
+function definitionInternal.prepare(owner, definition, ...)
+    assert(select("#", ...) == 0,
+        "prepareDefinition: pass storage defaults on definition.storage nodes, not as a separate argument")
     assert(owner == nil or type(owner) == "table",
         "prepareDefinition: owner must be a table when provided")
-    local dataDefaults = nil
-    local definition = dataDefaultsOrDefinition
-    if definitionOrNil ~= nil then
-        dataDefaults = dataDefaultsOrDefinition
-        definition = definitionOrNil
-    end
     assert(type(definition) == "table", "prepareDefinition: definition must be a table")
 
     local prepared = values.deepCopy(definition)
     local label = definitionInternal.getLabel(prepared)
-
-    if type(prepared.storage) == "table" then
-        storageInternal.hydrateDefaults(prepared.storage, dataDefaults)
-    end
+    InjectBuiltInStorage(prepared, label)
 
     if internal.libConfig.DebugMode == true then
         definitionInternal.validate(prepared, label)
     end
-    if type(prepared.storage) == "table" then
-        storageInternal.validate(prepared.storage, label)
-    end
+    storageInternal.validate(prepared.storage, label)
+    storageInternal.assertPersistedDefaults(prepared.storage, label)
 
     local inferredMutationShape, mutationInfo = mutationInternal.inferMutation(prepared)
     assert(not (prepared.affectsRunData == true and not inferredMutationShape),
@@ -222,6 +241,6 @@ function definitionInternal.prepare(owner, dataDefaultsOrDefinition, definitionO
     return prepared
 end
 
-function public.prepareDefinition(owner, dataDefaultsOrDefinition, definitionOrNil)
-    return definitionInternal.prepare(owner, dataDefaultsOrDefinition, definitionOrNil)
+function public.prepareDefinition(owner, definition, ...)
+    return definitionInternal.prepare(owner, definition, ...)
 end

@@ -30,18 +30,16 @@ Use the namespaced API directly.
 Typical coordinated module:
 
 ```lua
-local dataDefaults = import("config.lua")
-
-local definition = lib.prepareDefinition(internal, dataDefaults, {
+local definition = lib.prepareDefinition(internal, {
     modpack = PACK_ID,
     id = "ExampleModule",
     name = "Example Module",
     tooltip = "What this module does.",
     affectsRunData = false,
     storage = {
-        { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
-        { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 32 },
-        { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+        { type = "bool", alias = "EnabledFlag", default = false },
+        { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+        { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
     },
 })
 
@@ -108,7 +106,9 @@ Coordinated modules should declare:
 - `modpack`
 - `id`
 - `name`
-- `storage`
+
+Modules with no custom settings may omit `storage`; Lib injects built-in
+`Enabled` and `DebugMode` aliases during preparation.
 
 Framework behavior:
 - every coordinated module gets its own tab
@@ -148,22 +148,42 @@ Use `store.read(...)` from runtime/gameplay code for persisted values. Use `sess
 ### Persisted roots
 
 ```lua
-{ type = "bool", alias = "Enabled", configKey = "Enabled", default = false }
-{ type = "int", alias = "Count", configKey = "Count", default = 3, min = 1, max = 9 }
-{ type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 32 }
+{ type = "int", alias = "Count", default = 3, min = 1, max = 9 }
+{ type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 }
 ```
 
 ### Transient roots
 
 ```lua
-{ type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 }
+{ type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 }
 ```
 
 Rules:
-- persisted roots use `configKey`
-- transient roots use `lifetime = "transient"`
-- `configKey` and `lifetime` are mutually exclusive
-- transient roots are excluded from hash/profile serialization
+- `alias` is the store/session key and persisted backing key
+- aliases are direct flat storage identifiers
+- normal roots persist, stage, and hash by default
+- `persist = false` roots are session-only
+- `stage = false` roots use `store.getRuntimeState()`
+- `hash = false` roots are excluded from hash/profile serialization
+- `hash = true` requires both `persist = true` and `stage = true`
+
+Lib injects these built-in aliases into every prepared definition:
+
+| Alias | Declaration | Purpose |
+| --- | --- | --- |
+| `Enabled` | `{ type = "bool", alias = "Enabled", default = false }` | Module behavior toggle |
+| `DebugMode` | `{ type = "bool", alias = "DebugMode", default = false, hash = false }` | Diagnostic toggle |
+
+Do not declare `Enabled` or `DebugMode` in module storage or `config.lua`.
+
+Common shapes:
+
+| Declaration | Use case |
+| --- | --- |
+| omitted flags | ordinary persisted module setting |
+| `persist = false, hash = false` | transient UI state such as filters or active tabs |
+| `stage = false, hash = false` | persistent runtime cache read through `store.getRuntimeState()` |
+| `hash = false` | persisted UI preference that should not affect profiles or shared hashes |
 
 ### Packed storage
 
@@ -173,7 +193,6 @@ Use `packedInt` when you need alias-addressable packed children:
 {
     type = "packedInt",
     alias = "PackedAphrodite",
-    configKey = "PackedAphrodite",
     bits = {
         { alias = "AttackBanned", offset = 0, width = 1, type = "bool", default = false },
         { alias = "RarityOverride", offset = 1, width = 2, type = "int", default = 0 },
@@ -354,7 +373,6 @@ local reload = mods["SGG_Modding-ReLoad"]
 ---@type AdamantModpackLib
 lib = mods["adamant-ModpackLib"]
 
-local dataDefaults = import("config.lua")
 local config = chalk.auto("config.lua")
 
 local PACK_ID = "example-pack"
@@ -376,7 +394,7 @@ internal.standaloneUi = nil
 local function init()
     import_as_fallback(rom.game)
 
-    local definition = lib.prepareDefinition(internal, dataDefaults, {
+    local definition = lib.prepareDefinition(internal, {
         modpack = PACK_ID,
         id = "ExampleModule",
         name = "Example Module",
@@ -384,13 +402,12 @@ local function init()
         tooltip = "Demonstrates the Lib module contract.",
         affectsRunData = false,
         storage = {
-            { type = "bool", alias = "FeatureEnabled", configKey = "FeatureEnabled", default = false },
-            { type = "string", alias = "Mode", configKey = "Mode", default = "Vanilla", maxLen = 32 },
-            { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+            { type = "bool", alias = "FeatureEnabled", default = false },
+            { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+            { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
             {
                 type = "packedInt",
                 alias = "PackedFlags",
-                configKey = "PackedFlags",
                 default = 0,
                 bits = {
                     { alias = "PackedFlags_Attack", label = "Attack", type = "bool", offset = 0, width = 1, default = false },

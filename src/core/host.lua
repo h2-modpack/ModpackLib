@@ -27,9 +27,9 @@ local internal = AdamantModpackLib_Internal
 ---@field affectsRunData fun(): boolean
 ---@field getHashHints fun(): table|nil
 ---@field getStorage fun(): StorageSchema|nil
----@field read fun(aliasOrKey: ConfigPath): any
----@field writeAndFlush fun(aliasOrKey: ConfigPath, value: any): boolean
----@field stage fun(aliasOrKey: ConfigPath, value: any): boolean
+---@field read fun(alias: string): any
+---@field writeAndFlush fun(alias: string, value: any): boolean
+---@field stage fun(alias: string, value: any): boolean
 ---@field flush fun(): boolean
 ---@field reloadFromConfig fun()
 ---@field resync fun(): string[]
@@ -124,18 +124,18 @@ function public.createModuleHost(opts)
         return def.storage
     end
 
-    function host.read(aliasOrKey)
-        return store.read(aliasOrKey)
+    function host.read(alias)
+        return store.read(alias)
     end
 
-    function host.writeAndFlush(aliasOrKey, value)
-        session.write(aliasOrKey, value)
+    function host.writeAndFlush(alias, value)
+        session.write(alias, value)
         session._flushToConfig()
         return public.lifecycle.notifySettingsCommitted(def, store)
     end
 
-    function host.stage(aliasOrKey, value)
-        session.write(aliasOrKey, value)
+    function host.stage(alias, value)
+        session.write(alias, value)
         return true
     end
 

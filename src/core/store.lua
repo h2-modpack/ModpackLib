@@ -2,9 +2,6 @@ local internal = AdamantModpackLib_Internal
 local chalk = rom.mods['SGG_Modding-Chalk']
 local storageInternal = internal.storage
 local storeInternal = internal.store
-local StorageKey = storageInternal.StorageKey
-local readNestedPath = storeInternal.readNestedPath
-local writeNestedPath = storeInternal.writeNestedPath
 local ClonePersistedValue = storeInternal.ClonePersistedValue
 local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 
@@ -14,9 +11,10 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 
 ---@class ConfigBackend
 ---@field rawConfig table
----@field getEntry fun(configKey: ConfigPath): ConfigBackendEntry|nil
----@field readValue fun(configKey: ConfigPath): any
----@field writeValue fun(configKey: ConfigPath, value: any): boolean
+---@field getEntry fun(alias: string): ConfigBackendEntry|nil
+---@field ensureValue fun(alias: string, value: any): boolean
+---@field readValue fun(alias: string): any
+---@field writeValue fun(alias: string, value: any): boolean
 
 ---@class Session
 ---@field view table<string, any>
@@ -46,7 +44,7 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@field onSettingsCommitted fun(store: ManagedStore)|nil
 
 ---@class ManagedStore
----@field read fun(keyOrAlias: ConfigPath): any
+---@field read fun(alias: string): any
 ---@field getRuntimeState fun(): RuntimeState
 
 ---@class RuntimeState
@@ -54,21 +52,6 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@field write fun(alias: string, value: any)
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })
-
-local function GetChalkSectionAndKey(configKey)
-    if type(configKey) == "table" then
-        local len = #configKey
-        if len == 0 then
-            return nil, nil
-        end
-        if len == 1 then
-            return "config", tostring(configKey[1])
-        end
-        return "config." .. table.concat(configKey, ".", 1, len - 1), tostring(configKey[len])
-    end
-    return "config", tostring(configKey)
-end
-
 ---@param config table
 ---@return ConfigBackend|nil
 local function GetConfigBackend(config)
@@ -103,34 +86,61 @@ local function GetConfigBackend(config)
     local pathEntryCache = {}
     backend = {}
 
-    function backend.getEntry(configKey)
-        local pathKey = StorageKey(configKey)
-        local cached = pathEntryCache[pathKey]
+    function backend.getEntry(alias)
+        local cached = pathEntryCache[alias]
         if cached ~= nil then
             return cached or nil
         end
 
-        local section, key = GetChalkSectionAndKey(configKey)
-        local entry = section and entryIndex[section] and entryIndex[section][key] or nil
+        local entry = entryIndex.config and entryIndex.config[alias] or nil
         if entry then
-            pathEntryCache[pathKey] = entry
+            pathEntryCache[alias] = entry
             return entry
         end
 
-        pathEntryCache[pathKey] = false
+        pathEntryCache[alias] = false
         return nil
     end
 
-    function backend.readValue(configKey)
-        local entry = backend.getEntry(configKey)
+    function backend.ensureValue(alias, value)
+        local entry = backend.getEntry(alias)
+        if entry then
+            return true
+        end
+
+        if type(alias) ~= "string" or alias == "" or type(rawConfig.bind) ~= "function" then
+            return false
+        end
+
+        entry = rawConfig:bind("config", alias, value, "")
+        if not entry then
+            return false
+        end
+
+        local sectionEntries = entryIndex.config
+        if not sectionEntries then
+            sectionEntries = {}
+            entryIndex.config = sectionEntries
+        end
+        sectionEntries[alias] = entry
+        pathEntryCache[alias] = entry
+
+        if type(rawConfig.save) == "function" then
+            rawConfig:save()
+        end
+        return true
+    end
+
+    function backend.readValue(alias)
+        local entry = backend.getEntry(alias)
         if entry then
             return entry:get()
         end
         return nil
     end
 
-    function backend.writeValue(configKey, value)
-        local entry = backend.getEntry(configKey)
+    function backend.writeValue(alias, value)
+        local entry = backend.getEntry(alias)
         if entry then
             entry:set(value)
             return true
@@ -153,42 +163,48 @@ function public.createStore(modConfig, definition)
         "createStore expects a prepared definition; call lib.prepareDefinition(...) first")
     local backend = GetConfigBackend(modConfig)
     local store = {}
-    assert(type(definition.storage) == "table",
-        "createStore expects definition.storage to be a table")
     local storage = definition.storage
     local label = tostring(definition.name or definition.id or _PLUGIN.guid or "module")
 
     storageInternal.validate(storage, label)
+    storageInternal.assertPersistedDefaults(storage, label)
 
     local aliasNodes = storageInternal.getAliases(storage)
-    local rootByKey = rawget(storage, "_rootByKey") or {}
-    local runtimeAliases = {}
-    for _, node in ipairs(storageInternal.getRuntimeRoots(storage)) do
+    local runtimeCacheAliases = {}
+    for _, node in ipairs(storageInternal.getRuntimeCacheRoots(storage)) do
         if type(node.alias) == "string" and node.alias ~= "" then
-            runtimeAliases[node.alias] = node
+            runtimeCacheAliases[node.alias] = node
         end
     end
 
-    local function readRaw(configKey)
+    local function readRaw(alias)
         local raw
         if backend then
-            raw = backend.readValue(configKey)
+            raw = backend.readValue(alias)
         end
         if raw == nil then
-            raw = readNestedPath(modConfig, configKey)
+            raw = modConfig[alias]
         end
         return raw
     end
 
-    local function writeRaw(configKey, value)
-        if backend and backend.writeValue(configKey, value) then
+    local function writeRaw(alias, value)
+        if backend and backend.writeValue(alias, value) then
             return
         end
-        writeNestedPath(modConfig, configKey, value)
+        modConfig[alias] = value
     end
 
     local function readRootNode(root)
-        local raw = readRaw(root.configKey)
+        if not root._persist then
+            local raw = rawget(root, "_runtimeValue")
+            if raw == nil then
+                raw = ClonePersistedValue(root.default)
+            end
+            return NormalizeStorageValue(root, raw)
+        end
+
+        local raw = readRaw(root._storageKey)
         if raw == nil then
             raw = ClonePersistedValue(root.default)
         end
@@ -196,22 +212,45 @@ function public.createStore(modConfig, definition)
     end
 
     local function writeRootNode(root, value)
-        writeRaw(root.configKey, NormalizeStorageValue(root, value))
+        if root._persist then
+            writeRaw(root._storageKey, NormalizeStorageValue(root, value))
+        else
+            root._runtimeValue = NormalizeStorageValue(root, value)
+        end
     end
 
-    --- Reads a persisted storage value by alias, config key, or nested config path.
-    ---@param keyOrAlias string|table Alias, config key, or nested config path to read.
+    local function ensureRootNode(root)
+        if not root._persist then
+            return
+        end
+        if readRaw(root._storageKey) ~= nil then
+            return
+        end
+
+        local value = NormalizeStorageValue(root, ClonePersistedValue(root.default))
+        if backend and backend.ensureValue(root._storageKey, value) then
+            return
+        end
+        modConfig[root._storageKey] = value
+    end
+
+    for _, root in ipairs(storageInternal.getPersistRoots(storage)) do
+        ensureRootNode(root)
+    end
+
+    --- Reads a storage value by declared alias.
+    ---@param alias string Alias to read.
     ---@return any value Resolved value, normalized through the owning storage type when applicable.
-    function store.read(keyOrAlias)
-        if type(keyOrAlias) == "string" then
-            local node = aliasNodes[keyOrAlias]
-                if node then
-                    if node._lifetime == "transient" then
-                        internal.libWarn(
-                            "store.read: alias '%s' is transient; use session for UI-only state",
-                            tostring(keyOrAlias))
-                        return nil
-                    end
+    function store.read(alias)
+        if type(alias) == "string" then
+            local node = aliasNodes[alias]
+            if node then
+                if not node._persist and node._stage then
+                    internal.libWarn(
+                        "store.read: alias '%s' is staged-only; use session for UI-only state",
+                        tostring(alias))
+                    return nil
+                end
                 if node._isBitAlias then
                     local packed = readRootNode(node.parent)
                     local rawValue = storageInternal.readPackedBits(packed, node.offset, node.width)
@@ -222,23 +261,19 @@ function public.createStore(modConfig, definition)
                 end
                 return readRootNode(node)
             end
-
-            local root = rootByKey[StorageKey(keyOrAlias)]
-            if root then
-                return readRootNode(root)
-            end
         end
-        return readRaw(keyOrAlias)
+        internal.libWarn("store.read: unknown storage alias '%s'", tostring(alias))
+        return nil
     end
 
-    local function writeStoreValue(keyOrAlias, value)
-        if type(keyOrAlias) == "string" then
-            local node = aliasNodes[keyOrAlias]
+    local function writeStoreValue(alias, value)
+        if type(alias) == "string" then
+            local node = aliasNodes[alias]
             if node then
-                if node._lifetime == "transient" then
+                if not node._persist and node._stage then
                     internal.libWarn(
-                        "internal.store.writePersisted: alias '%s' is transient; use session for UI-only state",
-                        tostring(keyOrAlias))
+                        "internal.store.writePersisted: alias '%s' is staged-only; use session for UI-only state",
+                        tostring(alias))
                     return
                 end
                 if node._isBitAlias then
@@ -253,32 +288,26 @@ function public.createStore(modConfig, definition)
                 writeRootNode(node, value)
                 return
             end
-
-            local root = rootByKey[StorageKey(keyOrAlias)]
-            if root then
-                writeRootNode(root, value)
-                return
-            end
         end
-        writeRaw(keyOrAlias, value)
+        internal.libWarn("internal.store.writePersisted: unknown storage alias '%s'", tostring(alias))
     end
 
     local runtimeState = {}
 
     local function assertRuntimeAlias(alias)
-        local node = runtimeAliases[alias]
+        local node = runtimeCacheAliases[alias]
         if not node then
             error(string.format(
-                "runtime state alias '%s' is not declared with runtime = true",
+                "runtime cache alias '%s' is not declared with stage = false",
                 tostring(alias)
             ), 3)
         end
         return node
     end
 
-    --- Returns a narrow writer for declared runtime-only persisted aliases.
-    --- Runtime aliases are excluded from session, hash, and profile surfaces.
-    ---@return RuntimeState runtimeState Runtime-only read/write facade.
+    --- Returns a narrow writer for declared persistent runtime-cache aliases.
+    --- Runtime-cache aliases are excluded from session, hash, and profile surfaces.
+    ---@return RuntimeState runtimeState Runtime-cache read/write facade.
     function store.getRuntimeState()
         return runtimeState
     end
@@ -333,9 +362,9 @@ function public.resetStorageToDefaults(storage, session, opts)
     local exclude = type(opts) == "table" and type(opts.exclude) == "table" and opts.exclude or {}
     local count = 0
 
-    for _, node in ipairs(storageInternal.getRoots(storage) or {}) do
+    for _, node in ipairs(storageInternal.getStageRoots(storage) or {}) do
         local alias = node.alias
-        if alias ~= nil and not exclude[alias] then
+        if node._persist and alias ~= nil and not exclude[alias] then
             local current = session.read(alias)
             if not storageInternal.valuesEqual(node, current, node.default) then
                 session.reset(alias)

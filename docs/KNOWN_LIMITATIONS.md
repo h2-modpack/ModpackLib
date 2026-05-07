@@ -41,7 +41,7 @@ Author-facing module hot reload is the supported fast path. Lib and Framework ho
 
 What this means in practice:
 
-- existing module hosts may close over old Lib implementation closures until the owning module reloads
+- existing module hosts may close over prior Lib implementation closures until the owning module reloads
 - active mutation runtime is durable across module reload, not arbitrary Lib implementation reload
 - a Framework file reload does not update an existing pack object until Core or a coordinator rebuild calls `Framework.init(...)` again
 - retained HUD layout changes may require HUD recreation or a game HUD refresh

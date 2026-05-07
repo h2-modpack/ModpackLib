@@ -6,15 +6,6 @@ local StorageTypes = {}
 
 storage.types = StorageTypes
 
-local function StorageKey(key)
-    if type(key) == "table" then
-        return table.concat(key, ".")
-    end
-    return tostring(key)
-end
-
-storage.StorageKey = StorageKey
-
 local function NormalizeInteger(node, value)
     local num = tonumber(value)
     if num == nil then

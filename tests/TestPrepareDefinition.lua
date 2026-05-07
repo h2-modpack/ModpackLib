@@ -21,7 +21,7 @@ function TestPrepareDefinition:testPrepareDefinitionReturnsPreparedClone()
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
         hashGroupPlan = {
             {
@@ -40,7 +40,9 @@ function TestPrepareDefinition:testPrepareDefinitionReturnsPreparedClone()
 
     lu.assertNotIs(prepared, raw)
     lu.assertEquals(prepared.name, "Example")
-    lu.assertEquals(prepared.storage[1].alias, "EnabledFlag")
+    lu.assertEquals(prepared.storage[1].alias, "Enabled")
+    lu.assertEquals(prepared.storage[2].alias, "DebugMode")
+    lu.assertEquals(prepared.storage[3].alias, "EnabledFlag")
     lu.assertEquals(prepared.hashGroupPlan[1].keyPrefix, "group")
     lu.assertTrue(prepared._preparedDefinition)
     lu.assertEquals(owner.requiresFullReload, nil)
@@ -55,7 +57,7 @@ function TestPrepareDefinition:testPrepareDefinitionMarksStructuralReloadMismatc
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
 
@@ -64,14 +66,45 @@ function TestPrepareDefinition:testPrepareDefinitionMarksStructuralReloadMismatc
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "OtherFlag", configKey = "OtherFlag", default = false },
+            { type = "bool", alias = "OtherFlag", default = false },
         },
     })
 
     lu.assertTrue(owner.requiresFullReload)
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
-    lu.assertEquals(prepared.storage[1].alias, "OtherFlag")
+    lu.assertEquals(prepared.storage[3].alias, "OtherFlag")
+end
+
+function TestPrepareDefinition:testPrepareDefinitionInjectsBuiltInStorage()
+    local prepared = lib.prepareDefinition({}, {
+        modpack = "test-pack",
+        id = "Example",
+        name = "Example",
+        storage = {
+            { type = "int", alias = "Count", default = 0, min = 0, max = 10 },
+        },
+    })
+
+    lu.assertEquals(prepared.storage[1].alias, "Enabled")
+    lu.assertFalse(prepared.storage[1].default)
+    lu.assertEquals(prepared.storage[2].alias, "DebugMode")
+    lu.assertFalse(prepared.storage[2].default)
+    lu.assertFalse(prepared.storage[2].hash)
+    lu.assertEquals(prepared.storage[3].alias, "Count")
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsReservedBuiltInStorageAliases()
+    lu.assertErrorMsgContains("storage alias 'Enabled' is reserved by Lib", function()
+        lib.prepareDefinition({}, {
+            modpack = "test-pack",
+            id = "Example",
+            name = "Example",
+            storage = {
+                { type = "bool", alias = "Enabled", default = true },
+            },
+        })
+    end)
 end
 
 function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnStructuralMismatch()
@@ -89,7 +122,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
 
@@ -98,7 +131,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "OtherFlag", configKey = "OtherFlag", default = false },
+            { type = "bool", alias = "OtherFlag", default = false },
         },
     })
 
@@ -134,7 +167,7 @@ function TestPrepareDefinition:testCreateModuleHostWarnsWhenCoordinatedRebuildCa
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
 
@@ -143,7 +176,7 @@ function TestPrepareDefinition:testCreateModuleHostWarnsWhenCoordinatedRebuildCa
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "OtherFlag", configKey = "OtherFlag", default = false },
+            { type = "bool", alias = "OtherFlag", default = false },
         },
     })
 
@@ -179,7 +212,7 @@ function TestPrepareDefinition:testCreateModuleHostKeepsPendingReasonWhenRebuild
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
 
@@ -188,7 +221,7 @@ function TestPrepareDefinition:testCreateModuleHostKeepsPendingReasonWhenRebuild
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "OtherFlag", configKey = "OtherFlag", default = false },
+            { type = "bool", alias = "OtherFlag", default = false },
         },
     })
 
@@ -220,7 +253,7 @@ function TestPrepareDefinition:testPrepareDefinitionIgnoresBehaviorOnlyChanges()
         name = "Example",
         affectsRunData = true,
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
         patchPlan = function() end,
     })
@@ -231,7 +264,7 @@ function TestPrepareDefinition:testPrepareDefinitionIgnoresBehaviorOnlyChanges()
         name = "Example",
         affectsRunData = true,
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
         patchPlan = function()
             return "changed"
@@ -249,7 +282,7 @@ function TestPrepareDefinition:testCreateStoreAcceptsPreparedDefinition()
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
 
@@ -268,7 +301,7 @@ function TestPrepareDefinition:testCreateStoreRejectsRawDefinition()
         function()
             lib.createStore({}, {
                 storage = {
-                    { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+                    { type = "bool", alias = "EnabledFlag", default = false },
                 },
             })
         end)
@@ -280,11 +313,10 @@ function TestPrepareDefinition:testCreateStoreRequiresStorage()
         name = "No Storage",
     })
 
-    lu.assertErrorMsgContains(
-        "createStore expects definition.storage to be a table",
-        function()
-            lib.createStore({}, definition)
-        end)
+    local store, session = lib.createStore({}, definition)
+
+    lu.assertFalse(store.read("Enabled"))
+    lu.assertFalse(session.read("DebugMode"))
 end
 
 function TestPrepareDefinition:testPrepareDefinitionPreservesHashGroupPlan()
@@ -294,9 +326,9 @@ function TestPrepareDefinition:testPrepareDefinitionPreservesHashGroupPlan()
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
-            { type = "int", alias = "Tier", configKey = "Tier", default = 0, min = 0, max = 3 },
-            { type = "bool", alias = "DebugFlag", configKey = "DebugFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
+            { type = "int", alias = "Tier", default = 0, min = 0, max = 3 },
+            { type = "bool", alias = "DebugFlag", default = false },
         },
         hashGroupPlan = {
             {
@@ -316,55 +348,88 @@ function TestPrepareDefinition:testPrepareDefinitionPreservesHashGroupPlan()
     lu.assertEquals(#Warnings, 0)
 end
 
-function TestPrepareDefinition:testPrepareDefinitionHydratesMissingDefaultsBeforeFingerprint()
+function TestPrepareDefinition:testPrepareDefinitionUsesStorageDefaultsInFingerprint()
     local owner = {}
     local prepared = lib.prepareDefinition(owner, {
-        EnabledFlag = true,
-        Count = 7,
-    }, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag" },
-            { type = "int", alias = "Count", configKey = "Count", min = 0, max = 10 },
+            { type = "bool", alias = "EnabledFlag", default = true },
+            { type = "int", alias = "Count", default = 7, min = 0, max = 10 },
         },
     })
 
-    lu.assertTrue(prepared.storage[1].default)
-    lu.assertEquals(prepared.storage[2].default, 7)
+    lu.assertFalse(prepared.storage[1].default)
+    lu.assertFalse(prepared.storage[2].default)
+    lu.assertTrue(prepared.storage[3].default)
+    lu.assertEquals(prepared.storage[4].default, 7)
     lu.assertStrContains(prepared._structuralFingerprint, "EnabledFlag")
     lu.assertStrContains(prepared._structuralFingerprint, "Count")
 end
 
-function TestPrepareDefinition:testPrepareDefinitionTreatsDefaultHydrationChangesAsStructural()
+function TestPrepareDefinition:testPrepareDefinitionTreatsStorageDefaultChangesAsStructural()
     local owner = {}
 
     lib.prepareDefinition(owner, {
-        Count = 3,
-    }, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
         storage = {
-            { type = "int", alias = "Count", configKey = "Count", min = 0, max = 10 },
+            { type = "int", alias = "Count", default = 3, min = 0, max = 10 },
         },
     })
 
     lib.prepareDefinition(owner, {
-        Count = 4,
-    }, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
         storage = {
-            { type = "int", alias = "Count", configKey = "Count", min = 0, max = 10 },
+            { type = "int", alias = "Count", default = 4, min = 0, max = 10 },
         },
     })
 
     lu.assertTrue(owner.requiresFullReload)
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsLegacyDataDefaultsArgument()
+    lu.assertErrorMsgContains("storage defaults on definition.storage nodes", function()
+        lib.prepareDefinition({}, { Count = 1 }, {
+            modpack = "test-pack",
+            id = "Example",
+            name = "Example",
+            storage = {
+                { type = "int", alias = "Count", default = 3, min = 0, max = 10 },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionFingerprintIgnoresExternalTables()
+    local owner = {}
+
+    local first = lib.prepareDefinition(owner, {
+        modpack = "test-pack",
+        id = "Example",
+        name = "Example",
+        storage = {
+            { type = "int", alias = "Count", default = 3, min = 0, max = 10 },
+        },
+    })
+    local second = lib.prepareDefinition(owner, {
+        modpack = "test-pack",
+        id = "Example",
+        name = "Example",
+        storage = {
+            { type = "int", alias = "Count", default = 3, min = 0, max = 10 },
+        },
+    })
+
+    lu.assertEquals(first._structuralFingerprint, second._structuralFingerprint)
+    lu.assertNil(owner.requiresFullReload)
+    lu.assertEquals(#Warnings, 0)
 end
 
 function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksHashGroupPlanChanges()
@@ -375,9 +440,9 @@ function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksHashGroupPl
         id = "Example",
         name = "Example",
         storage = {
-            { type = "int", alias = "LargeA", configKey = "LargeA", default = 0, min = 0, max = 65535 },
-            { type = "int", alias = "LargeB", configKey = "LargeB", default = 0, min = 0, max = 65535 },
-            { type = "bool", alias = "Flag", configKey = "Flag", default = false },
+            { type = "int", alias = "LargeA", default = 0, min = 0, max = 65535 },
+            { type = "int", alias = "LargeB", default = 0, min = 0, max = 65535 },
+            { type = "bool", alias = "Flag", default = false },
         },
         hashGroupPlan = {
             {
@@ -395,9 +460,9 @@ function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksHashGroupPl
         id = "Example",
         name = "Example",
         storage = {
-            { type = "int", alias = "LargeA", configKey = "LargeA", default = 0, min = 0, max = 65535 },
-            { type = "int", alias = "LargeB", configKey = "LargeB", default = 0, min = 0, max = 65535 },
-            { type = "bool", alias = "Flag", configKey = "Flag", default = false },
+            { type = "int", alias = "LargeA", default = 0, min = 0, max = 65535 },
+            { type = "int", alias = "LargeB", default = 0, min = 0, max = 65535 },
+            { type = "bool", alias = "Flag", default = false },
         },
         hashGroupPlan = {
             {

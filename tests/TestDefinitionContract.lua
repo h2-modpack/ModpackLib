@@ -15,7 +15,7 @@ function TestDefinitionContract:testCreateStoreWarnsOnUnknownTopLevelDefinitionK
         id = "Example",
         name = "Example",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
         ui = {},
         affectRunData = true,
@@ -36,7 +36,7 @@ function TestDefinitionContract:testValidateDefinitionWarnsOnOldVocabularyKeysAs
         subgroup = "General",
         selectQuickUi = function() end,
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
 

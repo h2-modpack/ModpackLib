@@ -2,12 +2,9 @@ local internal = AdamantModpackLib_Internal
 internal.storage = internal.storage or {}
 local storageInternal = internal.storage
 local StorageTypes = storageInternal.types
-local StorageKey = storageInternal.StorageKey
 local NormalizeInteger = storageInternal.NormalizeInteger
 local values = internal.values
 
----@alias ConfigPath string|string[]
----@alias StorageLifetime "'persistent'"|"'transient'"|"'runtime'"
 ---@alias StorageValueKind "'bool'"|"'int'"|"'string'"
 ---@alias StorageNodeType "'bool'"|"'int'"|"'string'"|"'packedInt'"
 
@@ -29,9 +26,9 @@ local values = internal.values
 ---@field alias string
 ---@field label string|nil
 ---@field type StorageNodeType
----@field configKey ConfigPath|nil
----@field lifetime "transient"|nil
----@field runtime boolean|nil
+---@field persist boolean|nil
+---@field stage boolean|nil
+---@field hash boolean|nil
 ---@field default any
 ---@field min number|nil
 ---@field max number|nil
@@ -39,42 +36,22 @@ local values = internal.values
 ---@field maxLen number|nil
 ---@field bits PackedBitNode[]|nil
 ---@field _isRoot boolean|nil
----@field _lifetime "persistent"|"transient"|nil
----@field _runtime boolean|nil
+---@field _persist boolean|nil
+---@field _stage boolean|nil
+---@field _hash boolean|nil
 ---@field _storageKey string|nil
 ---@field _valueKind StorageValueKind|nil
 ---@field _bitAliases PackedBitNode[]|nil
 
 ---@class StorageSchema: StorageNode[]
----@field _rootNodes StorageNode[]|nil
----@field _transientRootNodes StorageNode[]|nil
----@field _runtimeRootNodes StorageNode[]|nil
+---@field _rootNodes StorageNode[]|nil Hash/profile root nodes.
+---@field _persistRootNodes StorageNode[]|nil
+---@field _stageRootNodes StorageNode[]|nil
+---@field _runtimeCacheRootNodes StorageNode[]|nil
 ---@field _aliasNodes table<string, StorageNode|PackedBitNode>|nil
----@field _persistedAliasNodes table<string, StorageNode>|nil
----@field _rootByKey table<string, StorageNode>|nil
-
-function storageInternal.hydrateDefaults(storage, dataDefaults)
-    if type(storage) ~= "table" or type(dataDefaults) ~= "table" then
-        return storage
-    end
-
-    for _, node in ipairs(storage) do
-        if type(node) == "table"
-            and node.lifetime ~= "transient"
-            and node.default == nil
-            and node.configKey ~= nil then
-            node.default = values.readPath(dataDefaults, node.configKey)
-        end
-    end
-
-    return storage
-end
 
 local function PrepareRootNodeMetadata(node)
-    node._storageKey = node.configKey ~= nil and StorageKey(node.configKey) or nil
-    if not node.alias and node._storageKey ~= nil then
-        node.alias = node._storageKey
-    end
+    node._storageKey = node.alias
 end
 
 local function ValidateChildAlias(bitNode, root, storage, seenAliases, seenRootKeys, prefix)
@@ -88,7 +65,7 @@ local function ValidateChildAlias(bitNode, root, storage, seenAliases, seenRootK
     end
     local ownerKey = seenRootKeys[bitNode.alias]
     if ownerKey and ownerKey ~= root._storageKey then
-        internal.libWarnIf("%s: alias '%s' conflicts with root configKey '%s'", prefix, bitNode.alias, ownerKey)
+        internal.libWarnIf("%s: alias '%s' conflicts with root alias '%s'", prefix, bitNode.alias, ownerKey)
         return
     end
 
@@ -104,6 +81,9 @@ local function ValidateChildAlias(bitNode, root, storage, seenAliases, seenRootK
         width = bitNode.width,
         parent = root,
         _isBitAlias = true,
+        _persist = root._persist,
+        _stage = root._stage,
+        _hash = root._hash,
         _storageKey = root._storageKey .. "." .. bitNode.alias,
         _valueKind = storageType and storageType.valueKind or bitNode.type,
     }
@@ -191,11 +171,10 @@ function storageInternal.validate(storage, label)
     end
 
     storage._rootNodes = {}
-    storage._transientRootNodes = {}
-    storage._runtimeRootNodes = {}
+    storage._persistRootNodes = {}
+    storage._stageRootNodes = {}
+    storage._runtimeCacheRootNodes = {}
     storage._aliasNodes = {}
-    storage._persistedAliasNodes = {}
-    storage._rootByKey = {}
 
     local seenAliases = {}
     local seenRootKeys = {}
@@ -208,58 +187,48 @@ function storageInternal.validate(storage, label)
             internal.libWarnIf("%s: missing type", prefix)
         else
             local storageType = StorageTypes[node.type]
-            local isTransient = node.lifetime == "transient"
-            local isRuntime = node.runtime == true
+            local persist = node.persist ~= false
+            local stage = node.stage ~= false
+            local hash = node.hash ~= false
             if not storageType then
                 internal.libWarnIf("%s: unknown storage type '%s'", prefix, tostring(node.type))
-            elseif node.lifetime ~= nil and not isTransient then
-                internal.libWarnIf("%s: unknown lifetime '%s'", prefix, tostring(node.lifetime))
-            elseif node.runtime ~= nil and type(node.runtime) ~= "boolean" then
-                internal.libWarnIf("%s: runtime must be boolean when provided", prefix)
-            elseif isTransient and isRuntime then
-                internal.libWarnIf("%s: runtime storage cannot also be transient", prefix)
-            elseif node.configKey ~= nil and node.lifetime ~= nil then
-                internal.libWarnIf("%s: configKey and lifetime are mutually exclusive", prefix)
-            elseif node.configKey == nil and node.lifetime == nil then
-                internal.libWarnIf("%s: storage root must declare configKey or lifetime = 'transient'", prefix)
-            elseif isTransient and node.type == "packedInt" then
-                internal.libWarnIf("%s: transient packedInt roots are not supported", prefix)
-            elseif isRuntime and node.type == "packedInt" then
-                internal.libWarnIf("%s: runtime packedInt roots are not supported", prefix)
-            elseif not isTransient and node.type == "packedInt" and node.configKey == nil then
-                internal.libWarnIf("%s: packedInt is missing configKey", prefix)
-            elseif not isTransient and node.configKey == nil then
-                internal.libWarnIf("%s: missing configKey", prefix)
+            elseif node.persist ~= nil and type(node.persist) ~= "boolean" then
+                internal.libWarnIf("%s: persist must be boolean when provided", prefix)
+            elseif node.stage ~= nil and type(node.stage) ~= "boolean" then
+                internal.libWarnIf("%s: stage must be boolean when provided", prefix)
+            elseif node.hash ~= nil and type(node.hash) ~= "boolean" then
+                internal.libWarnIf("%s: hash must be boolean when provided", prefix)
+            elseif type(node.alias) ~= "string" or node.alias == "" then
+                internal.libWarnIf("%s: missing alias", prefix)
+            elseif hash and not persist then
+                internal.libWarnIf("%s: hash=true requires persist=true", prefix)
+            elseif hash and not stage then
+                internal.libWarnIf("%s: hash=true requires stage=true", prefix)
+            elseif not stage and node.type == "packedInt" then
+                internal.libWarnIf("%s: stage=false packedInt roots are not supported", prefix)
             else
                 storageType.validate(node, prefix)
                 PrepareRootNodeMetadata(node)
                 node._isRoot = true
-                node._lifetime = isTransient and "transient" or "persistent"
-                node._runtime = isRuntime
+                node._persist = persist
+                node._stage = stage
+                node._hash = hash
                 node._valueKind = storageType.valueKind
                 node._bitAliases = {}
 
                 if node._storageKey ~= nil then
-                    if seenRootKeys[node._storageKey] then
-                        internal.libWarnIf("%s: duplicate configKey '%s'", prefix, node._storageKey)
-                    else
+                    if not seenRootKeys[node._storageKey] then
                         seenRootKeys[node._storageKey] = node._storageKey
-                        storage._rootByKey[node._storageKey] = node
                     end
                 end
 
                 local aliasValid = false
-                if type(node.alias) ~= "string" or node.alias == "" then
-                    internal.libWarnIf("%s: missing alias", prefix)
-                elseif seenAliases[node.alias] then
+                if seenAliases[node.alias] then
                     internal.libWarnIf("%s: duplicate alias '%s'", prefix, node.alias)
                 else
                     aliasValid = true
                     seenAliases[node.alias] = true
                     storage._aliasNodes[node.alias] = node
-                    if node._lifetime == "persistent" and node._runtime ~= true then
-                        storage._persistedAliasNodes[node.alias] = node
-                    end
                 end
 
                 if node.type == "packedInt" then
@@ -303,11 +272,15 @@ function storageInternal.validate(storage, label)
                     end
                 end
 
-                if node._lifetime == "transient" and aliasValid then
-                    table.insert(storage._transientRootNodes, node)
-                elseif node._runtime == true then
-                    table.insert(storage._runtimeRootNodes, node)
-                elseif node._lifetime ~= "transient" then
+                if node._persist then
+                    table.insert(storage._persistRootNodes, node)
+                end
+                if node._stage then
+                    table.insert(storage._stageRootNodes, node)
+                else
+                    table.insert(storage._runtimeCacheRootNodes, node)
+                end
+                if node._hash and aliasValid then
                     table.insert(storage._rootNodes, node)
                 end
             end
@@ -315,20 +288,50 @@ function storageInternal.validate(storage, label)
     end
 end
 
---- Returns the prepared persistent root nodes for a validated storage schema.
+--- Asserts that every persisted root has an effective storage-declared default after validation.
+---@param storage StorageSchema
+---@param label string
+function storageInternal.assertPersistedDefaults(storage, label)
+    local prefix = label or "storage"
+    for _, root in ipairs(storageInternal.getPersistRoots(storage) or {}) do
+        assert(root.default ~= nil, string.format(
+            "%s: persisted storage alias '%s' must declare an effective default",
+            prefix,
+            tostring(root.alias or "<unknown>")
+        ))
+    end
+end
+
+--- Returns the prepared hash/profile root nodes for a validated storage schema.
 ---@param storage StorageSchema Validated storage schema.
----@return StorageNode[] roots Prepared list of persistent root storage nodes.
+---@return StorageNode[] roots Prepared list of hash/profile root storage nodes.
 function storageInternal.getRoots(storage)
     if type(storage) ~= "table" then return {} end
     return rawget(storage, "_rootNodes") or {}
 end
 
---- Returns prepared runtime root nodes for a validated storage schema.
+--- Returns prepared persisted root nodes for backing config hydration and access.
 ---@param storage StorageSchema Validated storage schema.
----@return StorageNode[] roots Prepared list of runtime-only persisted roots.
-function storageInternal.getRuntimeRoots(storage)
+---@return StorageNode[] roots Prepared list of persisted root storage nodes.
+function storageInternal.getPersistRoots(storage)
     if type(storage) ~= "table" then return {} end
-    return rawget(storage, "_runtimeRootNodes") or {}
+    return rawget(storage, "_persistRootNodes") or {}
+end
+
+--- Returns prepared staged root nodes for session/UI state.
+---@param storage StorageSchema Validated storage schema.
+---@return StorageNode[] roots Prepared list of staged root storage nodes.
+function storageInternal.getStageRoots(storage)
+    if type(storage) ~= "table" then return {} end
+    return rawget(storage, "_stageRootNodes") or {}
+end
+
+--- Returns prepared runtime-cache root nodes for a validated storage schema.
+---@param storage StorageSchema Validated storage schema.
+---@return StorageNode[] roots Prepared list of stage=false root storage nodes.
+function storageInternal.getRuntimeCacheRoots(storage)
+    if type(storage) ~= "table" then return {} end
+    return rawget(storage, "_runtimeCacheRootNodes") or {}
 end
 
 --- Compares two values using storage-type equality when available, falling back to deep equality.

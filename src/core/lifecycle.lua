@@ -27,7 +27,7 @@ end
 ---@field ModEnabled boolean
 
 ---@class EnabledStore
----@field read fun(keyOrAlias: string|table): any
+---@field read fun(alias: string): any
 
 --- Returns whether a pack id has coordinator metadata registered.
 ---@param packId string Unique coordinator pack identifier.

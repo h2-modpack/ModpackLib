@@ -101,7 +101,7 @@ function TestHost:testHostFlushNotifiesSettingsObserver()
         id = "SettingsObserverHost",
         name = "Settings Observer Host",
         storage = {
-            { type = "bool", alias = "Value", configKey = "Value", default = false },
+            { type = "bool", alias = "Value", default = false },
         },
         onSettingsCommitted = function(store)
             calls = calls + 1
@@ -134,8 +134,8 @@ function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
         id = "ResetHost",
         name = "Reset Host",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
-            { type = "int", alias = "Count", configKey = "Count", default = 2, min = 0, max = 9 },
+            { type = "bool", alias = "EnabledFlag", default = false },
+            { type = "int", alias = "Count", default = 2, min = 0, max = 9 },
         },
     })
     local store, session = lib.createStore({
@@ -186,7 +186,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         id = "ReloadHost",
         name = "Reload Host",
         storage = {
-            { type = "bool", alias = "EnabledFlag", configKey = "EnabledFlag", default = false },
+            { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
     local store, session = lib.createStore({
@@ -216,7 +216,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         id = "ReloadHost",
         name = "Reload Host",
         storage = {
-            { type = "bool", alias = "OtherFlag", configKey = "OtherFlag", default = false },
+            { type = "bool", alias = "OtherFlag", default = false },
         },
     })
     local reloadStore, reloadSession = lib.createStore({

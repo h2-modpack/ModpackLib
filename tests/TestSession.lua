@@ -7,8 +7,7 @@ end
 local function makeScalarDefinition()
     return prepareDefinition({
         storage = {
-            { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
-            { type = "int", alias = "MaxGods", configKey = "MaxGodsPerRun", default = 3, min = 1, max = 9 },
+            { type = "int", alias = "MaxGods", default = 3, min = 1, max = 9 },
         },
         ui = {
             { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
@@ -23,7 +22,6 @@ local function makePackedDefinition()
             {
                 type = "packedInt",
                 alias = "Packed",
-                configKey = "Packed",
                 bits = {
                     { alias = "EnabledBit", offset = 0, width = 1, type = "bool", default = false },
                     { alias = "ModeBits", offset = 1, width = 2, type = "int", default = 0 },
@@ -40,10 +38,9 @@ end
 local function makeTransientDefinition()
     return prepareDefinition({
         storage = {
-            { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
-            { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
-            { type = "string", alias = "FilterMode", lifetime = "transient", default = "all", maxLen = 16 },
-            { type = "string", alias = "SummaryText", lifetime = "transient", default = "", maxLen = 128 },
+            { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
+            { type = "string", alias = "FilterMode", persist = false, hash = false, default = "all", maxLen = 16 },
+            { type = "string", alias = "SummaryText", persist = false, hash = false, default = "", maxLen = 128 },
         },
         ui = {
             { type = "checkbox", binds = { value = "Enabled" }, label = "Enabled" },
@@ -55,29 +52,32 @@ end
 local function makeRuntimeDefinition()
     return prepareDefinition({
         storage = {
-            { type = "bool", alias = "Enabled", configKey = "Enabled", default = false },
-            { type = "bool", alias = "RecordingArmed", configKey = "RecordingArmed", default = false, runtime = true },
-            { type = "int", alias = "RunMarker", configKey = "RunMarker", default = 0, min = 0, max = 99, runtime = true },
+            { type = "bool", alias = "RecordingArmed", default = false, stage = false, hash = false },
+            { type = "int", alias = "RunMarker", default = 0, min = 0, max = 99, stage = false, hash = false },
         },
     })
 end
 
 TestStore = {}
 
-function TestStore:testCreateStoreReadsAndWritesScalarAliasesAndRawKeys()
-    local config = { Enabled = false, MaxGodsPerRun = 4 }
+function TestStore:testCreateStoreReadsAndWritesScalarAliases()
+    local config = { Enabled = false, MaxGods = 4 }
     local store, session = lib.createStore(config, makeScalarDefinition())
 
     lu.assertFalse(store.read("Enabled"))
     lu.assertEquals(store.read("MaxGods"), 4)
-    lu.assertEquals(store.read("MaxGodsPerRun"), 4)
+    CaptureWarnings()
+    lu.assertNil(store.read("MaxGodsPerRun"))
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "unknown storage alias 'MaxGodsPerRun'")
+    RestoreWarnings()
 
     session.write("Enabled", true)
     session.write("MaxGods", 12)
     session._flushToConfig()
 
     lu.assertTrue(config.Enabled)
-    lu.assertEquals(config.MaxGodsPerRun, 9)
+    lu.assertEquals(config.MaxGods, 9)
     lu.assertEquals(store.read("MaxGods"), 9)
 end
 
@@ -110,7 +110,7 @@ function TestStore:testTransientAliasesAreNotReadableThroughStore()
 
     local sawReadWarning = false
     for _, warning in ipairs(Warnings) do
-        if string.find(warning, "store.read: alias 'FilterText' is transient", 1, true) then
+        if string.find(warning, "store.read: alias 'FilterText' is staged-only", 1, true) then
             sawReadWarning = true
         end
     end
@@ -141,7 +141,7 @@ function TestStore:testRuntimeAliasesUseNarrowStoreAccessor()
     end)
 
     lu.assertFalse(ok)
-    lu.assertStrContains(err, "runtime = true")
+    lu.assertStrContains(err, "stage = false")
 end
 
 function TestStore:testSessionRejectsRuntimeWrites()
@@ -153,14 +153,14 @@ function TestStore:testSessionRejectsRuntimeWrites()
     end)
 
     lu.assertFalse(ok)
-    lu.assertStrContains(err, "runtime-only")
+    lu.assertStrContains(err, "not staged")
     lu.assertFalse(config.RecordingArmed)
 end
 
 TestSession = {}
 
 function TestSession:testSessionStagesScalarAliases()
-    local config = { Enabled = true, MaxGodsPerRun = 5 }
+    local config = { Enabled = true, MaxGods = 5 }
     local store, session = lib.createStore(config, makeScalarDefinition())
 
     lu.assertTrue(session.view.Enabled)
@@ -220,7 +220,7 @@ function TestSession:testResyncSessionDetectsPackedDrift()
 end
 
 function TestSession:testReadonlyViewRejectsWrites()
-    local config = { Enabled = true, MaxGodsPerRun = 5 }
+    local config = { Enabled = true, MaxGods = 5 }
     local store, session = lib.createStore(config, makeScalarDefinition())
 
     local ok, err = pcall(function()
@@ -278,7 +278,7 @@ function TestSession:testResetRestoresTransientAliasDefault()
 end
 
 function TestSession:testResetRestoresPersistedAliasDefaultAndMarksDirty()
-    local config = { Enabled = true, MaxGodsPerRun = 5 }
+    local config = { Enabled = true, MaxGods = 5 }
     local store, session = lib.createStore(config, makeScalarDefinition())
 
     session.reset("Enabled")

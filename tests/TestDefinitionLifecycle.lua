@@ -263,7 +263,6 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlus
             {
                 type = "bool",
                 alias = "Value",
-                configKey = "Value",
                 default = false,
             },
         },

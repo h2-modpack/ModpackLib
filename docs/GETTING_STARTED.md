@@ -36,7 +36,7 @@ If you want the script workflow and setup details, read the
 A module is built from four main pieces:
 
 - `definition`
-  Declares module identity, storage, and optional mutation lifecycle hooks.
+  Declares module identity, optional storage, and optional mutation lifecycle hooks.
 - `store`
   Persisted runtime state. Read this from gameplay and hook code.
 - `session`
@@ -133,31 +133,40 @@ local definition = lib.prepareDefinition(internal, {
 ```
 
 For coordinated modules, `modpack`, `id`, `name`, and `storage` are the important discovery fields.
+Modules with no custom settings may omit `storage`; Lib still injects the built-in
+`Enabled` and `DebugMode` aliases.
 
 ### 2. Declare storage in `data.lua`
 
 Example:
 
 ```lua
-local definition = lib.prepareDefinition(internal, dataDefaults, {
+local definition = lib.prepareDefinition(internal, {
     modpack = PACK_ID,
     id = "ExampleModule",
     name = "Example Module",
     affectsRunData = false,
     storage = {
-    { type = "bool", alias = "FeatureEnabled", configKey = "FeatureEnabled" },
-    { type = "string", alias = "Mode", configKey = "Mode", maxLen = 32 },
-    { type = "string", alias = "FilterText", lifetime = "transient", default = "", maxLen = 64 },
+        { type = "bool", alias = "FeatureEnabled", default = false },
+        { type = "string", alias = "Mode", default = "Vanilla", maxLen = 32 },
+        { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
     },
 })
 ```
 
 Rules:
 
-- persisted values use `configKey`
-- transient values use `lifetime = "transient"`
+- `alias` is the store/session key and the persisted backing key
+- aliases are direct flat storage identifiers
+- normal values persist, stage, and hash by default
+- transient values use `persist = false, hash = false`
 - transient values live only in session state
 - draw code should still access both through `session`
+- `Enabled` and `DebugMode` are reserved Lib-owned aliases; do not declare them
+
+For persistent runtime markers that should not appear in UI staging, profiles, or
+hashes, declare `stage = false, hash = false` and use
+`store.getRuntimeState()`.
 
 ### 3. Create the managed state in `main.lua`
 
@@ -202,12 +211,12 @@ If the module only changes configuration/UI, `logic.lua` can stay minimal.
 If the module changes live run data:
 
 ```lua
-local definition = lib.prepareDefinition(internal, dataDefaults, {
+local definition = lib.prepareDefinition(internal, {
     modpack = PACK_ID,
     id = "ExampleModule",
     name = "Example Module",
     affectsRunData = true,
-    storage = internal.BuildStorage(dataDefaults),
+    storage = internal.BuildStorage(),
     patchPlan = function(plan, activeStore)
     if activeStore.read("FeatureEnabled") then
         plan:set(SomeGameTable, "SomeKey", true)
@@ -291,6 +300,13 @@ Persisted storage roots live in Chalk config and are exposed through `store.read
 
 The UI stages edits in `session`, then host/framework plumbing commits those edits later.
 
+Lib injects two persisted staged aliases into every prepared module definition:
+
+- `Enabled`, the module behavior toggle
+- `DebugMode`, diagnostic-only and excluded from hashes/profiles
+
+Module authors should not put these in `definition.storage` or `config.lua`.
+
 ### Transient values
 
 Transient aliases never hit persisted config. They only live in `session`.
@@ -300,6 +316,24 @@ Examples:
 - filter text
 - temporary selection state
 - ephemeral editor helpers
+
+### Runtime cache values
+
+Runtime cache aliases persist through config but do not enter `session`, profiles,
+or hashes. They are for module-owned intent/state that gameplay code needs across
+reloads:
+
+```lua
+{ type = "bool", alias = "RecordingActive", default = false, stage = false, hash = false }
+```
+
+Read and write them through:
+
+```lua
+local runtime = store.getRuntimeState()
+runtime.write("RecordingActive", true)
+local active = runtime.read("RecordingActive") == true
+```
 
 ### Packed values
 
