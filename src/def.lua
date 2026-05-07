@@ -21,7 +21,7 @@ local lib = {}
 ---@alias AdamantModpackLib.HashGroupPlan AdamantModpackLib.HashGroup[]
 
 ---@class AdamantModpackLib.StorageNode
----@field type "bool"|"int"|"string"|"packedInt"
+---@field type "bool"|"int"|"string"|"packedInt"|"table"
 ---@field alias string Public alias used by store/session/widget APIs and as the persisted backing key.
 ---@field label? string UI label.
 ---@field tooltip? string UI tooltip.
@@ -35,6 +35,10 @@ local lib = {}
 ---@field width? number Packed/hash bit width for integer-like nodes.
 ---@field maxLen? number String max length for input widgets/hash normalization.
 ---@field bits? AdamantModpackLib.PackedBitNode[] Packed child bit aliases for `packedInt`.
+---@field row? AdamantModpackLib.StorageSchema Row schema for `table` roots.
+---@field minRows? integer Minimum row count for `table` roots.
+---@field maxRows? integer Maximum row count for `table` roots.
+---@field defaultRows? integer Default row count for `table` roots.
 
 ---@class AdamantModpackLib.PackedBitNode
 ---@field type "bool"|"int"
@@ -49,17 +53,30 @@ local lib = {}
 
 ---@alias AdamantModpackLib.StorageSchema AdamantModpackLib.StorageNode[]
 
+---@class AdamantModpackLib.StorageTableReadOnly
+---@field count fun(self: AdamantModpackLib.StorageTableReadOnly): integer
+---@field read fun(self: AdamantModpackLib.StorageTableReadOnly, rowIndex: integer, alias: string): any
+---@field row fun(self: AdamantModpackLib.StorageTableReadOnly, rowIndex: integer): table?
+---@field rows fun(self: AdamantModpackLib.StorageTableReadOnly): table[]
+
+---@class AdamantModpackLib.StorageTableSession: AdamantModpackLib.StorageTableReadOnly
+---@field write fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer, alias: string, value: any): boolean
+---@field reset fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer, alias: string): boolean
+---@field resetRow fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer): boolean
+---@field append fun(self: AdamantModpackLib.StorageTableSession, rowValues?: table): boolean
+---@field insert fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer, rowValues?: table): boolean
+---@field remove fun(self: AdamantModpackLib.StorageTableSession, rowIndex: integer): boolean
+---@field clear fun(self: AdamantModpackLib.StorageTableSession): boolean
+
 ---@class AdamantModpackLib.ManagedStore
 ---@field read fun(alias: string): any
----@field getRuntimeState fun(): AdamantModpackLib.RuntimeState
-
----@class AdamantModpackLib.RuntimeState
----@field read fun(alias: string): any
----@field write fun(alias: string, value: any)
+---@field table fun(alias: string): AdamantModpackLib.StorageTableReadOnly?
+---@field writeUnstaged fun(alias: string, value: any)
 
 ---@class AdamantModpackLib.Session
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
+---@field table fun(alias: string): AdamantModpackLib.StorageTableSession?
 ---@field write fun(alias: string, value: any)
 ---@field reset fun(alias: string)
 ---@field _flushToConfig fun()

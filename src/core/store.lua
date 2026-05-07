@@ -19,6 +19,7 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@class Session
 ---@field view table<string, any>
 ---@field read fun(alias: string): any
+---@field table fun(alias: string): StorageTableSession|nil
 ---@field write fun(alias: string, value: any)
 ---@field reset fun(alias: string)
 ---@field _flushToConfig fun()
@@ -45,11 +46,8 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 
 ---@class ManagedStore
 ---@field read fun(alias: string): any
----@field getRuntimeState fun(): RuntimeState
-
----@class RuntimeState
----@field read fun(alias: string): any
----@field write fun(alias: string, value: any)
+---@field table fun(alias: string): StorageTableReadOnly|nil
+---@field writeUnstaged fun(alias: string, value: any)
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })
 ---@param config table
@@ -170,10 +168,10 @@ function public.createStore(modConfig, definition)
     storageInternal.assertPersistedDefaults(storage, label)
 
     local aliasNodes = storageInternal.getAliases(storage)
-    local runtimeCacheAliases = {}
+    local unstagedAliases = {}
     for _, node in ipairs(storageInternal.getRuntimeCacheRoots(storage)) do
         if type(node.alias) == "string" and node.alias ~= "" then
-            runtimeCacheAliases[node.alias] = node
+            unstagedAliases[node.alias] = node
         end
     end
 
@@ -238,87 +236,93 @@ function public.createStore(modConfig, definition)
         ensureRootNode(root)
     end
 
+    local storeReadBackend = {
+        readRoot = readRootNode,
+        canRead = function(node, alias)
+            if not node._persist and node._stage then
+                internal.libWarn(
+                    "store.read: alias '%s' is staged-only; use session for UI-only state",
+                    tostring(alias))
+                return false
+            end
+            return true
+        end,
+        onUnknownRead = function(alias)
+            internal.libWarn("store.read: unknown storage alias '%s'", tostring(alias))
+        end,
+    }
+
+    local storeWriteBackend = {
+        readRoot = readRootNode,
+        writeRoot = function(root, rootValue)
+            writeRootNode(root, rootValue)
+            return true
+        end,
+        canWrite = function(node, alias)
+            if not node._persist and node._stage then
+                internal.libWarn(
+                    "internal.store.writePersisted: alias '%s' is staged-only; use session for UI-only state",
+                    tostring(alias))
+                return false
+            end
+            return true
+        end,
+        onUnknownWrite = function(alias)
+            internal.libWarn("internal.store.writePersisted: unknown storage alias '%s'", tostring(alias))
+        end,
+    }
+
     --- Reads a storage value by declared alias.
     ---@param alias string Alias to read.
     ---@return any value Resolved value, normalized through the owning storage type when applicable.
     function store.read(alias)
-        if type(alias) == "string" then
-            local node = aliasNodes[alias]
-            if node then
-                if not node._persist and node._stage then
-                    internal.libWarn(
-                        "store.read: alias '%s' is staged-only; use session for UI-only state",
-                        tostring(alias))
-                    return nil
-                end
-                if node._isBitAlias then
-                    local packed = readRootNode(node.parent)
-                    local rawValue = storageInternal.readPackedBits(packed, node.offset, node.width)
-                    if node.type == "bool" then
-                        rawValue = rawValue ~= 0
-                    end
-                    return NormalizeStorageValue(node, rawValue)
-                end
-                return readRootNode(node)
-            end
+        return storageInternal.readAlias(aliasNodes, storeReadBackend, alias)
+    end
+
+    --- Returns a read-only table-storage handle by declared table root alias.
+    ---@param alias string
+    ---@return StorageTableReadOnly|nil tableHandle
+    function store.table(alias)
+        local node = type(alias) == "string" and aliasNodes[alias] or nil
+        if not node then
+            internal.libWarn("store.table: unknown storage alias '%s'", tostring(alias))
+            return nil
         end
-        internal.libWarn("store.read: unknown storage alias '%s'", tostring(alias))
-        return nil
+        if node.type ~= "table" or node._isBitAlias then
+            internal.libWarn("store.table: alias '%s' is not table storage", tostring(alias))
+            return nil
+        end
+        if not node._persist and node._stage then
+            internal.libWarn("store.table: alias '%s' is staged-only; use session.table()", tostring(alias))
+            return nil
+        end
+        return storageInternal.CreateTableHandle(node, {
+            readRoot = readRootNode,
+            normalizedRoot = true,
+        })
     end
 
     local function writeStoreValue(alias, value)
-        if type(alias) == "string" then
-            local node = aliasNodes[alias]
-            if node then
-                if not node._persist and node._stage then
-                    internal.libWarn(
-                        "internal.store.writePersisted: alias '%s' is staged-only; use session for UI-only state",
-                        tostring(alias))
-                    return
-                end
-                if node._isBitAlias then
-                    local parent = node.parent
-                    local currentPacked = readRootNode(parent)
-                    local normalized = NormalizeStorageValue(node, value)
-                    local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
-                    local nextPacked = storageInternal.writePackedBits(currentPacked, node.offset, node.width, encoded)
-                    writeRootNode(parent, nextPacked)
-                    return
-                end
-                writeRootNode(node, value)
-                return
-            end
-        end
-        internal.libWarn("internal.store.writePersisted: unknown storage alias '%s'", tostring(alias))
+        storageInternal.writeAlias(aliasNodes, storeWriteBackend, alias, value)
     end
 
-    local runtimeState = {}
-
-    local function assertRuntimeAlias(alias)
-        local node = runtimeCacheAliases[alias]
+    local function assertUnstagedAlias(alias)
+        local node = unstagedAliases[alias]
         if not node then
             error(string.format(
-                "runtime cache alias '%s' is not declared with stage = false",
+                "store.writeUnstaged: alias '%s' is not declared with stage = false",
                 tostring(alias)
             ), 3)
         end
         return node
     end
 
-    --- Returns a narrow writer for declared persistent runtime-cache aliases.
-    --- Runtime-cache aliases are excluded from session, hash, and profile surfaces.
-    ---@return RuntimeState runtimeState Runtime-cache read/write facade.
-    function store.getRuntimeState()
-        return runtimeState
-    end
-
-    function runtimeState.read(alias)
-        assertRuntimeAlias(alias)
-        return store.read(alias)
-    end
-
-    function runtimeState.write(alias, value)
-        assertRuntimeAlias(alias)
+    --- Writes a declared stage=false alias through the managed store.
+    --- Unstaged aliases are excluded from session, hash, and profile surfaces.
+    ---@param alias string
+    ---@param value any
+    function store.writeUnstaged(alias, value)
+        assertUnstagedAlias(alias)
         writeStoreValue(alias, value)
     end
 

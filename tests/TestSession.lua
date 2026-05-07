@@ -58,6 +58,32 @@ local function makeRuntimeDefinition()
     })
 end
 
+local function makeTableDefinition()
+    return prepareDefinition({
+        storage = {
+            {
+                type = "table",
+                alias = "Tiers",
+                minRows = 0,
+                maxRows = 3,
+                defaultRows = 1,
+                row = {
+                    { type = "bool", alias = "Enabled", default = true },
+                    { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
+                    {
+                        type = "packedInt",
+                        alias = "PackedChoices",
+                        bits = {
+                            { alias = "ChoiceA", offset = 0, width = 1, type = "bool", default = false },
+                            { alias = "ChoiceMode", offset = 1, width = 2, type = "int", default = 0 },
+                        },
+                    },
+                },
+            },
+        },
+    })
+end
+
 TestStore = {}
 
 function TestStore:testCreateStoreReadsAndWritesScalarAliases()
@@ -122,22 +148,21 @@ end
 function TestStore:testRuntimeAliasesUseNarrowStoreAccessor()
     local config = { Enabled = true, RecordingArmed = false, RunMarker = 2 }
     local store, session = lib.createStore(config, makeRuntimeDefinition())
-    local runtime = store.getRuntimeState()
 
     lu.assertTrue(store.read("Enabled"))
-    lu.assertFalse(runtime.read("RecordingArmed"))
-    lu.assertEquals(runtime.read("RunMarker"), 2)
+    lu.assertFalse(store.read("RecordingArmed"))
+    lu.assertEquals(store.read("RunMarker"), 2)
     lu.assertNil(session.read("RecordingArmed"))
 
-    runtime.write("RecordingArmed", true)
-    runtime.write("RunMarker", 120)
+    store.writeUnstaged("RecordingArmed", true)
+    store.writeUnstaged("RunMarker", 120)
 
     lu.assertTrue(config.RecordingArmed)
     lu.assertEquals(config.RunMarker, 99)
     lu.assertFalse(session.isDirty())
 
     local ok, err = pcall(function()
-        runtime.write("Enabled", false)
+        store.writeUnstaged("Enabled", false)
     end)
 
     lu.assertFalse(ok)
@@ -303,5 +328,98 @@ function TestSession:testResetRestoresPackedChildDefault()
     lu.assertEquals(session.view.Packed, 1)
 end
 
+function TestSession:testTableStorageHydratesDefaultRows()
+    local config = {}
+    local store, session = lib.createStore(config, makeTableDefinition())
 
+    lu.assertEquals(session.table("Tiers"):count(), 1)
+    lu.assertTrue(session.table("Tiers"):read(1, "Enabled"))
+    lu.assertEquals(session.table("Tiers"):read(1, "Limit"), 2)
+    lu.assertEquals(session.table("Tiers"):read(1, "PackedChoices"), 0)
+    lu.assertEquals(#config.Tiers, 1)
+end
+
+function TestSession:testTableStorageStagesRowWritesAndFlushesRoot()
+    local config = {}
+    local store, session = lib.createStore(config, makeTableDefinition())
+    local tiers = session.table("Tiers")
+
+    lu.assertTrue(tiers:append({ Enabled = false, Limit = 4, ChoiceA = true }))
+    lu.assertTrue(tiers:write(2, "ChoiceMode", 3))
+    lu.assertTrue(tiers:write(2, "Limit", 9))
+
+    lu.assertEquals(tiers:count(), 2)
+    lu.assertFalse(tiers:read(2, "Enabled"))
+    lu.assertTrue(tiers:read(2, "ChoiceA"))
+    lu.assertEquals(tiers:read(2, "ChoiceMode"), 3)
+    lu.assertEquals(tiers:read(2, "PackedChoices"), 7)
+    lu.assertEquals(tiers:read(2, "Limit"), 5)
+    lu.assertEquals(#config.Tiers, 1)
+
+    session._flushToConfig()
+
+    lu.assertEquals(#config.Tiers, 2)
+    lu.assertEquals(config.Tiers[2].PackedChoices, 7)
+    lu.assertEquals(config.Tiers[2].Limit, 5)
+    lu.assertEquals(store.table("Tiers"):read(2, "ChoiceMode"), 3)
+end
+
+function TestSession:testTableStorageMutatesRowsAsCompactList()
+    local config = {}
+    local _, session = lib.createStore(config, makeTableDefinition())
+    local tiers = session.table("Tiers")
+
+    tiers:append({ Limit = 1 })
+    tiers:insert(2, { Limit = 3 })
+    lu.assertEquals(tiers:count(), 3)
+    lu.assertEquals(tiers:read(2, "Limit"), 3)
+
+    tiers:remove(2)
+    lu.assertEquals(tiers:count(), 2)
+    lu.assertEquals(tiers:read(2, "Limit"), 1)
+
+    tiers:resetRow(2)
+    lu.assertEquals(tiers:read(2, "Limit"), 2)
+
+    tiers:clear()
+    lu.assertEquals(tiers:count(), 0)
+end
+
+function TestSession:testTableStorageDoesNotLeakRowAliasesGlobally()
+    local _, session = lib.createStore({}, makeTableDefinition())
+
+    CaptureWarnings()
+    lu.assertNil(session.read("Limit"))
+    lu.assertNil(session.read("ChoiceA"))
+    RestoreWarnings()
+end
+
+function TestSession:testReadonlyViewDoesNotExposeMutableTableRoot()
+    local _, session = lib.createStore({}, makeTableDefinition())
+
+    local snapshot = session.view.Tiers
+    snapshot[1].Limit = 5
+
+    lu.assertEquals(session.table("Tiers"):read(1, "Limit"), 2)
+end
+
+function TestSession:testTableStorageHashRoundTripsRows()
+    local definition = makeTableDefinition()
+    local tableNode = definition.storage[3]
+    local value = {
+        { Enabled = false, Limit = 4, PackedChoices = 5 },
+        { Enabled = true, Limit = 1, ChoiceMode = 2 },
+    }
+
+    local encoded = lib.hashing.toHash(tableNode, value)
+    local decoded = lib.hashing.fromHash(tableNode, encoded)
+
+    lu.assertEquals(#decoded, 2)
+    lu.assertFalse(decoded[1].Enabled)
+    lu.assertEquals(decoded[1].Limit, 4)
+    lu.assertEquals(decoded[1].PackedChoices, 5)
+    lu.assertTrue(decoded[2].Enabled)
+    lu.assertEquals(decoded[2].Limit, 1)
+    lu.assertEquals(decoded[2].PackedChoices, 4)
+end
 

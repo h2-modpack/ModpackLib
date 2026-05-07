@@ -16,8 +16,13 @@ Built-in root types:
 - `int`
 - `string`
 - `packedInt`
+- `table`
 
 Storage metadata helpers used for hash/profile work live under `lib.hashing`.
+
+`table` roots expose row handles through `store.table(alias)` and `session.table(alias)`.
+They do not have a generic widget yet; render table rows with ordinary Lua loops
+and the scalar/packed widgets that fit each row.
 
 ## Reset Helpers
 

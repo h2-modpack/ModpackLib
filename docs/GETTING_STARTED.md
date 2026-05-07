@@ -161,12 +161,13 @@ Rules:
 - normal values persist, stage, and hash by default
 - transient values use `persist = false, hash = false`
 - transient values live only in session state
+- table values use one `type = "table"` root with a uniform `row` schema
 - draw code should still access both through `session`
 - `Enabled` and `DebugMode` are reserved Lib-owned aliases; do not declare them
 
 For persistent runtime markers that should not appear in UI staging, profiles, or
 hashes, declare `stage = false, hash = false` and use
-`store.getRuntimeState()`.
+`store.writeUnstaged(...)`.
 
 ### 3. Create the managed state in `main.lua`
 
@@ -330,14 +331,32 @@ reloads:
 Read and write them through:
 
 ```lua
-local runtime = store.getRuntimeState()
-runtime.write("RecordingActive", true)
-local active = runtime.read("RecordingActive") == true
+store.writeUnstaged("RecordingActive", true)
+local active = store.read("RecordingActive") == true
 ```
 
 ### Packed values
 
 Packed widgets can edit packed child aliases, but storage still persists the packed root. Lib handles the repacking automatically.
+
+### Table values
+
+Table storage models compact ordered rows with one shared row schema:
+
+```lua
+{
+    type = "table",
+    alias = "Tiers",
+    maxRows = 10,
+    defaultRows = 1,
+    row = {
+        { type = "bool", alias = "Enabled", default = true },
+        { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
+    },
+}
+```
+
+Use `session.table("Tiers")` for staged UI edits and `store.table("Tiers")` for read-only runtime access.
 
 ## Common Mistakes
 

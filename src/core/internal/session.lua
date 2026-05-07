@@ -3,6 +3,7 @@ local storageInternal = internal.storage
 local storeInternal = internal.store
 local ClonePersistedValue = storeInternal.ClonePersistedValue
 local NormalizeStorageValue = storageInternal.NormalizeStorageValue
+local DecodePackedChild = storageInternal.DecodePackedChild
 
 ---@param modConfig table
 ---@param configBackend ConfigBackend|nil
@@ -51,11 +52,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
 
     local function syncPackedChildren(root, packedValue)
         for _, child in ipairs(root._bitAliases or {}) do
-            local rawValue = storageInternal.readPackedBits(packedValue, child.offset, child.width)
-            if child.type == "bool" then
-                rawValue = rawValue ~= 0
-            end
-            staging[child.alias] = NormalizeStorageValue(child, rawValue)
+            staging[child.alias] = DecodePackedChild(child, packedValue)
         end
     end
 
@@ -126,60 +123,109 @@ function internal.store.createSession(modConfig, configBackend, storage)
         dirtyRoots = {}
     end
 
+    local sessionReadBackend = {
+        readRoot = function(root)
+            return staging[root.alias]
+        end,
+        canRead = function(node, alias)
+            if not node._stage then
+                internal.libWarnIf(
+                    "session.read: alias '%s' is not staged; use store.read()",
+                    tostring(alias)
+                )
+                return false
+            end
+            return true
+        end,
+        onUnknownRead = function()
+            return nil
+        end,
+    }
+
+    local sessionWriteBackend = {
+        readRoot = function(root)
+            if staging[root.alias] == nil then
+                loadStageRootIntoStaging(root)
+            end
+            return staging[root.alias]
+        end,
+        writeRoot = writeRootToStaging,
+        writeAliasValue = function(node, aliasValue)
+            staging[node.alias] = aliasValue
+        end,
+        canWrite = function(node, alias)
+            if not node._stage then
+                error(string.format(
+                    "session.write: alias '%s' is not staged; use store.writeUnstaged()",
+                    tostring(alias)
+                ), 2)
+            end
+            return true
+        end,
+        onUnknownWrite = function(alias)
+            internal.libWarnIf("session.write: unknown alias '%s'; value will not be persisted", tostring(alias))
+        end,
+    }
+
     local readonlyProxy = setmetatable({}, {
         __index = function(_, key)
-            return staging[key]
+            local value = staging[key]
+            local node = aliasNodes[key]
+            if node and node.type == "table" then
+                return ClonePersistedValue(value)
+            end
+            return value
         end,
         __newindex = function()
             error("session.view is read-only; use session.write", 2)
         end,
         __pairs = function()
-            return next, staging, nil
+            return function(_, key)
+                local nextKey, value = next(staging, key)
+                local node = aliasNodes[nextKey]
+                if node and node.type == "table" then
+                    value = ClonePersistedValue(value)
+                end
+                return nextKey, value
+            end, staging, nil
         end,
     })
 
     local function readStagingValue(alias)
-        local node = aliasNodes[alias]
-        if node and not node._stage then
-            internal.libWarnIf("session.read: alias '%s' is not staged; use store.getRuntimeState()", tostring(alias))
-            return nil
-        end
-        return staging[alias]
+        return storageInternal.readAlias(aliasNodes, sessionReadBackend, alias)
     end
 
     local function writeStagingValue(alias, value)
-        local node = aliasNodes[alias]
+        storageInternal.writeAlias(aliasNodes, sessionWriteBackend, alias, value)
+    end
+
+    local function getTableHandle(alias)
+        local node = type(alias) == "string" and aliasNodes[alias] or nil
         if not node then
-            internal.libWarnIf("session.write: unknown alias '%s'; value will not be persisted", tostring(alias))
-            return
+            internal.libWarnIf("session.table: unknown alias '%s'", tostring(alias))
+            return nil
+        end
+        if node.type ~= "table" or node._isBitAlias then
+            internal.libWarnIf("session.table: alias '%s' is not table storage", tostring(alias))
+            return nil
         end
         if not node._stage then
-            error(string.format("session.write: alias '%s' is not staged; use store.getRuntimeState()", tostring(alias)), 2)
+            error(string.format(
+                "session.table: alias '%s' is not staged; use store.table()",
+                tostring(alias)
+            ), 2)
         end
 
-        if node._isBitAlias then
-            local parent = node.parent
-            local packedValue = staging[parent.alias]
-            if packedValue == nil then
-                loadStageRootIntoStaging(parent)
-                packedValue = staging[parent.alias]
-            end
-            local normalized = NormalizeStorageValue(node, value)
-            if storageInternal.valuesEqual(node, staging[node.alias], normalized) then
-                return
-            end
-            local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
-            local nextPacked = storageInternal.writePackedBits(packedValue, node.offset, node.width, encoded)
-            if storageInternal.valuesEqual(parent, packedValue, nextPacked) then
-                staging[node.alias] = normalized
-                return
-            end
-            writeRootToStaging(parent, nextPacked)
-            staging[node.alias] = normalized
-            return
-        end
-
-        writeRootToStaging(node, value)
+        return storageInternal.CreateTableHandle(node, {
+            readRoot = function(root)
+                if staging[root.alias] == nil then
+                    loadStageRootIntoStaging(root)
+                end
+                return staging[root.alias]
+            end,
+            writeRoot = writeRootToStaging,
+            normalizedRoot = true,
+        })
     end
 
     local function resetAliasValue(alias)
@@ -200,6 +246,9 @@ function internal.store.createSession(modConfig, configBackend, storage)
         view = readonlyProxy,
         read = function(alias)
             return readStagingValue(alias)
+        end,
+        table = function(alias)
+            return getTableHandle(alias)
         end,
         write = function(alias, value)
             writeStagingValue(alias, value)
@@ -236,11 +285,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
                 end
                 if root.type == "packedInt" then
                     for _, child in ipairs(root._bitAliases or {}) do
-                        local childValue = storageInternal.readPackedBits(persistedValue, child.offset, child.width)
-                        if child.type == "bool" then
-                            childValue = childValue ~= 0
-                        end
-                        childValue = NormalizeStorageValue(child, childValue)
+                        local childValue = DecodePackedChild(child, persistedValue)
                         if not storageInternal.valuesEqual(child, childValue, staging[child.alias]) then
                             table.insert(mismatches, child.alias)
                         end

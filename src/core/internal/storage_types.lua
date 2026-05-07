@@ -187,3 +187,42 @@ StorageTypes.packedInt = {
         return nil
     end,
 }
+
+StorageTypes.table = {
+    valueKind = "table",
+    validate = function(node, prefix)
+        if node.default ~= nil then
+            internal.libWarnIf("%s: table roots do not support default; use defaultRows", prefix)
+        end
+        if node.minRows ~= nil and (type(node.minRows) ~= "number" or node.minRows < 0) then
+            internal.libWarnIf("%s: table minRows must be a non-negative number", prefix)
+        end
+        if node.maxRows ~= nil and (type(node.maxRows) ~= "number" or node.maxRows < 0) then
+            internal.libWarnIf("%s: table maxRows must be a non-negative number", prefix)
+        end
+        if node.defaultRows ~= nil and (type(node.defaultRows) ~= "number" or node.defaultRows < 0) then
+            internal.libWarnIf("%s: table defaultRows must be a non-negative number", prefix)
+        end
+        if type(node.minRows) == "number" and type(node.maxRows) == "number" and node.minRows > node.maxRows then
+            internal.libWarnIf("%s: table minRows cannot exceed maxRows", prefix)
+        end
+        if type(node.row) ~= "table" or #node.row == 0 then
+            internal.libWarnIf("%s: table row must be a non-empty storage schema", prefix)
+        end
+    end,
+    normalize = function(node, value)
+        return storage.NormalizeTableValue(node, value)
+    end,
+    equals = function(node, a, b)
+        return internal.values.deepEqual(
+            storage.NormalizeTableValue(node, a),
+            storage.NormalizeTableValue(node, b)
+        )
+    end,
+    toHash = function(node, value)
+        return storage.SerializeTableValue(node, value)
+    end,
+    fromHash = function(node, str)
+        return storage.DeserializeTableValue(node, str)
+    end,
+}

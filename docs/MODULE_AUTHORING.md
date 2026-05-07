@@ -163,7 +163,7 @@ Rules:
 - aliases are direct flat storage identifiers
 - normal roots persist, stage, and hash by default
 - `persist = false` roots are session-only
-- `stage = false` roots use `store.getRuntimeState()`
+- `stage = false` roots read through `store.read(...)` and write through `store.writeUnstaged(...)`
 - `hash = false` roots are excluded from hash/profile serialization
 - `hash = true` requires both `persist = true` and `stage = true`
 
@@ -182,7 +182,7 @@ Common shapes:
 | --- | --- |
 | omitted flags | ordinary persisted module setting |
 | `persist = false, hash = false` | transient UI state such as filters or active tabs |
-| `stage = false, hash = false` | persistent runtime cache read through `store.getRuntimeState()` |
+| `stage = false, hash = false` | persistent runtime cache read through `store.read(...)` and written through `store.writeUnstaged(...)` |
 | `hash = false` | persisted UI preference that should not affect profiles or shared hashes |
 
 ### Packed storage
@@ -201,6 +201,50 @@ Use `packedInt` when you need alias-addressable packed children:
 ```
 
 If the module treats the packed value as a raw mask, a plain root `int` is enough.
+
+### Table storage
+
+Use `table` for a compact ordered list of rows where every row shares the same schema:
+
+```lua
+{
+    type = "table",
+    alias = "Tiers",
+    minRows = 0,
+    maxRows = 10,
+    defaultRows = 1,
+    row = {
+        { type = "bool", alias = "Enabled", default = true },
+        { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
+        {
+            type = "packedInt",
+            alias = "PackedChoices",
+            bits = {
+                { alias = "ChoiceA", offset = 0, width = 1, type = "bool", default = false },
+                { alias = "ChoiceMode", offset = 1, width = 2, type = "int", default = 0 },
+            },
+        },
+    },
+}
+```
+
+Rules:
+- the table root owns `persist`, `stage`, and `hash`
+- row aliases are scoped to one row and do not leak into `session.read(...)`
+- rows are compact ordered arrays with no holes
+- `defaultRows` creates the default row count; each row uses the row field defaults
+- packed child aliases work inside a row just like packed child aliases work globally
+
+Access:
+
+```lua
+local tiers = session.table("Tiers")
+tiers:append({ Enabled = true, ChoiceA = true })
+tiers:write(1, "ChoiceMode", 2)
+local mode = tiers:read(1, "ChoiceMode")
+```
+
+Use `store.table(alias)` for read-only runtime access and `session.table(alias)` for staged UI edits.
 
 ## Immediate-Mode UI
 

@@ -150,6 +150,47 @@ function TestDataDefaults:testMissingStorageDefaultFails()
     end)
 end
 
+function TestDataDefaults:testMissingTableRowDefaultFails()
+    local definition = {
+        storage = {
+            {
+                type = "table",
+                alias = "Rows",
+                defaultRows = 1,
+                row = {
+                    { type = "bool", alias = "Flag" },
+                },
+            },
+        },
+    }
+    lu.assertErrorMsgContains("must declare an effective default", function()
+        makeStore(definition, {})
+    end)
+end
+
+function TestDataDefaults:testNestedTableStorageFails()
+    local definition = {
+        storage = {
+            {
+                type = "table",
+                alias = "Rows",
+                row = {
+                    {
+                        type = "table",
+                        alias = "Nested",
+                        row = {
+                            { type = "bool", alias = "Flag", default = false },
+                        },
+                    },
+                },
+            },
+        },
+    }
+    lu.assertErrorMsgContains("nested table storage is not supported", function()
+        makeStore(definition, {})
+    end)
+end
+
 function TestDataDefaults:testExplicitStorageDefaultsAreSafe()
     local definition = {
         storage = {
@@ -190,11 +231,10 @@ function TestDataDefaults:testCreateStoreHydratesMissingRuntimeConfigFromStorage
         },
     }
     local store, session, config = makeStore(definition, {})
-    local runtime = store.getRuntimeState()
 
     lu.assertFalse(session.read("Enabled"))
-    lu.assertFalse(runtime.read("RecordingArmed"))
-    lu.assertEquals(runtime.read("RunMarker"), 3)
+    lu.assertFalse(store.read("RecordingArmed"))
+    lu.assertEquals(store.read("RunMarker"), 3)
     lu.assertEquals(config.Enabled, false)
     lu.assertEquals(config.RecordingArmed, false)
     lu.assertEquals(config.RunMarker, 3)

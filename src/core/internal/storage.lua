@@ -5,8 +5,8 @@ local StorageTypes = storageInternal.types
 local NormalizeInteger = storageInternal.NormalizeInteger
 local values = internal.values
 
----@alias StorageValueKind "'bool'"|"'int'"|"'string'"
----@alias StorageNodeType "'bool'"|"'int'"|"'string'"|"'packedInt'"
+---@alias StorageValueKind "'bool'"|"'int'"|"'string'"|"'table'"
+---@alias StorageNodeType "'bool'"|"'int'"|"'string'"|"'packedInt'"|"'table'"
 
 ---@class PackedBitNode
 ---@field alias string
@@ -35,6 +35,10 @@ local values = internal.values
 ---@field width number|nil
 ---@field maxLen number|nil
 ---@field bits PackedBitNode[]|nil
+---@field row StorageSchema|nil
+---@field minRows number|nil
+---@field maxRows number|nil
+---@field defaultRows number|nil
 ---@field _isRoot boolean|nil
 ---@field _persist boolean|nil
 ---@field _stage boolean|nil
@@ -52,6 +56,51 @@ local values = internal.values
 
 local function PrepareRootNodeMetadata(node)
     node._storageKey = node.alias
+end
+
+local function ClampRowCount(node, count)
+    count = math.floor(tonumber(count) or 0)
+    if count < 0 then count = 0 end
+    if node.minRows ~= nil and count < node.minRows then count = node.minRows end
+    if node.maxRows ~= nil and count > node.maxRows then count = node.maxRows end
+    return count
+end
+
+local function PrepareTableNode(node, prefix)
+    if type(node.row) ~= "table" then
+        return
+    end
+
+    for index, rowNode in ipairs(node.row) do
+        local rowPrefix = prefix .. " row[" .. index .. "]"
+        if type(rowNode) == "table" then
+            assert(rowNode.type ~= "table",
+                string.format("%s: nested table storage is not supported", rowPrefix))
+            if rowNode.persist ~= nil then
+                internal.libWarnIf("%s: row storage cannot declare persist; table root owns persistence", rowPrefix)
+                rowNode.persist = nil
+            end
+            if rowNode.stage ~= nil then
+                internal.libWarnIf("%s: row storage cannot declare stage; table root owns staging", rowPrefix)
+                rowNode.stage = nil
+            end
+            if rowNode.hash ~= nil then
+                internal.libWarnIf("%s: row storage cannot declare hash; table root owns hashing", rowPrefix)
+                rowNode.hash = nil
+            end
+        end
+    end
+
+    storageInternal.validate(node.row, prefix .. " row")
+    storageInternal.assertPersistedDefaults(node.row, prefix .. " row")
+
+    node.minRows = ClampRowCount({ minRows = 0 }, node.minRows or 0)
+    node.maxRows = node.maxRows ~= nil and ClampRowCount({ minRows = 0 }, node.maxRows) or nil
+    if node.maxRows ~= nil and node.minRows > node.maxRows then
+        node.minRows = node.maxRows
+    end
+    node.defaultRows = ClampRowCount(node, node.defaultRows or node.minRows or 0)
+    node.default = storageInternal.NormalizeTableValue(node, nil)
 end
 
 local function ValidateChildAlias(bitNode, root, storage, seenAliases, seenRootKeys, prefix)
@@ -270,6 +319,8 @@ function storageInternal.validate(storage, label)
                             end
                         end
                     end
+                elseif node.type == "table" then
+                    PrepareTableNode(node, prefix)
                 end
 
                 if node._persist then
@@ -353,6 +404,396 @@ function storageInternal.NormalizeStorageValue(node, value)
         return storageType.normalize(node, value)
     end
     return value
+end
+
+local function GetRowAliasNodes(node)
+    return node and node.row and storageInternal.getAliases(node.row) or {}
+end
+
+local function GetRowRootNodes(node)
+    return node and node.row and storageInternal.getRoots(node.row) or {}
+end
+
+local function CreateDefaultTableRow(node)
+    local row = {}
+    for _, root in ipairs(GetRowRootNodes(node)) do
+        row[root.alias] = values.deepCopy(root.default)
+    end
+    return row
+end
+
+function storageInternal.NormalizeTableRow(node, rowValue)
+    local row = CreateDefaultTableRow(node)
+    if type(rowValue) ~= "table" then
+        return row
+    end
+    local aliasNodes = GetRowAliasNodes(node)
+
+    for _, root in ipairs(GetRowRootNodes(node)) do
+        if rowValue[root.alias] ~= nil then
+            row[root.alias] = storageInternal.NormalizeStorageValue(root, rowValue[root.alias])
+        end
+    end
+
+    local rowBackend = {
+        readRoot = function(root)
+            local value = row[root.alias]
+            if value == nil then
+                value = values.deepCopy(root.default)
+            end
+            return storageInternal.NormalizeStorageValue(root, value)
+        end,
+        writeRoot = function(root, value)
+            row[root.alias] = storageInternal.NormalizeStorageValue(root, value)
+            return true
+        end,
+    }
+
+    for alias, value in pairs(rowValue) do
+        if aliasNodes[alias] ~= nil then
+            storageInternal.writeAlias(aliasNodes, rowBackend, alias, value)
+        end
+    end
+
+    return row
+end
+
+function storageInternal.NormalizeTableValue(node, value)
+    local rows = {}
+    local source = type(value) == "table" and value or nil
+    local count = source and #source or node.defaultRows or 0
+    count = ClampRowCount(node, count)
+
+    for index = 1, count do
+        rows[index] = storageInternal.NormalizeTableRow(node, source and source[index] or nil)
+    end
+    return rows
+end
+
+local function EncodeLengthPrefixed(value)
+    value = tostring(value or "")
+    return tostring(#value) .. ":" .. value
+end
+
+local function DecodeLengthPrefixed(str, pos)
+    local lenText, nextPos = string.match(str, "^(%d+):()", pos)
+    if not lenText then
+        return nil, nil
+    end
+    local len = tonumber(lenText) or 0
+    local valueStart = nextPos
+    local valueEnd = valueStart + len - 1
+    if valueEnd > #str then
+        return nil, nil
+    end
+    return string.sub(str, valueStart, valueEnd), valueEnd + 1
+end
+
+function storageInternal.SerializeTableValue(node, value)
+    local rows = storageInternal.NormalizeTableValue(node, value)
+    local parts = { tostring(#rows) .. ":" }
+    for _, row in ipairs(rows) do
+        for _, root in ipairs(GetRowRootNodes(node)) do
+            local storageType = StorageTypes[root.type]
+            local encoded = storageType.toHash(root, row[root.alias])
+            parts[#parts + 1] = EncodeLengthPrefixed(encoded)
+        end
+    end
+    return table.concat(parts)
+end
+
+function storageInternal.DeserializeTableValue(node, str)
+    if type(str) ~= "string" then
+        return storageInternal.NormalizeTableValue(node, nil)
+    end
+
+    local countText, pos = string.match(str, "^(%d+):()")
+    if not countText then
+        return storageInternal.NormalizeTableValue(node, nil)
+    end
+
+    local rows = {}
+    local count = ClampRowCount(node, tonumber(countText) or 0)
+    local roots = GetRowRootNodes(node)
+    for rowIndex = 1, count do
+        local row = {}
+        for _, root in ipairs(roots) do
+            local encoded
+            encoded, pos = DecodeLengthPrefixed(str, pos)
+            if encoded == nil then
+                return storageInternal.NormalizeTableValue(node, nil)
+            end
+            local storageType = StorageTypes[root.type]
+            row[root.alias] = storageType.fromHash(root, encoded)
+        end
+        rows[rowIndex] = storageInternal.NormalizeTableRow(node, row)
+    end
+    return storageInternal.NormalizeTableValue(node, rows)
+end
+
+function storageInternal.CreateTableHandle(node, opts)
+    opts = opts or {}
+    local aliasNodes = GetRowAliasNodes(node)
+
+    local function readRows()
+        local rows = opts.readRoot(node)
+        if opts.normalizedRoot == true then
+            return type(rows) == "table" and rows or node.default
+        end
+        return storageInternal.NormalizeTableValue(node, rows)
+    end
+
+    local function copyRows()
+        if opts.normalizedRoot == true then
+            return values.deepCopy(readRows())
+        end
+        return readRows()
+    end
+
+    local function writeRows(rows)
+        if type(opts.writeRoot) ~= "function" then
+            error("table storage handle is read-only", 3)
+        end
+        return opts.writeRoot(node, storageInternal.NormalizeTableValue(node, rows))
+    end
+
+    local function readRow(rows, rowIndex)
+        rowIndex = math.floor(tonumber(rowIndex) or 0)
+        return rows[rowIndex], rowIndex
+    end
+
+    local function readRowAlias(row, alias)
+        local rowBackend = {
+            readRoot = function(root)
+                local value = row[root.alias]
+                if value == nil then
+                    value = values.deepCopy(root.default)
+                end
+                return storageInternal.NormalizeStorageValue(root, value)
+            end,
+        }
+        return storageInternal.readAlias(aliasNodes, rowBackend, alias)
+    end
+
+    local function writeRowAlias(row, alias, value)
+        local rowBackend = {
+            readRoot = function(root)
+                local raw = row[root.alias]
+                if raw == nil then
+                    raw = values.deepCopy(root.default)
+                end
+                return storageInternal.NormalizeStorageValue(root, raw)
+            end,
+            writeRoot = function(root, rootValue)
+                row[root.alias] = storageInternal.NormalizeStorageValue(root, rootValue)
+                return true
+            end,
+        }
+        return storageInternal.writeAlias(aliasNodes, rowBackend, alias, value)
+    end
+
+    local handle = {}
+
+    local function ShiftMethodArgs(first, second, third, fourth)
+        if first == handle then
+            return second, third, fourth
+        end
+        return first, second, third
+    end
+
+    function handle.count()
+        return #readRows()
+    end
+
+    function handle.read(first, second, third)
+        local rowIndex, alias = ShiftMethodArgs(first, second, third)
+        local row = readRow(readRows(), rowIndex)
+        if not row then
+            return nil
+        end
+        return readRowAlias(row, alias)
+    end
+
+    function handle.row(first, second)
+        local rowIndex = ShiftMethodArgs(first, second)
+        local row = readRow(readRows(), rowIndex)
+        return row and values.deepCopy(row) or nil
+    end
+
+    function handle.rows()
+        return values.deepCopy(readRows())
+    end
+
+    if type(opts.writeRoot) == "function" then
+        function handle.write(first, second, third, fourth)
+            local rowIndex, alias, value = ShiftMethodArgs(first, second, third, fourth)
+            local rows = copyRows()
+            local row = readRow(rows, rowIndex)
+            if not row then
+                return false
+            end
+            local changed = writeRowAlias(row, alias, value)
+            if changed then
+                writeRows(rows)
+            end
+            return changed
+        end
+
+        function handle.reset(first, second, third)
+            local rowIndex, alias = ShiftMethodArgs(first, second, third)
+            local rows = copyRows()
+            local row = readRow(rows, rowIndex)
+            if not row then
+                return false
+            end
+            local aliasNode = aliasNodes[alias]
+            if not aliasNode then
+                return false
+            end
+            local changed = writeRowAlias(row, alias, values.deepCopy(aliasNode.default))
+            if changed then
+                writeRows(rows)
+            end
+            return changed
+        end
+
+        function handle.resetRow(first, second)
+            local rowIndex = ShiftMethodArgs(first, second)
+            local rows = copyRows()
+            local _, normalizedIndex = readRow(rows, rowIndex)
+            if normalizedIndex < 1 or normalizedIndex > #rows then
+                return false
+            end
+            rows[normalizedIndex] = CreateDefaultTableRow(node)
+            writeRows(rows)
+            return true
+        end
+
+        function handle.append(first, second)
+            local rowValues = ShiftMethodArgs(first, second)
+            local rows = copyRows()
+            if node.maxRows ~= nil and #rows >= node.maxRows then
+                return false
+            end
+            rows[#rows + 1] = storageInternal.NormalizeTableRow(node, rowValues)
+            writeRows(rows)
+            return true
+        end
+
+        function handle.insert(first, second, third)
+            local rowIndex, rowValues = ShiftMethodArgs(first, second, third)
+            local rows = copyRows()
+            if node.maxRows ~= nil and #rows >= node.maxRows then
+                return false
+            end
+            rowIndex = math.floor(tonumber(rowIndex) or (#rows + 1))
+            if rowIndex < 1 then rowIndex = 1 end
+            if rowIndex > #rows + 1 then rowIndex = #rows + 1 end
+            table.insert(rows, rowIndex, storageInternal.NormalizeTableRow(node, rowValues))
+            writeRows(rows)
+            return true
+        end
+
+        function handle.remove(first, second)
+            local rowIndex = ShiftMethodArgs(first, second)
+            local rows = copyRows()
+            rowIndex = math.floor(tonumber(rowIndex) or 0)
+            if rowIndex < 1 or rowIndex > #rows then
+                return false
+            end
+            table.remove(rows, rowIndex)
+            writeRows(rows)
+            return true
+        end
+
+        function handle.clear()
+            writeRows({})
+            return true
+        end
+    end
+
+    return handle
+end
+
+local function DecodePackedChild(node, packedValue)
+    local rawValue = storageInternal.readPackedBits(packedValue, node.offset, node.width)
+    if node.type == "bool" then
+        rawValue = rawValue ~= 0
+    end
+    return storageInternal.NormalizeStorageValue(node, rawValue)
+end
+
+storageInternal.DecodePackedChild = DecodePackedChild
+
+--- Reads a declared alias through a backend that owns root-value storage.
+---@param aliasNodes table<string, StorageNode|PackedBitNode>
+---@param backend table
+---@param alias string
+---@return any
+function storageInternal.readAlias(aliasNodes, backend, alias)
+    local node = type(alias) == "string" and aliasNodes[alias] or nil
+    if not node then
+        if backend and type(backend.onUnknownRead) == "function" then
+            backend.onUnknownRead(alias)
+        end
+        return nil
+    end
+
+    if backend and type(backend.canRead) == "function" and backend.canRead(node, alias) == false then
+        return nil
+    end
+
+    if node._isBitAlias then
+        return DecodePackedChild(node, backend.readRoot(node.parent))
+    end
+    return backend.readRoot(node)
+end
+
+--- Writes a declared alias through a backend that owns root-value storage.
+---@param aliasNodes table<string, StorageNode|PackedBitNode>
+---@param backend table
+---@param alias string
+---@param value any
+---@return boolean changed
+function storageInternal.writeAlias(aliasNodes, backend, alias, value)
+    local node = type(alias) == "string" and aliasNodes[alias] or nil
+    if not node then
+        if backend and type(backend.onUnknownWrite) == "function" then
+            backend.onUnknownWrite(alias)
+        end
+        return false
+    end
+
+    if backend and type(backend.canWrite) == "function" and backend.canWrite(node, alias) == false then
+        return false
+    end
+
+    if node._isBitAlias then
+        local parent = node.parent
+        local currentPacked = backend.readRoot(parent)
+        local normalized = storageInternal.NormalizeStorageValue(node, value)
+        local currentValue = DecodePackedChild(node, currentPacked)
+        if storageInternal.valuesEqual(node, currentValue, normalized) then
+            return false
+        end
+
+        local encoded = node.type == "bool" and (normalized and 1 or 0) or normalized
+        local nextPacked = storageInternal.writePackedBits(currentPacked, node.offset, node.width, encoded)
+        if storageInternal.valuesEqual(parent, currentPacked, nextPacked) then
+            if type(backend.writeAliasValue) == "function" then
+                backend.writeAliasValue(node, normalized)
+            end
+            return false
+        end
+
+        local changed = backend.writeRoot(parent, nextPacked)
+        if type(backend.writeAliasValue) == "function" then
+            backend.writeAliasValue(node, normalized)
+        end
+        return changed ~= false
+    end
+
+    return backend.writeRoot(node, value) ~= false
 end
 
 --- Returns the prepared alias map for a validated storage schema.

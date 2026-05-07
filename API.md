@@ -221,7 +221,8 @@ call with a session from another. Recreate the pair together on module reload.
 
 Returned surface:
 - `store.read(alias)`
-- `store.getRuntimeState()`
+- `store.table(alias)`
+- `store.writeUnstaged(alias, value)`
 
 Persisted writes happen through semantic helpers or session flushes:
 
@@ -241,7 +242,7 @@ Rules:
 - keep each `store, session` pair together for its lifetime
 - widgets and draw code should usually read staged values from `session.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
-- module-owned runtime markers declared with `stage = false, hash = false` should write through `store.getRuntimeState()`
+- module-owned runtime markers declared with `stage = false, hash = false` should write through `store.writeUnstaged(...)`
 - enabled toggles should write through `lib.lifecycle.setEnabled(def, store, enabled)`
 - debug toggles should write through `lib.lifecycle.setDebugMode(store, enabled)`
 - profile/hash plumbing should stage values through `session.write(...)` and flush them through `session._flushToConfig()`
@@ -264,12 +265,54 @@ Persistent runtime cache storage is declared on ordinary storage nodes:
 Use it for module-owned runtime intent or small reload/restart markers that should not affect UI staging, profiles, or config hashes:
 
 ```lua
-local runtime = store.getRuntimeState()
-runtime.write("BatchRecordingArmed", true)
-local armed = runtime.read("BatchRecordingArmed") == true
+store.writeUnstaged("BatchRecordingArmed", true)
+local armed = store.read("BatchRecordingArmed") == true
 ```
 
-`runtime.write(alias, value)` only accepts aliases declared with `stage = false`.
+`store.writeUnstaged(alias, value)` only accepts aliases declared with `stage = false`.
+
+Composite table storage is declared as one table root with a uniform row schema:
+
+```lua
+{
+    type = "table",
+    alias = "Tiers",
+    minRows = 0,
+    maxRows = 10,
+    defaultRows = 1,
+    row = {
+        { type = "bool", alias = "Enabled", default = true },
+        { type = "int", alias = "Limit", default = 2, min = 0, max = 5 },
+        {
+            type = "packedInt",
+            alias = "PackedChoices",
+            bits = {
+                { alias = "ChoiceA", offset = 0, width = 1, type = "bool", default = false },
+                { alias = "ChoiceMode", offset = 1, width = 2, type = "int", default = 0 },
+            },
+        },
+    },
+}
+```
+
+The table root owns `persist`, `stage`, and `hash`. Row fields are row-scoped
+storage aliases and do not declare storage axes. Table rows are compact ordered
+arrays with no row ids or holes.
+
+Read table state through:
+
+```lua
+local tiers = session.table("Tiers")
+tiers:append({ Enabled = true, ChoiceA = true })
+tiers:write(1, "ChoiceMode", 2)
+local enabled = tiers:read(1, "Enabled")
+```
+
+Table handles:
+- `store.table(alias)` returns a read-only table handle
+- `session.table(alias)` returns a staged writable table handle
+- row aliases can address scalar row roots, packed row roots, or packed child aliases
+- table storage participates in hash/profile serialization when `hash` is true
 
 Aliases are direct flat storage identifiers. Managed storage reads and writes the
 declared alias key directly; future composite storage should own any generated
@@ -299,6 +342,7 @@ Managed staged UI state for the module.
 Useful surface:
 - `session.view`
 - `session.read(alias)`
+- `session.table(alias)`
 - `session.write(alias, value)`
 - `session.reset(alias)`
 - `session.isDirty()`

@@ -9,7 +9,8 @@ All notable changes to this project will be documented in this file.
 - Storage declarations now use direct flat `alias` identifiers as the canonical managed storage backing keys.
 - Removed old `configKey`, `lifetime`, and `runtime` storage declaration compatibility in favor of explicit `persist`, `stage`, and `hash` axes.
 - Lib now injects `Enabled` and `DebugMode` as built-in prepared storage aliases instead of requiring module-authored config defaults.
-- Persistent runtime-cache module state is now declared with `stage = false, hash = false` and still uses `store.getRuntimeState()`.
+- Persistent runtime-cache module state is now declared with `stage = false, hash = false`, read through `store.read(...)`, and written through `store.writeUnstaged(...)`.
+- Added first-class table storage roots with row-scoped aliases, staged table handles, read-only store table handles, packed child row access, and hash/profile serialization.
 
 ## [1.1.0] - 2026-05-05
 
