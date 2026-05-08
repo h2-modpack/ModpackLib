@@ -157,6 +157,9 @@ end
 ---@return ManagedStore store Managed store instance for config and mutation lifecycle.
 ---@return Session session Staged UI/session state for storage-backed controls.
 function public.createStore(modConfig, definition)
+    if type(modConfig) ~= "table" then
+        internal.violate("store.invalid_config", "createStore expects config to be a table")
+    end
     if type(definition) ~= "table" or definition._preparedDefinition ~= true then
         internal.violate(
             "store.invalid_create_args",
@@ -166,11 +169,7 @@ function public.createStore(modConfig, definition)
     local backend = GetConfigBackend(modConfig)
     local store = {}
     local storage = definition.storage
-    local label = tostring(definition.name or definition.id or _PLUGIN.guid or "module")
     local runtimeValues = {}
-
-    storageInternal.validate(storage, label)
-    storageInternal.assertPersistedDefaults(storage, label)
 
     local aliasNodes = storageInternal.getAliases(storage)
     local unstagedAliases = {}
@@ -293,12 +292,15 @@ function public.createStore(modConfig, definition)
         local node = type(alias) == "string" and aliasNodes[alias] or nil
         if not node then
             internal.violate("store.unknown_table_alias", "store.table: unknown storage alias '%s'", tostring(alias))
+            return nil
         end
         if node.type ~= "table" or node._isBitAlias then
             internal.violate("store.invalid_table_alias", "store.table: alias '%s' is not table storage", tostring(alias))
+            return nil
         end
         if not node._persist and node._stage then
             internal.violate("store.invalid_table_surface", "store.table: alias '%s' is staged-only; use session.table()", tostring(alias))
+            return nil
         end
         return storageInternal.CreateTableHandle(node, {
             readRoot = readRootNode,
@@ -310,25 +312,21 @@ function public.createStore(modConfig, definition)
         storageInternal.writeAlias(aliasNodes, storeWriteBackend, alias, value)
     end
 
-    local function assertUnstagedAlias(alias)
-        local node = unstagedAliases[alias]
-        if not node then
-            internal.violate(
-                "store.invalid_unstaged_write",
-                "store.writeUnstaged: alias '%s' is not declared with stage = false",
-                tostring(alias)
-            )
-        end
-        return node
-    end
-
     --- Writes a declared stage=false alias through the managed store.
     --- Unstaged aliases are excluded from session, hash, and profile surfaces.
     ---@param alias string
     ---@param value any
     function store.writeUnstaged(alias, value)
-        assertUnstagedAlias(alias)
+        if not unstagedAliases[alias] then
+            internal.violate(
+                "store.invalid_unstaged_write",
+                "store.writeUnstaged: alias '%s' is not declared with stage = false",
+                tostring(alias)
+            )
+            return false
+        end
         writeStoreValue(alias, value)
+        return true
     end
 
     local function getPackedAliases(alias)

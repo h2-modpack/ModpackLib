@@ -307,6 +307,41 @@ function TestPrepareDefinition:testCreateStoreRejectsRawDefinition()
         end)
 end
 
+function TestPrepareDefinition:testCreateStoreRejectsNonTableConfig()
+    local definition = lib.prepareDefinition({}, {
+        storage = {
+            { type = "bool", alias = "EnabledFlag", default = false },
+        },
+    })
+
+    lu.assertErrorMsgContains("store.invalid_config", function()
+        lib.createStore(nil, definition)
+    end)
+end
+
+function TestPrepareDefinition:testCreateModuleHostRejectsRawDefinition()
+    local prepared = lib.prepareDefinition({}, {
+        storage = {
+            { type = "bool", alias = "EnabledFlag", default = false },
+        },
+    })
+    local store, session = lib.createStore({}, prepared)
+
+    lu.assertErrorMsgContains("prepared definition is required", function()
+        lib.createModuleHost({
+            pluginGuid = "test-raw-host",
+            definition = {
+                storage = {
+                    { type = "bool", alias = "EnabledFlag", default = false },
+                },
+            },
+            store = store,
+            session = session,
+            drawTab = function() end,
+        })
+    end)
+end
+
 function TestPrepareDefinition:testCreateStoreRequiresStorage()
     local definition = lib.prepareDefinition({}, {
         id = "NoStorage",

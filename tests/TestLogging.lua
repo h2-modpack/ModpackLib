@@ -54,6 +54,13 @@ function TestLogging:testViolationWarnUsesPolicyId()
     lu.assertEquals(self.lines, { "[lib] test.warn: hello world" })
 end
 
+function TestLogging:testViolationPolicyCarriesDescriptions()
+    local policy = AdamantModpackLib_Internal.violationPolicy["storage.hash_requires_persist"]
+
+    lu.assertEquals(policy.severity, "error")
+    lu.assertStrContains(policy.description, "persisted")
+end
+
 function TestLogging:testViolationDebugHonorsLibDebugMode()
     AdamantModpackLib_Internal.violationSeverity["test.debug"] = "debug"
 
@@ -87,5 +94,11 @@ function TestLogging:testViolationRejectsInvalidSeverity()
 
     lu.assertErrorMsgContains("violation.invalid_severity", function()
         AdamantModpackLib_Internal.violate("test.invalid", "broken")
+    end)
+end
+
+function TestLogging:testViolationRejectsUnknownId()
+    lu.assertErrorMsgContains("violation.unknown_id", function()
+        AdamantModpackLib_Internal.violate("test.missing", "broken")
     end)
 end

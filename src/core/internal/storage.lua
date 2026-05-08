@@ -94,7 +94,6 @@ local function PrepareTableNode(node, prefix)
     end
 
     storageInternal.validate(node.row, prefix .. " row")
-    storageInternal.assertPersistedDefaults(node.row, prefix .. " row")
 
     node.minRows = ClampRowCount({ minRows = 0 }, node.minRows or 0)
     node.maxRows = node.maxRows ~= nil and ClampRowCount({ minRows = 0 }, node.maxRows) or nil
@@ -338,12 +337,14 @@ function storageInternal.validate(storage, label)
             end
         end
     end
+
+    storageInternal.validatePersistedDefaults(storage, label)
 end
 
---- Asserts that every persisted root has an effective storage-declared default after validation.
+--- Validates that every persisted root has an effective storage-declared default.
 ---@param storage StorageSchema
 ---@param label string
-function storageInternal.assertPersistedDefaults(storage, label)
+function storageInternal.validatePersistedDefaults(storage, label)
     local prefix = label or "storage"
     for _, root in ipairs(storageInternal.getPersistRoots(storage) or {}) do
         if root.default == nil then

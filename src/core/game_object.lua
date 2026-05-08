@@ -4,27 +4,23 @@ local gameObject = public.gameObject
 
 local ROOT_KEY = "_AdamantModpackLibGameObject"
 
-local function assertNonEmptyString(value, name)
-    if type(value) ~= "string" or value == "" then
-        internal.violate("game_object.invalid_args", "lib.gameObject %s must be a non-empty string", name)
-    end
-end
-
-local function assertObject(object)
-    if type(object) ~= "table" then
-        internal.violate("game_object.invalid_args", "lib.gameObject object must be a table")
-    end
-end
-
 local function tableIsEmpty(value)
     return next(value) == nil
 end
 
 local function getModuleBucket(object, packId, moduleId, key, create)
-    assertObject(object)
-    assertNonEmptyString(packId, "packId")
-    assertNonEmptyString(moduleId, "moduleId")
-    assertNonEmptyString(key, "key")
+    if type(object) ~= "table" then
+        internal.violate("game_object.invalid_args", "lib.gameObject object must be a table")
+    end
+    if type(packId) ~= "string" or packId == "" then
+        internal.violate("game_object.invalid_args", "lib.gameObject packId must be a non-empty string")
+    end
+    if type(moduleId) ~= "string" or moduleId == "" then
+        internal.violate("game_object.invalid_args", "lib.gameObject moduleId must be a non-empty string")
+    end
+    if type(key) ~= "string" or key == "" then
+        internal.violate("game_object.invalid_args", "lib.gameObject key must be a non-empty string")
+    end
 
     local root = rawget(object, ROOT_KEY)
     if root == nil and create then

@@ -226,7 +226,6 @@ function definitionInternal.prepare(owner, definition, ...)
 
     definitionInternal.validate(prepared, label)
     storageInternal.validate(prepared.storage, label)
-    storageInternal.assertPersistedDefaults(prepared.storage, label)
 
     local fingerprint = definitionInternal.getStructuralFingerprint(prepared)
     prepared._preparedDefinition = true
@@ -244,7 +243,7 @@ function definitionInternal.prepare(owner, definition, ...)
                     modpack = prepared.modpack,
                 }
             else
-                public.logging.warn(label,
+                internal.violate("definition.structural_reload_required", "%s: %s", label,
                     "structural definition changed during hot reload; full reload required")
             end
         end

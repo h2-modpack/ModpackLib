@@ -138,8 +138,8 @@ function internal.store.createSession(modConfig, configBackend, storage)
             end
             return true
         end,
-        onUnknownRead = function()
-            return nil
+        onUnknownRead = function(alias)
+            internal.violate("session.unknown_read_alias", "session.read: unknown alias '%s'", tostring(alias))
         end,
     }
 
@@ -161,6 +161,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
                     "session.write: alias '%s' is not staged; use store.writeUnstaged()",
                     tostring(alias)
                 )
+                return false
             end
             return true
         end,
@@ -205,9 +206,11 @@ function internal.store.createSession(modConfig, configBackend, storage)
         local node = type(alias) == "string" and aliasNodes[alias] or nil
         if not node then
             internal.violate("session.unknown_table_alias", "session.table: unknown alias '%s'", tostring(alias))
+            return nil
         end
         if node.type ~= "table" or node._isBitAlias then
             internal.violate("session.invalid_table_alias", "session.table: alias '%s' is not table storage", tostring(alias))
+            return nil
         end
         if not node._stage then
             internal.violate(
@@ -215,6 +218,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
                 "session.table: alias '%s' is not staged; use store.table()",
                 tostring(alias)
             )
+            return nil
         end
 
         return storageInternal.CreateTableHandle(node, {
@@ -233,6 +237,7 @@ function internal.store.createSession(modConfig, configBackend, storage)
         local node = aliasNodes[alias]
         if not node then
             internal.violate("session.unknown_reset_alias", "session.reset: unknown alias '%s'", tostring(alias))
+            return
         end
 
         local defaultValue = ClonePersistedValue(node.default)

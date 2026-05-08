@@ -9,16 +9,6 @@ internal.integrations = internal.integrations or {
 
 local registry = internal.integrations.registry
 
-local function assertNonEmptyString(value, label)
-    if type(value) ~= "string" or value == "" then
-        internal.violate(
-            "integrations.invalid_args",
-            "lib.integrations.%s must be a non-empty string",
-            label
-        )
-    end
-end
-
 local function getBucket(id, create)
     local bucket = registry[id]
     if not bucket and create then
@@ -77,8 +67,12 @@ end
 ---@param api table Provider API table exposed to consumers.
 ---@return table api The registered API table.
 function integrations.register(id, providerId, api)
-    assertNonEmptyString(id, "register: id")
-    assertNonEmptyString(providerId, "register: providerId")
+    if type(id) ~= "string" or id == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.register: id must be a non-empty string")
+    end
+    if type(providerId) ~= "string" or providerId == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.register: providerId must be a non-empty string")
+    end
     if type(api) ~= "table" then
         internal.violate("integrations.invalid_args", "lib.integrations.register: api must be a table")
     end
@@ -96,8 +90,12 @@ end
 ---@param providerId string Stable provider id.
 ---@return boolean removed True when a provider was removed.
 function integrations.unregister(id, providerId)
-    assertNonEmptyString(id, "unregister: id")
-    assertNonEmptyString(providerId, "unregister: providerId")
+    if type(id) ~= "string" or id == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.unregister: id must be a non-empty string")
+    end
+    if type(providerId) ~= "string" or providerId == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.unregister: providerId must be a non-empty string")
+    end
 
     local bucket = getBucket(id, false)
     local removed = removeProviderFromBucket(bucket, providerId)
@@ -109,7 +107,12 @@ end
 ---@param providerId string Stable provider id.
 ---@return number count Number of removed provider registrations.
 function integrations.unregisterProvider(providerId)
-    assertNonEmptyString(providerId, "unregisterProvider: providerId")
+    if type(providerId) ~= "string" or providerId == "" then
+        internal.violate(
+            "integrations.invalid_args",
+            "lib.integrations.unregisterProvider: providerId must be a non-empty string"
+        )
+    end
 
     local count = 0
     for id, bucket in pairs(registry) do
@@ -127,7 +130,9 @@ end
 ---@return table|nil api Provider API table, or nil when absent.
 ---@return string|nil providerId Provider id for the returned API.
 function integrations.get(id)
-    assertNonEmptyString(id, "get: id")
+    if type(id) ~= "string" or id == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.get: id must be a non-empty string")
+    end
 
     return getPreferredProvider(id)
 end
@@ -140,8 +145,12 @@ end
 ---@return any result Provider method result, or fallback.
 ---@return string|nil providerId Provider id that handled the call.
 function integrations.invoke(id, methodName, fallback, ...)
-    assertNonEmptyString(id, "invoke: id")
-    assertNonEmptyString(methodName, "invoke: methodName")
+    if type(id) ~= "string" or id == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.invoke: id must be a non-empty string")
+    end
+    if type(methodName) ~= "string" or methodName == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.invoke: methodName must be a non-empty string")
+    end
 
     local api, providerId = getPreferredProvider(id)
     local method = api and api[methodName] or nil
@@ -151,7 +160,8 @@ function integrations.invoke(id, methodName, fallback, ...)
 
     local ok, result = pcall(method, ...)
     if not ok then
-        public.logging.warn("lib.integrations",
+        internal.violate(
+            "integrations.provider_failed",
             "%s.%s provider '%s' failed: %s",
             tostring(id),
             tostring(methodName),
@@ -167,7 +177,9 @@ end
 ---@param id string Integration id.
 ---@return table[] providers Array of `{ providerId = string, api = table }` entries.
 function integrations.list(id)
-    assertNonEmptyString(id, "list: id")
+    if type(id) ~= "string" or id == "" then
+        internal.violate("integrations.invalid_args", "lib.integrations.list: id must be a non-empty string")
+    end
 
     local bucket = getBucket(id, false)
     local providers = {}

@@ -160,6 +160,23 @@ function TestStore:testRuntimeAliasesUseNarrowStoreAccessor()
     lu.assertStrContains(err, "stage = false")
 end
 
+function TestStore:testDowngradedUnstagedWriteRejectionDoesNotWrite()
+    local previous = AdamantModpackLib_Internal.violationSeverity["store.invalid_unstaged_write"]
+    AdamantModpackLib_Internal.violationSeverity["store.invalid_unstaged_write"] = "warn"
+    CaptureWarnings()
+
+    local config = { Enabled = true, RecordingArmed = false }
+    local store = lib.createStore(config, makeRuntimeDefinition())
+
+    lu.assertFalse(store.writeUnstaged("Enabled", false))
+
+    lu.assertTrue(config.Enabled)
+    lu.assertEquals(#Warnings, 1)
+
+    RestoreWarnings()
+    AdamantModpackLib_Internal.violationSeverity["store.invalid_unstaged_write"] = previous
+end
+
 function TestStore:testSessionRejectsRuntimeWrites()
     local config = { Enabled = true, RecordingArmed = false }
     local _, session = lib.createStore(config, makeRuntimeDefinition())
@@ -171,6 +188,24 @@ function TestStore:testSessionRejectsRuntimeWrites()
     lu.assertFalse(ok)
     lu.assertStrContains(err, "not staged")
     lu.assertFalse(config.RecordingArmed)
+end
+
+function TestStore:testDowngradedSessionRuntimeWriteStillDoesNotStage()
+    local previous = AdamantModpackLib_Internal.violationSeverity["session.invalid_write_surface"]
+    AdamantModpackLib_Internal.violationSeverity["session.invalid_write_surface"] = "warn"
+    CaptureWarnings()
+
+    local config = { Enabled = true, RecordingArmed = false }
+    local _, session = lib.createStore(config, makeRuntimeDefinition())
+
+    session.write("RecordingArmed", true)
+
+    lu.assertFalse(config.RecordingArmed)
+    lu.assertFalse(session.isDirty())
+    lu.assertEquals(#Warnings, 1)
+
+    RestoreWarnings()
+    AdamantModpackLib_Internal.violationSeverity["session.invalid_write_surface"] = previous
 end
 
 TestSession = {}
@@ -379,15 +414,27 @@ end
 function TestSession:testTableStorageDoesNotLeakRowAliasesGlobally()
     local _, session = lib.createStore({}, makeTableDefinition())
 
-    lu.assertNil(session.read("Limit"))
-    lu.assertNil(session.read("ChoiceA"))
+    lu.assertErrorMsgContains("session.unknown_read_alias", function()
+        session.read("Limit")
+    end)
+    lu.assertErrorMsgContains("session.unknown_read_alias", function()
+        session.read("ChoiceA")
+    end)
 end
 
 function TestSession:testSessionWriteUnknownAliasFails()
-    local _, session = lib.createStore({}, makeScalarDefinition())
+    local _, session = lib.createStore({}, makeRuntimeDefinition())
 
     lu.assertErrorMsgContains("unknown alias 'Nope'", function()
         session.write("Nope", true)
+    end)
+end
+
+function TestSession:testSessionReadUnknownAliasFails()
+    local _, session = lib.createStore({}, makeRuntimeDefinition())
+
+    lu.assertErrorMsgContains("session.unknown_read_alias", function()
+        session.read("Nope")
     end)
 end
 
@@ -399,12 +446,76 @@ function TestSession:testSessionResetUnknownAliasFails()
     end)
 end
 
+function TestSession:testDowngradedSessionResetUnknownAliasReturnsSafely()
+    local previous = AdamantModpackLib_Internal.violationSeverity["session.unknown_reset_alias"]
+    AdamantModpackLib_Internal.violationSeverity["session.unknown_reset_alias"] = "warn"
+    CaptureWarnings()
+
+    local _, session = lib.createStore({}, makeRuntimeDefinition())
+
+    session.reset("Nope")
+
+    lu.assertFalse(session.isDirty())
+    lu.assertEquals(#Warnings, 1)
+
+    RestoreWarnings()
+    AdamantModpackLib_Internal.violationSeverity["session.unknown_reset_alias"] = previous
+end
+
 function TestSession:testSessionTableWrongAliasFails()
     local _, session = lib.createStore({}, makeScalarDefinition())
 
     lu.assertErrorMsgContains("is not table storage", function()
         session.table("Enabled")
     end)
+end
+
+function TestSession:testDowngradedSessionTableErrorsReturnNilSafely()
+    local previousUnknown = AdamantModpackLib_Internal.violationSeverity["session.unknown_table_alias"]
+    local previousInvalid = AdamantModpackLib_Internal.violationSeverity["session.invalid_table_alias"]
+    local previousPrint = print
+    local lines = {}
+    AdamantModpackLib_Internal.violationSeverity["session.unknown_table_alias"] = "warn"
+    AdamantModpackLib_Internal.violationSeverity["session.invalid_table_alias"] = "warn"
+    print = function(msg)
+        table.insert(lines, msg)
+    end
+
+    local _, session = lib.createStore({ Enabled = true, MaxGods = 5 }, makeScalarDefinition())
+    local missing = session.table("Missing")
+    local wrongType = session.table("MaxGods")
+
+    print = previousPrint
+    AdamantModpackLib_Internal.violationSeverity["session.unknown_table_alias"] = previousUnknown
+    AdamantModpackLib_Internal.violationSeverity["session.invalid_table_alias"] = previousInvalid
+
+    lu.assertNil(missing)
+    lu.assertNil(wrongType)
+    lu.assertEquals(#lines, 2)
+end
+
+function TestSession:testDowngradedStoreTableErrorsReturnNilSafely()
+    local previousUnknown = AdamantModpackLib_Internal.violationSeverity["store.unknown_table_alias"]
+    local previousInvalid = AdamantModpackLib_Internal.violationSeverity["store.invalid_table_alias"]
+    local previousPrint = print
+    local lines = {}
+    AdamantModpackLib_Internal.violationSeverity["store.unknown_table_alias"] = "warn"
+    AdamantModpackLib_Internal.violationSeverity["store.invalid_table_alias"] = "warn"
+    print = function(msg)
+        table.insert(lines, msg)
+    end
+
+    local store = lib.createStore({ Enabled = true, MaxGods = 5 }, makeScalarDefinition())
+    local missing = store.table("Missing")
+    local wrongType = store.table("MaxGods")
+
+    print = previousPrint
+    AdamantModpackLib_Internal.violationSeverity["store.unknown_table_alias"] = previousUnknown
+    AdamantModpackLib_Internal.violationSeverity["store.invalid_table_alias"] = previousInvalid
+
+    lu.assertNil(missing)
+    lu.assertNil(wrongType)
+    lu.assertEquals(#lines, 2)
 end
 
 function TestSession:testReadonlyViewDoesNotExposeMutableTableRoot()

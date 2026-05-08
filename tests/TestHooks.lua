@@ -92,7 +92,7 @@ end
 local function createHostWithHooks(owner, registerHooks)
     return lib.createModuleHost({
         pluginGuid = "hook-test-module",
-        definition = { id = "HookTest", name = "Hook Test", storage = {} },
+        definition = lib.prepareDefinition({}, { id = "HookTest", name = "Hook Test", storage = {} }),
         store = {
             read = function()
                 return false
@@ -331,7 +331,7 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
 
     lib.createModuleHost({
         pluginGuid = "hook-pack.Alpha",
-        definition = {
+        definition = lib.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
@@ -343,7 +343,7 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
             revert = function()
                 revertCalls = revertCalls + 1
             end,
-        },
+        }),
         store = {
             read = function(key)
                 if key == "Enabled" then
@@ -410,7 +410,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
 
     lib.createModuleHost({
         pluginGuid = "hook-reload-pack.Alpha",
-        definition = {
+        definition = lib.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
@@ -422,7 +422,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
             revert = function()
                 firstRevertCalls = firstRevertCalls + 1
             end,
-        },
+        }),
         store = store,
         session = createSession(),
         drawTab = function() end,
@@ -430,7 +430,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
 
     lib.createModuleHost({
         pluginGuid = "hook-reload-pack.Alpha",
-        definition = {
+        definition = lib.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
@@ -442,7 +442,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
             revert = function()
                 secondRevertCalls = secondRevertCalls + 1
             end,
-        },
+        }),
         store = store,
         session = createSession(),
         drawTab = function() end,

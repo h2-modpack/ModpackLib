@@ -64,8 +64,8 @@ function public.createModuleHost(opts)
     local def = opts.definition
     local store = opts.store
     local session = opts.session
-    if type(def) ~= "table" then
-        internal.violate("host.invalid_create_opts", "createModuleHost: definition is required")
+    if type(def) ~= "table" or def._preparedDefinition ~= true then
+        internal.violate("host.invalid_create_opts", "createModuleHost: prepared definition is required")
     end
     if not (store and type(store.read) == "function") then
         internal.violate("host.invalid_create_opts", "createModuleHost: store is required")
