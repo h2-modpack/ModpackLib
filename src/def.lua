@@ -73,7 +73,6 @@ local lib = {}
 ---@class AdamantModpackLib.ManagedStore
 ---@field read fun(alias: string): any
 ---@field table fun(alias: string): AdamantModpackLib.StorageTableReadOnly?
----@field getAliasSchema fun(alias: string): AdamantModpackLib.StorageNode|AdamantModpackLib.PackedBitNode|nil Read-only schema metadata.
 ---@field writeUnstaged fun(alias: string, value: any): boolean
 
 ---@class AdamantModpackLib.Session

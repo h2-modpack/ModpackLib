@@ -212,11 +212,14 @@ function widgetHelpers.ClearPackedChoiceSelection(session, children, selection)
 end
 
 function widgetHelpers.ResolvePackedChildren(session, alias)
-    local children = {}
-    if not session or type(session.getAliasSchema) ~= "function" then
-        return children
+    if type(session) ~= "table" or type(session.getAliasSchema) ~= "function" then
+        internal.violate(
+            "widgets.invalid_packed_session",
+            "packed widgets require a session with getAliasSchema(alias)"
+        )
     end
 
+    local children = {}
     local node = session.getAliasSchema(alias)
     for _, child in ipairs(storageInternal.getPackedAliases(node)) do
         children[#children + 1] = {

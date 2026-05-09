@@ -89,11 +89,10 @@ local function makePackedStore()
         storage = storage,
     })
     local config = { Enabled = false, DebugMode = false, Packed = 0 }
-    local store, session = lib.createStore(config, definition)
+    local _, session = lib.createStore(config, definition)
     lu.assertEquals(session.getAliasSchema("Packed").alias, "Packed")
     lu.assertEquals(session.getAliasSchema("Second").alias, "Second")
-    lu.assertEquals(store.getAliasSchema("Packed"), session.getAliasSchema("Packed"))
-    return store, session
+    return session
 end
 
 function TestWidgets:testPlainDropdownUsesNativePreview()
@@ -168,7 +167,7 @@ function TestWidgets:testStepperUsesStableButtonIdsAndWritesIncrement()
 end
 
 function TestWidgets:testPackedDropdownResolvesChildrenFromSessionSchema()
-    local _, session = makePackedStore()
+    local session = makePackedStore()
     session.write("Second", true)
     local imgui, state = makeDropdownImgui()
 

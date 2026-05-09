@@ -80,6 +80,7 @@ function TestLogging:testViolationPolicyMatchesSourceCallSites()
         "src/core/internal/storage.lua",
         "src/core/internal/storage_types.lua",
         "src/core/internal/store.lua",
+        "src/widgets/widget_helpers.lua",
     }
 
     for _, path in ipairs(files) do
@@ -108,6 +109,7 @@ function TestLogging:testViolationPolicyHasNoOrphanIds()
         "src/core/internal/storage.lua",
         "src/core/internal/storage_types.lua",
         "src/core/internal/store.lua",
+        "src/widgets/widget_helpers.lua",
     }
     local referenced = {}
 

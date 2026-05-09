@@ -43,7 +43,6 @@ local NormalizeStorageValue = storageInternal.NormalizeStorageValue
 ---@class ManagedStore
 ---@field read fun(alias: string): any
 ---@field table fun(alias: string): StorageTableReadOnly|nil
----@field getAliasSchema fun(alias: string): StorageNode|PackedBitNode|nil
 ---@field writeUnstaged fun(alias: string, value: any)
 
 local ConfigBackendCache = setmetatable({}, { __mode = "k" })
@@ -303,14 +302,6 @@ function public.createStore(modConfig, definition)
             readRoot = readRootNode,
             normalizedRoot = true,
         })
-    end
-
-    --- Returns prepared storage metadata for a declared alias.
-    --- Store and session expose the same schema nodes; only their value surfaces differ.
-    ---@param alias string
-    ---@return StorageNode|PackedBitNode|nil node
-    function store.getAliasSchema(alias)
-        return aliasNodes[alias]
     end
 
     local function writeStoreValue(alias, value)

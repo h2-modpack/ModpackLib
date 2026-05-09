@@ -50,7 +50,7 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(store.read("Flag"), true)
     lu.assertNotNil(authorSchemaNode)
     lu.assertEquals(authorSchemaNode.alias, "Flag")
-    lu.assertEquals(store.getAliasSchema("Flag"), authorSchemaNode)
+    lu.assertEquals(authorSchemaNode.type, "bool")
     lu.assertEquals(type(owner._definitionStructuralFingerprint), "string")
 end
 

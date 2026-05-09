@@ -133,6 +133,11 @@ local DefaultViolationPolicy = {
         description = "Overlay registration requires valid ids, draw functions, and column descriptors.",
     },
 
+    ["widgets.invalid_packed_session"] = {
+        severity = "error",
+        description = "Packed widgets require a session exposing prepared storage schema metadata.",
+    },
+
     ["session.unknown_reset_alias"] = {
         severity = "error",
         description = "Session reset only accepts declared staged storage aliases.",

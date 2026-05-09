@@ -261,7 +261,6 @@ call with a session from another. Recreate the pair together on module reload.
 Returned surface:
 - `store.read(alias)`
 - `store.table(alias)`
-- `store.getAliasSchema(alias)`
 - `store.writeUnstaged(alias, value)` returns whether the write was accepted
 
 Persisted writes happen through semantic helpers or session flushes:
@@ -411,10 +410,10 @@ When a module is rendered through `lib.createModuleHost(...)`, draw callbacks re
 - `getAliasSchema(alias)`
 - `resetToDefaults(opts?)`
 
-`store` and `session` expose the same prepared storage schema nodes through
-`getAliasSchema(alias)`. Values differ by surface; metadata does not. Treat the
-returned nodes as read-only metadata owned by Lib storage preparation. Widgets
-use this metadata for composite storage such as packed roots.
+`session.getAliasSchema(alias)` exposes prepared storage schema metadata for UI
+and widget plumbing. Treat the returned nodes as read-only metadata owned by Lib
+storage preparation. Widgets use this metadata for composite storage such as
+packed roots.
 
 Behavior:
 - persisted aliases stage in `session` and only hit config on flush/commit
