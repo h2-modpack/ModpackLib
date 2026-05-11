@@ -99,6 +99,15 @@ function internal.RegisterHooks(host, store)
 end
 ```
 
+Callback argument order follows a stable convention:
+- work surface first when a callback has one, such as `imgui` for draw callbacks or `plan` for patch mutation callbacks
+- state/context handle next, using `session` for staged UI state and `host` for runtime/module context
+- `store` last when persisted runtime values are needed
+
+Examples: `drawTab(imgui, session, host)`, `registerHooks(host, store)`,
+`registerPatchMutation(plan, host, store)`, and manual mutation
+`apply(host, store)` / `revert(host, store)`.
+
 ## Definition Rules
 
 Meaningful prepared definition fields:
