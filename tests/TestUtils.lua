@@ -159,3 +159,18 @@ dofile("src/main.lua")
 
 -- Alias for convenience
 lib = public
+
+HostLifecycle = import("core/module_bootstrap/private_host_lifecycle.lua", nil, {
+    internal = AdamantModpackLib_Internal,
+    mutation = AdamantModpackLib_Internal.mutation,
+    clone = AdamantModpackLib_Internal.values.deepCopy,
+    isCoordinatorRegistered = lib.coordinator.isRegistered,
+    setupRunData = function()
+        return rom.game.SetupRunData()
+    end,
+})
+
+function CreateModuleState(config, definition)
+    local state = AdamantModpackLib_Internal.moduleState.create(config, definition)
+    return state.store, state.session
+end

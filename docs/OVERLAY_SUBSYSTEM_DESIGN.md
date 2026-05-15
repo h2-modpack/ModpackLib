@@ -24,7 +24,7 @@ Modules own:
 - Do not add a general custom event bus in the overlay subsystem.
 - Do not allow overlay callbacks to mutate store values directly.
 - Do not make overlay callbacks equivalent to hooks; overlay callbacks are projection callbacks.
-- Do not remove the low-level overlay functions in the first implementation.
+- Do not expose low-level HUD/stacked renderer primitives as module-author APIs.
 
 ## Module API
 
@@ -288,19 +288,17 @@ Activation behavior:
 - If a later activation step fails, rollback restores the previous overlay registrations.
 - Failed activation must not leave newly created overlay elements or subscriptions active.
 
-## Low-Level Overlay APIs
+## Renderer Internals
 
-The retained API builds on the existing low-level overlay primitives. The first implementation should keep
-the lower-level functions available:
+The retained API builds on private HUD component and stacked-layout renderer functions. Module authors
+should not register HUD components or stacked rows directly.
 
-- `lib.overlays.registerHudText`
-- `lib.overlays.registerStackedText`
-- `lib.overlays.registerStackedRow`
-- `lib.overlays.refreshHudText`
-- `lib.overlays.refreshStackedText`
-- `lib.overlays.suppressForUi`
+- `lib.overlays.defineOwned` is the retained system-overlay entry point.
+- Module `registerOverlays` is the retained module-overlay entry point.
+- `lib.overlays.suppressForUi` remains public because Framework and standalone module UIs need to hide
+  overlays while foreground configuration UI is open.
 
-New module code should prefer retained owner-scoped declarations through `registerOverlays`.
+New code should use retained owner-scoped declarations only.
 
 ## Timer Target Shape
 

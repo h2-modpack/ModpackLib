@@ -38,7 +38,7 @@ Safe to rebuild on every module `init`:
 - `definition`
 - `store`
 - `session`
-- live module host created by `lib.createModule(...)` and activated by `host.activate()`
+- live module host created by `lib.createModule(...)` and activated by `host.tryActivate()`
 - UI draw closures
 - lookup tables derived from current imports
 
@@ -128,11 +128,11 @@ The important part is the split:
 
 ## Coordinated Module Host Refresh
 
-`lib.createModule(...)` plus `host.activate()` is the normal behavior refresh boundary for a coordinated module.
+`lib.createModule(...)` plus `host.tryActivate()` is the normal behavior refresh boundary for a coordinated module.
 
 During module creation and activation:
 - the module host closes over the current `definition`, `store`, and `session`
-- `host.activate()` publishes the live host
+- `host.tryActivate()` publishes the live host
 - Lib refreshes that owner's hook registrations; absent hook registrations for that owner are deactivated
 - Lib refreshes integration registrations under required `definition.id`; absent integration providers for that module id are removed
 - if the coordinator for `definition.modpack` is already registered, Lib immediately syncs live mutation state
@@ -184,7 +184,7 @@ The model is:
 - use a persistent owner table, typically the module `MODULE_ANCHOR`
 - register hook sites from `registerHooks(host, store)`
 - pass `owner` and `registerHooks` into `lib.createModule(...)`
-- call `host.activate()` after construction
+- call `host.tryActivate()` after construction
 - Lib runs the full registration pass during module activation
 
 Behavior:
@@ -222,7 +222,7 @@ implementation reloads.
 Important properties:
 - active tracked mutation state survives store recreation during module reload
 - active state is keyed by stable module identity when available
-- `applyOnLoad` synchronizes live mutation state to the module's effective enabled state
+- host startup sync synchronizes live mutation state to the module's effective enabled state
 - if a module is disabled on reload, tracked active mutation state is reverted
 
 This keeps run-data patch lifecycles coherent across reloads.
@@ -240,8 +240,8 @@ Important consequences:
 - standalone module windows remain suppressed for coordinated modules
 - standalone startup lifecycle applies only when the module is not coordinated
 
-Framework calls `applyOnLoad()` for discovered coordinated modules during pack init.
-`lib.standaloneHost(...)` calls `applyOnLoad()` for standalone modules during standalone startup.
+Framework calls `host.applyOnLoad()` for discovered coordinated modules during pack init.
+`lib.standaloneHost(...)` calls `host.applyOnLoad()` for standalone modules during standalone startup.
 Activation also syncs live mutation state immediately when the module is already coordinated, so non-structural module reloads resync live runtime state without a pack rebuild.
 
 ## Safety By Scenario
@@ -304,7 +304,7 @@ coordinated path, use a full reload.
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
 - register runtime hooks through `registerHooks(host, store)` and ownerless `lib.hooks.*`
 - pass `owner` and `registerHooks` to `lib.createModule(...)` when the module owns runtime hooks
-- call `host.activate()` after construction
+- call `host.tryActivate()` after construction
 - keep stable GUI callbacks outside `init`
 - late-read current framework or module state from those stable callbacks when a stale closure would matter
 - do not use raw ModUtil path wraps for repo-owned hot-reload-sensitive hook sites

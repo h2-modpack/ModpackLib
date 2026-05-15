@@ -21,7 +21,7 @@ Keep the public surface:
 - Do not widen the public API casually.
 - Keep docs aligned with code in the same change.
 - Document the supported contract directly.
-- Keep storage schema behavior behind `lib.createStore` / internal storage; keep UI authoring in `lib.widgets` / `lib.nav`.
+- Keep storage schema behavior behind `lib.createModule(...)` / internal storage; keep UI authoring in `lib.widgets` / `lib.nav`.
 - Unknown module misuse may warn and degrade where intended. Lib-owned contract breakage should fail loudly.
 
 ## Validation

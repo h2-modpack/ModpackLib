@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Lib now injects `Enabled` and `DebugMode` as built-in prepared storage aliases instead of requiring module-authored config defaults.
 - Module definitions now require both stable `id` and display `name`; `modpack` remains optional.
 - Module callbacks receive the author host consistently: `registerHooks(host, store)`, `registerIntegrations(host, store)`, `registerPatchMutation(plan, host, store)`, manual mutation `apply(host, store)` / `revert(host, store)`, `onSettingsCommitted(host, store, commit)`, `drawTab(imgui, session, host)`, and `drawQuickContent(imgui, session, host)`.
+- Module authors now construct through `lib.createModule(...)` / `lib.tryCreateModule(...)` and activate through `host.tryActivate()`; lower-level definition/state/host construction is internal.
 - Host activation now refreshes hook and integration generations transactionally so omitted hook/integration registrations are removed on reload and late activation failures roll back refreshed hook state.
 - Persistent runtime-cache module state is now declared with `stage = false, hash = false`, read through `store.read(...)`, and written through `store.writeUnstaged(...)`.
 - Added first-class table storage roots with row-scoped aliases, staged table handles, read-only store table handles, packed child row access, and hash/profile serialization.
@@ -24,7 +25,7 @@ All notable changes to this project will be documented in this file.
 - Added a LuaLS public definition file at `src/def.lua` for the Lib module export, storage/session types, module host contract, lifecycle helpers, mutation plans, widgets, nav, hooks, integrations, hashing, logging, and ImGui helpers.
 - Added Lib-owned live-host publication and lookup through `lib.getLiveModuleHost(...)`.
 - Added reload-stable ModUtil hook registration through `lib.hooks.Wrap(...)`, `lib.hooks.Override(...)`, and `lib.hooks.Context.Wrap(...)`.
-- Added coordinated pack rebuild callbacks through `lib.lifecycle.registerCoordinatorRebuild(...)` and `lib.lifecycle.requestCoordinatorRebuild(...)`.
+- Added coordinated pack rebuild callbacks through `lib.coordinator.registerRebuild(...)` and `lib.coordinator.requestRebuild(...)`.
 - Added optional cross-module integration registration through `lib.integrations.*`.
 - Added `lib.imguiHelpers.*` enum/value helpers for low-level ImGui binding use.
 - Added `lib.overlays.*` retained HUD overlay helpers with managed `middleRightStack` layout, stacked text, stacked rows, and framework/module/debug order bands.
@@ -37,7 +38,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Module authoring now uses the explicit `prepareDefinition(...) -> createStore(...) -> createModuleHost(...)` flow.
+- Module authoring now uses the explicit `prepareDefinition(...) -> createModuleState(...) -> createModuleHost(...)` flow.
 - Effective storage defaults are hydrated during definition preparation, before structural fingerprinting.
 - Structural definition changes are fingerprinted separately from behavior-only changes.
 - Coordinated modules can request a Framework rebuild when structural definition shape changes during hot reload.
@@ -46,10 +47,10 @@ All notable changes to this project will be documented in this file.
 - `createModuleHost(...)` and `standaloneHost(...)` now require an explicit plugin guid captured at module load time.
 - Manual lifecycle hooks now receive the active author host and managed store as `apply(host, store)` and `revert(host, store)`.
 - Mutation lifecycle state is tracked by stable module identity where available, making reload/reapply behavior more robust.
-- `lib.lifecycle.applyOnLoad(...)` now reverts active tracked mutation state when a module reloads disabled.
+- Host startup sync now reverts active tracked mutation state when a module reloads disabled.
 - Store creation now requires prepared definitions with explicit storage.
 - Runtime-only storage aliases are excluded from session staging, profile/hash surfaces, and reset-to-defaults flows.
-- Host `writeAndFlush(...)`, `flush()`, and lifecycle `commitSession(...)` now notify `onSettingsCommitted` after successful dirty commits.
+- Host `writeAndFlush(...)` and `flush()` now notify `onSettingsCommitted` after successful dirty commits.
 - The fallback HUD marker now participates in the shared overlay layout instead of owning a separate HUD placement path.
 - Standalone module UI now suppresses Lib overlays while open and restores them on close after pending runtime flushes.
 - Internal helper duplication was consolidated into shared internal value/store utilities.
@@ -83,23 +84,22 @@ Initial public release of the adamant Modpack Lib surface.
 
 ### Added
 
-- managed module storage through `lib.createStore(config, definition, dataDefaults?)`
+- managed module storage through `lib.createModuleState(config, definition)`
 - explicit staged UI state through the returned `session`
 - host-based module wiring through `lib.createModuleHost(...)`
 - standalone window/menu hosting through `lib.standaloneHost(...)`
-- lifecycle helpers under `lib.lifecycle.*`
+- coordinator helpers under `lib.coordinator.*`
 - mutation helpers under `lib.mutation.*`
 - hashing and packed-bit helpers under `lib.hashing.*`
 - immediate-mode widget helpers under `lib.widgets.*`
 - immediate-mode navigation helpers under `lib.nav.*`
-- shared logging helpers under `lib.logging.*`
 - managed storage support for:
   - `bool`
   - `int`
   - `string`
   - `packedInt`
 - transactional session commit/resync support for host and framework flows
-- coordinated-pack enable-state support through `lib.isModuleCoordinated(...)` and `lib.isModuleEnabled(...)`
+- coordinated-pack enable-state support through `lib.coordinator.isRegistered(...)` and `host.isEnabled()`
 - standalone and framework-friendly module authoring contract based on:
   - `public.definition`
   - `public.host`

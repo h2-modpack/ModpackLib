@@ -21,10 +21,10 @@ Any unnecessary allocation or repeated C-boundary call inside those paths shows 
 
 This document assumes:
 - raw `config` stays local to `main.lua`
-- `local definition = lib.prepareDefinition(...)` and `local store, session = lib.createStore(config, definition)` are the contract/state boundaries
+- `lib.createModule(...)` owns the definition and state construction boundary
 - draw code reads staged values from `session.view`
 - runtime/gameplay code reads persisted values through `store.read(...)`
-- debug toggles write persisted values through `lib.lifecycle.setDebugMode(store, ...)`
+- debug toggles write persisted values through the host/framework flow
 - hash/profile plumbing stages arbitrary values through `session.write(...)` and flushes with `session._flushToConfig()`
 - framework/host own `session` commit timing
 - standalone UI goes through `lib.standaloneHost(...)`
@@ -145,7 +145,7 @@ Do not rebuild the same large option table multiple times in the same frame.
 - splitting one draw flow into extra lifecycle phases without a real need
 - calling `store.read(...)` repeatedly inside draw code for values already present in `session.view`
 - doing config writes directly from draw code instead of staging through `session`
-- using `lib.lifecycle.setDebugMode(...)` from draw code for normal widget edits
+- bypassing the host/framework flow for normal widget edits
 
 
 

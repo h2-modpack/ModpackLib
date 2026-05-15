@@ -7,7 +7,7 @@ local lu = require('luaunit')
 TestIsEnabled = {}
 
 local function makeStore(enabled)
-    return lib.createStore({ Enabled = enabled }, lib.prepareDefinition({}, {
+    return CreateModuleState({ Enabled = enabled }, AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "IsEnabledStore",
         name = "Is Enabled Store",
         storage = {},
@@ -16,43 +16,43 @@ end
 
 -- Reset the "test-pack" coordinator slot before each test.
 function TestIsEnabled:setUp()
-    lib.lifecycle.registerCoordinator("test-pack", nil)
+    lib.coordinator.register("test-pack", nil)
 end
 
 -- no coordinator registered
 function TestIsEnabled:testEnabledStandalone()
-    lu.assertTrue(lib.isModuleEnabled(makeStore(true), "test-pack"))
+    lu.assertTrue(HostLifecycle.isEnabled(makeStore(true), "test-pack"))
 end
 
 function TestIsEnabled:testDisabledStandalone()
-    lu.assertFalse(lib.isModuleEnabled(makeStore(false), "test-pack"))
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(false), "test-pack"))
 end
 
 function TestIsEnabled:testEnabledNoPackId()
-    lu.assertTrue(lib.isModuleEnabled(makeStore(true)))
-    lu.assertFalse(lib.isModuleEnabled(makeStore(false)))
+    lu.assertTrue(HostLifecycle.isEnabled(makeStore(true)))
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(false)))
 end
 
 -- coordinator registered with ModEnabled = true
 function TestIsEnabled:testEnabledWithCoordEnabled()
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
-    lu.assertTrue(lib.isModuleEnabled(makeStore(true), "test-pack"))
+    lib.coordinator.register("test-pack", { ModEnabled = true })
+    lu.assertTrue(HostLifecycle.isEnabled(makeStore(true), "test-pack"))
 end
 
 function TestIsEnabled:testDisabledWithCoordEnabled()
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
-    lu.assertFalse(lib.isModuleEnabled(makeStore(false), "test-pack"))
+    lib.coordinator.register("test-pack", { ModEnabled = true })
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(false), "test-pack"))
 end
 
 -- coordinator registered with ModEnabled = false (pack-level off overrides module)
 function TestIsEnabled:testEnabledWithCoordDisabled()
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = false })
-    lu.assertFalse(lib.isModuleEnabled(makeStore(true), "test-pack"))
+    lib.coordinator.register("test-pack", { ModEnabled = false })
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(true), "test-pack"))
 end
 
 function TestIsEnabled:testDisabledWithCoordDisabled()
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = false })
-    lu.assertFalse(lib.isModuleEnabled(makeStore(false), "test-pack"))
+    lib.coordinator.register("test-pack", { ModEnabled = false })
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(false), "test-pack"))
 end
 
 -- =============================================================================
@@ -62,28 +62,28 @@ end
 TestIsCoordinated = {}
 
 function TestIsCoordinated:setUp()
-    lib.lifecycle.registerCoordinator("test-pack", nil)
-    lib.lifecycle.registerCoordinator("other-pack", nil)
+    lib.coordinator.register("test-pack", nil)
+    lib.coordinator.register("other-pack", nil)
 end
 
 function TestIsCoordinated:testNotCoordinatedByDefault()
-    lu.assertFalse(lib.isModuleCoordinated("test-pack"))
+    lu.assertFalse(lib.coordinator.isRegistered("test-pack"))
 end
 
 function TestIsCoordinated:testCoordinatedAfterRegister()
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
-    lu.assertTrue(lib.isModuleCoordinated("test-pack"))
+    lib.coordinator.register("test-pack", { ModEnabled = true })
+    lu.assertTrue(lib.coordinator.isRegistered("test-pack"))
 end
 
 function TestIsCoordinated:testUnrelatedPackNotCoordinated()
-    lib.lifecycle.registerCoordinator("other-pack", { ModEnabled = true })
-    lu.assertFalse(lib.isModuleCoordinated("test-pack"))
+    lib.coordinator.register("other-pack", { ModEnabled = true })
+    lu.assertFalse(lib.coordinator.isRegistered("test-pack"))
 end
 
 function TestIsCoordinated:testClearedByNilRegister()
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
-    lib.lifecycle.registerCoordinator("test-pack", nil)
-    lu.assertFalse(lib.isModuleCoordinated("test-pack"))
+    lib.coordinator.register("test-pack", { ModEnabled = true })
+    lib.coordinator.register("test-pack", nil)
+    lu.assertFalse(lib.coordinator.isRegistered("test-pack"))
 end
 
 -- =============================================================================
@@ -93,40 +93,40 @@ end
 TestRegisterCoordinator = {}
 
 function TestRegisterCoordinator:setUp()
-    lib.lifecycle.registerCoordinator("pack-a", nil)
-    lib.lifecycle.registerCoordinator("pack-b", nil)
+    lib.coordinator.register("pack-a", nil)
+    lib.coordinator.register("pack-b", nil)
 end
 
 function TestRegisterCoordinator:testMultiplePacksIndependent()
-    lib.lifecycle.registerCoordinator("pack-a", { ModEnabled = true })
-    lib.lifecycle.registerCoordinator("pack-b", { ModEnabled = false })
-    lu.assertTrue(lib.isModuleCoordinated("pack-a"))
-    lu.assertTrue(lib.isModuleCoordinated("pack-b"))
-    lu.assertTrue(lib.isModuleEnabled(makeStore(true), "pack-a"))
-    lu.assertFalse(lib.isModuleEnabled(makeStore(true), "pack-b"))
+    lib.coordinator.register("pack-a", { ModEnabled = true })
+    lib.coordinator.register("pack-b", { ModEnabled = false })
+    lu.assertTrue(lib.coordinator.isRegistered("pack-a"))
+    lu.assertTrue(lib.coordinator.isRegistered("pack-b"))
+    lu.assertTrue(HostLifecycle.isEnabled(makeStore(true), "pack-a"))
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(true), "pack-b"))
 end
 
 function TestRegisterCoordinator:testRegisterCoordinatorRejectsInvalidConfig()
     lu.assertErrorMsgContains("packId must be a non-empty string", function()
-        lib.lifecycle.registerCoordinator("", { ModEnabled = true })
+        lib.coordinator.register("", { ModEnabled = true })
     end)
     lu.assertErrorMsgContains("config.ModEnabled must be a boolean", function()
-        lib.lifecycle.registerCoordinator("bad-pack", {})
+        lib.coordinator.register("bad-pack", {})
     end)
 end
 
 function TestRegisterCoordinator:testCoordinatorRegistrySurvivesLibReload()
-    lib.lifecycle.registerCoordinator("pack-a", { ModEnabled = false })
-    lib.lifecycle.registerCoordinatorRebuild("pack-a", function()
+    lib.coordinator.register("pack-a", { ModEnabled = false })
+    lib.coordinator.registerRebuild("pack-a", function()
         return true
     end)
 
     dofile("src/main.lua")
     lib = public
 
-    lu.assertTrue(lib.isModuleCoordinated("pack-a"))
-    lu.assertFalse(lib.isModuleEnabled(makeStore(true), "pack-a"))
-    lu.assertTrue(lib.lifecycle.requestCoordinatorRebuild("pack-a", {
+    lu.assertTrue(lib.coordinator.isRegistered("pack-a"))
+    lu.assertFalse(HostLifecycle.isEnabled(makeStore(true), "pack-a"))
+    lu.assertTrue(lib.coordinator.requestRebuild("pack-a", {
         kind = "test",
     }))
 end

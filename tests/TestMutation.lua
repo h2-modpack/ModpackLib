@@ -238,8 +238,8 @@ function TestMutation:testManualLifecycleHooksReceiveStore()
         },
     }
 
-    lu.assertTrue(lib.lifecycle.applyMutation(def, mutation, nil, store))
-    lu.assertTrue(lib.lifecycle.revertMutation(def, mutation, nil, store))
+    lu.assertTrue(AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, store))
+    lu.assertTrue(AdamantModpackLib_Internal.mutation.revert(def, mutation, nil, store))
     lu.assertEquals(reads, { "Mode", "Mode" })
 end
 
@@ -263,6 +263,6 @@ function TestMutation:testManualLifecycleFallbackRevertReceivesStore()
         },
     }
 
-    lu.assertTrue(lib.lifecycle.revertMutation(def, mutation, nil, store))
+    lu.assertTrue(AdamantModpackLib_Internal.mutation.revert(def, mutation, nil, store))
     lu.assertTrue(reverted)
 end

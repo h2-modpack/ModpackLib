@@ -42,13 +42,13 @@ A module is built from four main pieces:
 - `session`
   Staged UI state. Draw code edits this and host/framework plumbing commits it later.
 - `host`
-  The author-facing view returned by `lib.createModule(...)`. Call `host.activate()` after construction so Framework and standalone hosting can use the registered live host.
+  The author-facing view returned by `lib.createModule(...)`. Call `host.tryActivate()` after construction so Framework and standalone hosting can use the registered live host.
 
 Typical module flow:
 
 1. `main.lua` calls `lib.createModule(...)`.
 2. The returned author host is kept local in `main.lua`.
-3. `host.activate()` registers hooks, integrations, and the live host.
+3. `host.tryActivate()` registers hooks, integrations, and the live host.
 4. UI code edits staged values through the session passed into draw callbacks.
 5. Host/framework plumbing commits staged persistent values when appropriate.
 6. Gameplay logic reads persisted state through `store.read(...)`.
@@ -136,7 +136,7 @@ local host = lib.createModule({
     },
     drawTab = function() end,
 })
-host.activate()
+host.tryActivate()
 ```
 
 Every module must declare `id` and `name`. Coordinated modules also declare
@@ -198,7 +198,7 @@ local host = lib.createModule({
     },
     drawTab = function() end,
 })
-host.activate()
+host.tryActivate()
 ```
 
 Rules:
@@ -233,7 +233,7 @@ local host = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 ```
 
 The draw path receives the restricted author-facing session through the live host.
@@ -319,7 +319,7 @@ local host = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 ```
 
 This is the main module export.
@@ -334,7 +334,7 @@ If the module has no runtime hooks, `registerHooks` may be omitted.
 
 If the module belongs to a Framework-managed pack:
 
-- `host.activate()` registers the module in Lib's live-host registry
+- `host.tryActivate()` registers the module in Lib's live-host registry
 - Framework calls `host.drawTab(...)`
 - optional quick setup uses `host.drawQuickContent(...)`
 

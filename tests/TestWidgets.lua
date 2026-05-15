@@ -91,14 +91,14 @@ local function makePackedStore()
             },
         },
     }
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         modpack = "test-pack",
         id = "PackedWidgetTest",
         name = "Packed Widget Test",
         storage = storage,
     })
     local config = { Enabled = false, DebugMode = false, Packed = 0 }
-    local _, session = lib.createStore(config, definition)
+    local _, session = CreateModuleState(config, definition)
     lu.assertEquals(session.getAliasSchema("Packed").alias, "Packed")
     lu.assertEquals(session.getAliasSchema("Second").alias, "Second")
     return session
@@ -192,7 +192,7 @@ function TestWidgets:testPackedDropdownResolvesChildrenFromSessionSchema()
 end
 
 function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         modpack = "test-pack",
         id = "PackedWidgetRowTest",
         name = "Packed Widget Row Test",
@@ -214,7 +214,7 @@ function TestWidgets:testPackedDropdownAcceptsTableRowHandle()
             },
         },
     })
-    local _, session = lib.createStore({}, definition)
+    local _, session = CreateModuleState({}, definition)
     local row = session.table("Rows"):rowHandle(1)
     row.write("Second", true)
     local imgui, state = makeDropdownImgui()

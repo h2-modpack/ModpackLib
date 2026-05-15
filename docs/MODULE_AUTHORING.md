@@ -12,12 +12,12 @@ Module code should use:
 - `lib.config`
 - `lib.createModule(...)`
 - `lib.standaloneHost(...)`
-- `lib.isModuleCoordinated(...)`
+- `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hooks.*`
 - `lib.hashing.*`
 - `lib.mutation.*`
-- `lib.lifecycle.*`
+- `lib.coordinator.*`
 - `lib.widgets.*`
 - `lib.nav.*`
 
@@ -67,19 +67,17 @@ local host = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 ```
 
 This example assumes coordinated/framework hosting.
 For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
 If the module does not register runtime hooks, omit `registerHooks`.
 
-`lib.createModule(...)` is the recommended path. The lower-level
-`prepareDefinition(...)`, `createStore(...)`, and `createModuleHost(...)`
-functions remain available when a module needs custom construction.
+`lib.createModule(...)` is the supported module construction path.
 For `createModule(...)`, `owner` is the single persistent owner for structural
 hot-reload tracking and hook refresh ownership.
-Call `host.activate()` after construction. That activation step publishes the
+Call `host.tryActivate()` after construction. That activation step publishes the
 live host, registers hooks, runs integrations, and syncs initial runtime behavior.
 Pack-level orchestrators can use `lib.tryCreateModule(...)` and
 `host.tryActivate()` when an invalid module should be logged and skipped rather
@@ -342,13 +340,13 @@ local host = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 ```
 
 Rules:
 - use a persistent owner table such as the module `internal`
 - declare hook sites inside `RegisterHooks(host, store)`
-- call `host.activate()` after construction
+- call `host.tryActivate()` after construction
 - use the keyed overload when one owner needs several hooks on the same path
 
 ## Mutation Lifecycle
@@ -380,7 +378,7 @@ local host = lib.createModule({
     end,
     drawTab = internal.DrawTab,
 })
-host.activate()
+host.tryActivate()
 ```
 
 Lib applies and reverts these mutations through the live host. Module authors
@@ -389,7 +387,7 @@ normally provide the callbacks and let `createModule(...)` wire the lifecycle.
 ## Coordinated Modules
 
 Framework discovery requires:
-- a live host registered by `host.activate()`
+- a live host registered by `host.tryActivate()`
 - `host.getIdentity()`
 - `host.getMeta()`
 - a prepared definition and Lib-created storage surface
@@ -425,7 +423,7 @@ local host = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 
 local runtime = lib.standaloneHost(PLUGIN_GUID)
 
@@ -514,7 +512,7 @@ local function init()
         drawTab = internal.DrawTab,
         drawQuickContent = internal.DrawQuickContent,
     })
-    host.activate()
+    host.tryActivate()
 
     internal.standaloneUi = lib.standaloneHost(PLUGIN_GUID)
 end
@@ -585,7 +583,7 @@ Notes on the example:
 - `config` and `reload` stay local to `main.lua`
 - `store` is passed to runtime hooks and mutation callbacks
 - draw callbacks receive the restricted author session through the live host
-- `host.activate()` owns live coordinated host registration
+- `host.tryActivate()` owns live coordinated host registration
 - `internal.RegisterHooks(host, store)` is the normal place for `lib.hooks.*` declarations
 - `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
 - `DrawQuickContent` is optional

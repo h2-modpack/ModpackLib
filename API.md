@@ -5,14 +5,8 @@ This is the public Lib surface.
 Preferred usage uses top-level module authoring helpers plus namespaces for specialized APIs:
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
-- `lib.prepareDefinition(...)`
-- `lib.createStore(...)`
-- `lib.createModuleHost(...)`
-- `lib.activateModuleHost(...)`
-- `lib.tryActivateModule(...)`
 - `lib.standaloneHost(...)`
-- `lib.isModuleEnabled(...)`
-- `lib.isModuleCoordinated(...)`
+- `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hashing.*`
 - `lib.hooks.*`
@@ -20,8 +14,7 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.integrations.*`
 - `lib.gameObject.*`
 - `lib.mutation.*`
-- `lib.lifecycle.*`
-- `lib.logging.*`
+- `lib.coordinator.*`
 - `lib.widgets.*`
 - `lib.nav.*`
 - `lib.imguiHelpers.*`
@@ -38,7 +31,7 @@ Modules declare:
 
 Modules normally create and publish their behavior host through:
 - `lib.createModule(...)`
-- `host.activate()`
+- `host.tryActivate()`
 
 Module/host creation requires:
 - `drawTab`
@@ -54,7 +47,7 @@ Optional module capabilities are passed to module/host creation:
 That host owns:
 - `drawTab`
 - optional `drawQuickContent`
-- built-in lifecycle/state helpers for Framework and standalone hosting
+- built-in host state helpers for Framework and standalone hosting
 
 Module behavior is hosted through Lib's live host registry.
 
@@ -117,7 +110,7 @@ Use this for object-owned runtime state whose lifetime should follow that game t
 
 The normal author path is `lib.createModule(...)`, which prepares the definition,
 creates the store/session pair, and returns the author-facing host plus the state
-handles to keep. `host.activate()` publishes the live host and runs side effects.
+handles to keep. `host.tryActivate()` publishes the live host and runs side effects.
 
 Advanced use:
 
@@ -144,77 +137,6 @@ Rules:
 
 ## Store And Session
 
-### `lib.prepareDefinition(owner, definition, opts)`
-
-Creates the canonical definition object for a module from a raw authored definition table.
-
-What it does:
-- clones the authored definition into a Lib-owned table
-- requires `definition.id` as the stable module identity
-- requires `definition.name` as the stable display name
-- validates top-level definition keys and types
-- prepares `definition.storage` metadata for later `createStore(...)` use
-- injects Lib-owned built-in storage aliases:
-  - `Enabled`
-  - `DebugMode`
-- requires persisted storage roots to have explicit effective defaults in the storage declaration
-- preserves optional `definition.hashGroupPlan` hash-compaction hints as structural contract data
-- records a structural fingerprint on the persistent `owner` table when provided
-- warns and marks `owner.requiresFullReload = true` when a later hot reload changes structural definition shape
-
-Structural reload checks cover:
-- `modpack`
-- `id`
-- `name`
-- `shortName`
-- `tooltip`
-- `storage`
-- `hashGroupPlan`
-- `opts.hasQuickContent`
-
-Behavior callbacks are not valid definition fields and do not participate in structural fingerprinting.
-When using the lower-level `prepareDefinition(...)` -> `createStore(...)` ->
-`createModuleHost(...)` pipeline directly, pass
-`{ hasQuickContent = type(drawQuickContent) == "function" }` so quick-content
-add/remove changes are tracked as structural UI changes. `createModule(...)`
-does this automatically.
-
-Typical use:
-
-```lua
-local definition = lib.prepareDefinition(internal, {
-    modpack = PACK_ID,
-    id = "ExampleModule",
-    name = "Example Module",
-    storage = internal.BuildStorage(),
-    hashGroupPlan = internal.BuildHashGroupPlan(),
-})
-```
-
-Treat the returned definition as the authoritative module contract and pass it to
-`createStore(...)` and `createModuleHost(...)` when using the lower-level
-pipeline directly.
-
-`hashGroupPlan` is the preferred author-facing input for complex hash layouts:
-
-```lua
-hashGroupPlan = {
-    {
-        keyPrefix = "global",
-        items = {
-            { "EnabledFlag", "Tier" },
-            "DebugFlag",
-        },
-    },
-}
-```
-
-Rules:
-- `keyPrefix` names a hash-group family
-- `items` is an ordered list of logical bundles
-- each item may be a single alias string or a list of aliases that must stay together
-- Framework may use these hints to pack multiple persisted roots into shorter canonical hash tokens
-
 ### `lib.createModule(opts)`
 
 Canonical module-construction helper.
@@ -238,21 +160,17 @@ local host, store = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 ```
 
 Returns:
 - `host`
-  Author-facing host with `activate()`, `isEnabled()`, metadata getters, and module-scoped logging helpers.
+  Author-facing host with `tryActivate()`, `isEnabled()`, metadata getters, and module-scoped logging helpers.
 - `store`
   Runtime read surface for gameplay/hooks.
 
 `createModule(...)` intentionally does not return the prepared definition or
-raw session. Draw callbacks receive the restricted author session, and custom
-construction can use `prepareDefinition(...)`, `createStore(...)`,
-`createModuleHost(...)`, and `activateModuleHost(...)` directly.
-
-If `registerHooks` is provided, Lib calls it as:
+raw session. Draw callbacks receive the restricted author session. If `registerHooks` is provided, Lib calls it as:
 
 ```lua
 registerHooks(host, store)
@@ -283,45 +201,21 @@ end
 
 `tryCreateModule(...)` only wraps construction. Activation remains explicit.
 
-### `lib.createStore(config, definition)`
-
-Creates the managed store facade around persisted module config from a prepared
-definition.
-What it does:
-- requires a definition returned by `lib.prepareDefinition(...)`
-- consumes the prepared `definition.storage` metadata
-- returns a separate `session` for staged UI state
-- exposes persisted read helpers
-
-Typical use:
-
-```lua
-local store, session = lib.createStore(config, definition)
-```
-
-Ownership rule: `store` and `session` are a matched pair created for one prepared
-`definition` and one backing config table. Pass them together to
-`lib.createModuleHost(...)`, and do not mix a store from one `createStore(...)`
-call with a session from another. Recreate the pair together on module reload.
-
-Returned surface:
+The runtime store surface provides:
 - `store.read(alias)`
 - `store.table(alias)`
 - `store.writeUnstaged(alias, value)` returns whether the write was accepted
 
-Persisted writes happen through semantic helpers or session flushes:
+Persisted writes happen through host-owned semantic helpers or session flushes:
 
 ```lua
-lib.lifecycle.setEnabled(def, mutationBundle, host, store, enabled)
-lib.lifecycle.setDebugMode(store, enabled)
+host.setEnabled(enabled)
+host.setDebugMode(enabled)
 ```
 
-Use `setEnabled` from lower-level host/custom construction code when you also
-own the mutation bundle. Normal modules should let `createModule(...)` and the
-host own enabled/debug transitions. Module/host plumbing can use
-`session.write(...)` plus `session._flushToConfig()` for immediate persisted
-writes such as profile/hash import. Ordinary draw-code edits stay staged and
-commit through the host/framework flow.
+Normal modules should let `createModule(...)` and the host own enabled/debug
+transitions. Ordinary draw-code edits stay staged and commit through the
+host/framework flow.
 
 `Enabled` and `DebugMode` are ordinary prepared storage aliases injected by Lib.
 Do not declare them in module storage or module `config.lua`.
@@ -329,12 +223,11 @@ Do not declare them in module storage or module `config.lua`.
 module-level hash key. `DebugMode` is diagnostic-only and has `hash = false`.
 
 Rules:
-- keep each `store, session` pair together for its lifetime
 - widgets and draw code should usually read staged values from `session.view`
 - runtime/gameplay code should read persisted values through `store.read(...)`
 - module-owned runtime markers declared with `stage = false, hash = false` should write through `store.writeUnstaged(...)`
-- enabled toggles should write through the host or `lib.lifecycle.setEnabled(def, mutationBundle, host, store, enabled)`
-- debug toggles should write through `lib.lifecycle.setDebugMode(store, enabled)`
+- enabled toggles should write through the host/framework flow
+- debug toggles should write through the host/framework flow
 - profile/hash plumbing should stage values through `session.write(...)` and flush them through `session._flushToConfig()`
 - transient aliases are read from `session`
 - transient aliases declare `persist = false, hash = false` and stay out of persisted config
@@ -566,14 +459,14 @@ local host = lib.createModule({
     registerHooks = internal.RegisterHooks,
     drawTab = internal.DrawTab,
 })
-host.activate()
+host.tryActivate()
 ```
 
-When `host.activate()` runs with `owner` and `registerHooks`, activation runs the registration pass and deactivates hooks omitted by a later pass for the same owner.
+When `host.tryActivate()` runs with `owner` and `registerHooks`, activation runs the registration pass and deactivates hooks omitted by a later pass for the same owner.
 
 ## `lib.overlays`
 
-Retained HUD text helpers for shared overlay placement.
+Owner-scoped retained HUD projections for shared overlay placement.
 
 Overlay visibility has two layers:
 - Lib applies a global game-HUD gate, currently based on `ShowingCombatUI`.
@@ -594,48 +487,110 @@ Order bands:
 - `lib.overlays.order.module`
 - `lib.overlays.order.debug`
 
-### `lib.overlays.registerStackedText(opts)`
+### Module `registerOverlays(overlays, host, store)`
 
-Registers one text box in a managed stack region.
-
-Useful for single-line overlays where the whole line can share one font and alignment.
-
-### `lib.overlays.registerStackedRow(opts)`
-
-Registers one multi-column row in a managed stack region.
-
-Columns are declared left-to-right:
+Modules declare overlay structure during host activation:
 
 ```lua
-lib.overlays.registerStackedRow({
-    id = "example.timer",
+registerOverlays = function(overlays, host, store)
+    overlays.createLine("summary.igt", {
+        region = "middleRightStack",
+        order = lib.overlays.order.module,
+        columnGap = 20,
+        columns = {
+            { key = "label", minWidth = 40 },
+            { key = "time", minWidth = 80 },
+        },
+    })
+
+    overlays.onCommit(function(ctx)
+        ctx.setLine("summary.igt", { label = "IGT:", time = "00:00.00" })
+        ctx.refresh("summary.igt")
+    end)
+end
+```
+
+Retained element names are local to the module owner and do not collide across modules.
+
+### `overlays.createLine(name, spec)`
+
+Declares one retained display line. Lines can use a one-column convenience shape:
+
+```lua
+overlays.createLine("message", {
     region = "middleRightStack",
-    order = lib.overlays.order.module,
-    columnGap = 6,
+    minWidth = 120,
+})
+```
+
+or explicit columns:
+
+```lua
+overlays.createLine("summary.rta", {
+    region = "middleRightStack",
+    columnGap = 20,
     columns = {
-        {
-            key = "label",
-            minWidth = 42,
-            justify = "Right",
-            text = "IGT:",
-            textArgs = { Font = "P22UndergroundSCMedium" },
-        },
-        {
-            key = "time",
-            minWidth = 96,
-            justify = "Right",
-            text = function() return "00:00.00" end,
-            textArgs = { Font = "MonospaceTypewriterBold" },
-        },
+        { key = "label", minWidth = 40 },
+        { key = "time", minWidth = 80 },
     },
 })
 ```
 
-`minWidth` reserves layout space so columns line up across rows. It does not clip text.
+Projection callbacks update lines through `ctx.setLine(name, values)`.
 
-Stacked handles expose two refresh paths:
-- `refresh()` recomputes region layout, visibility, and text.
-- `refreshText()` updates retained text only and is intended for hot paths where row visibility/order is known to be stable.
+### `overlays.createTable(name, spec)`
+
+Declares one fixed-capacity retained table projection:
+
+```lua
+overlays.createTable("runs", {
+    region = "middleRightStack",
+    maxRows = 10,
+    columnGap = 20,
+    columns = {
+        { key = "label", minWidth = 80 },
+        { key = "igt", minWidth = 78 },
+        { key = "rta", minWidth = 78 },
+    },
+})
+```
+
+Rows beyond `maxRows` are ignored. Unused retained rows are hidden. Projection callbacks update
+tables through `ctx.setTable(name, rows)`.
+
+### Projection Events
+
+Supported retained overlay events:
+
+- `overlays.onCommit(function(ctx, commit) ... end)`
+- `overlays.onInterval(name, seconds, function(ctx, event) ... end, opts)`
+- `overlays.afterHook(path, function(ctx, event) ... end)`
+
+The projection context exposes read-only helpers plus named retained updates:
+
+- `ctx.read(alias)`
+- `ctx.isEnabled()`
+- `ctx.log(fmt, ...)`
+- `ctx.logIf(fmt, ...)`
+- `ctx.setLine(name, values)`
+- `ctx.setTable(name, rows)`
+- `ctx.setCell(tableName, rowKey, columnKey, value)`
+- `ctx.refresh(name)`
+- `ctx.refreshRegion(region)`
+- `ctx.refreshAll()`
+
+### `lib.overlays.defineOwned(owner, register)`
+
+Declares retained overlays for Lib/Framework systems that are not module-owned.
+
+```lua
+lib.overlays.defineOwned("adamant-framework.pack.hud", function(overlays)
+    overlays.createLine("hash", {
+        region = "middleRightStack",
+        minWidth = 120,
+    })
+end)
+```
 
 ### `lib.overlays.suppressForUi()`
 
@@ -719,160 +674,29 @@ Creates a reversible mutation plan with:
 - `plan:revert()`
 
 
-## `lib.lifecycle`
+## `lib.coordinator`
 
-Framework/host-facing helpers for module lifecycle orchestration, built-in module controls, and staged session commits.
+Framework-facing coordinator helpers for coordinated module packs.
 
-### `lib.lifecycle.inferMutation(def)`
-
-Infers the mutation lifecycle shape:
-- `patch`
-- `manual`
-- `hybrid`
-- or `nil`
-
-### `lib.lifecycle.registerCoordinator(packId, config)`
+### `lib.coordinator.register(packId, config)`
 
 Registers coordinator config for a pack. Framework uses this during coordinator initialization.
 
-### `lib.lifecycle.setEnabled(def, mutationBundle, host, store, enabled)`
+### `lib.coordinator.isRegistered(packId)`
 
-Transitions persisted enabled state and applies/reverts mutation state as needed.
+Returns whether a pack id is registered.
 
-### `lib.lifecycle.setDebugMode(store, enabled)`
+### `lib.coordinator.registerRebuild(packId, callback)`
 
-Writes the persisted debug-mode flag for a module store.
+Registers a Framework rebuild callback for a coordinated pack.
 
-### `lib.lifecycle.affectsRunData(mutationBundle)`
+### `lib.coordinator.requestRebuild(packId, reason)`
 
-Returns whether a mutation bundle declares live run-data mutation behavior.
+Requests a coordinated pack rebuild after a structural module change.
 
-### `lib.lifecycle.applyMutation(def, mutationBundle, host, store)`
-
-Applies the module's mutation lifecycle.
-Patch callbacks receive `(plan, host, store)`. Manual lifecycle hooks receive
-`(host, store)`.
-
-### `lib.lifecycle.revertMutation(def, mutationBundle, host, store)`
-
-Reverts the module's mutation lifecycle.
-Manual lifecycle hooks receive `(host, store)`.
-
-### `lib.lifecycle.reapplyMutation(def, mutationBundle, host, store)`
-
-Reverts and reapplies the module's mutation lifecycle.
-
-### `lib.lifecycle.applyOnLoad(def, mutationBundle, host, store)`
-
-Syncs live mutation state to the module's effective enabled state on load. Framework calls this for coordinated modules; `lib.standaloneHost(...)` calls it for standalone modules.
-
-### `lib.lifecycle.resyncSession(def, session)`
-
-Audits staged state against persisted config, logs drift, then reloads staged values from config.
-
-### `lib.lifecycle.commitSession(def, mutationBundle, settingsObserver, host, store, session)`
-
-Transactional commit helper for staged `session`.
-
-Behavior:
-- flushes staged persisted values to config
-- if the module is enabled and the mutation bundle affects run data, reapplies mutation state
-- calls `settingsObserver(host, store, commit)` after a successful dirty commit or staged action when present
-- on failure, restores the previous config snapshot and reloads `session`
-
-`onSettingsCommitted` is a post-commit observer for rebuilding derived runtime/UI structures. It is not transactional; callback errors are warned and do not roll back the committed config.
-
-### `lib.lifecycle.notifySettingsCommitted(def, settingsObserver, host, store, commit?)`
-
-Runs `settingsObserver(host, store, commit)` when present. Host flush paths use this after direct staged writes, so profile/hash imports and normal UI commits share the same observer boundary.
+Enabled/debug transitions, startup mutation sync, and session commit/resync are host responsibilities. Use the returned module host surface (`host.setEnabled`, `host.setDebugMode`, `host.applyOnLoad`, `host.flush`, `host.resync`) instead of calling internals directly.
 
 ## Standalone Host
-
-### `lib.createModuleHost(opts)`
-
-Creates full and author-facing host objects around:
-- optional `owner`
-- `definition`
-- `pluginGuid`
-- `store`
-- `session`
-- optional `registerHooks`
-- optional `registerPatchMutation`
-- optional `registerManualMutation`
-- optional `onSettingsCommitted`
-- optional `registerIntegrations`
-- `drawTab`
-- optional `drawQuickContent`
-
-`drawTab` and `drawQuickContent` receive a restricted author session:
-- `session.view`
-- `session.read(alias)`
-- `session.write(alias, value)`
-- `session.reset(alias)`
-- `session.getAliasSchema(alias)`
-- `session.resetToDefaults(opts?)`
-
-Returns the full host and the author-facing projection. Construction is side-effect
-free; `host.activate()` or `authorHost.activate()` publishes the full host, refreshes hook and
-integration generations for this module, runs optional registration callbacks,
-and syncs initial runtime behavior. Commit and reload behavior stays on the full
-host. Normal module code should use the author host returned by
-`createModule(...)`.
-
-### `lib.activateModuleHost(host)`
-
-Activates a host created by `lib.createModuleHost(...)`. Normal author code
-calls `authorHost.activate()`.
-
-For hook refresh:
-- `owner` must be a persistent table when `registerHooks` is provided
-- Lib refreshes the host's hook owner during activation
-- when provided, Lib runs `registerHooks(host, store)` inside that refresh
-- ownerless hook declarations made through `lib.hooks.*` are refreshed as one registration pass for that owner
-
-Activation refreshes the module's integration provider generation using
-`definition.id` as the stable provider owner. If `registerIntegrations` is
-provided, Lib runs `registerIntegrations(host, store)` during activation.
-Registrations absent from the current activation pass are removed for that
-module owner.
-
-Returned author surface:
-- `host.isEnabled()`
-- `host.getIdentity()`
-- `host.getMeta()`
-- `host.log(fmt, ...)`
-- `host.logIf(fmt, ...)`, which prints only when the module's `DebugMode` storage is enabled
-
-`activateModuleHost(...)` is single-use for a constructed host. Calling it
-twice for the same host is a state-machine error. Side-effecting full-host
-methods such as `drawTab`, `commitIfDirty`, `setEnabled`, and `applyOnLoad`
-require activation first.
-
-Runtime host behavior is resolved internally through the live-host registry.
-
-Use this as the bridge between module state and either:
-- Framework hosting
-- standalone window/menu hosting
-
-Behavior:
-- activation publishes the host to Lib's live-host registry
-- activation refreshes optional hooks and integrations transactionally
-- when a coordinator is already registered for `definition.modpack`, activation immediately syncs the module's live mutation state
-- otherwise startup sync is owned by Framework or standalone hosting
-
-### `lib.tryActivateModule(host)`
-
-Safe wrapper around `lib.activateModuleHost(host)`.
-
-Returns:
-- `true, nil` when activation succeeds
-- `false, err` when activation fails
-
-The failure path logs `host.activate_failed`, rolls back activation side effects
-through the same transaction path as `activateModuleHost(...)`, and leaves the
-host unactivated. `host.tryActivate()` delegates to this helper. The author host
-returned by `createModule(...)` also exposes `tryActivate()` as a safe subset of
-the full host surface.
 
 ### `lib.standaloneHost(pluginGuid)`
 
@@ -880,8 +704,7 @@ Initializes standalone module hosting and returns window/menu-bar renderers.
 
 Useful when the module is not framework-hosted.
 
-`pluginGuid` must be the same plugin guid passed to `lib.createModuleHost(...)`
-or `lib.createModule(...)`.
+`pluginGuid` must be the same plugin guid passed to `lib.createModule(...)`.
 
 Returned surface:
 - `runtime.renderWindow()`
@@ -890,7 +713,7 @@ Returned surface:
 
 Behavior:
 - resolves the module's live host through the explicit `pluginGuid`
-- applies on-load lifecycle state for non-coordinated modules
+- applies startup mutation state for non-coordinated modules
 - suppresses the standalone window/menu when the module is coordinated
 - releases overlay suppression when the host ImGui layer is hidden globally, matching Framework-hosted UI behavior
 - renders built-in controls for:
@@ -902,35 +725,11 @@ Behavior:
 
 ### `lib.getLiveModuleHost(pluginGuid)`
 
-Returns the full runtime host registered by `lib.activateModuleHost(...)`.
+Returns the full runtime host registered by module activation.
 
 This is an infrastructure API for Framework discovery, standalone hosting, and
 Lib internals. Normal module code should keep the author host returned by
 `lib.createModule(...)` and use `store`/callback sessions for state access.
-
-## Module Coordination Queries
-
-### `lib.isModuleCoordinated(packId)`
-
-Returns whether a pack id is registered.
-
-### `lib.isModuleEnabled(store, packId?)`
-
-Returns whether a module should currently be treated as enabled, taking pack-level coordination into account when present.
-
-## `lib.logging`
-
-### `lib.logging.warnIf(packId, enabled, fmt, ...)`
-
-Conditionally emits a module-scoped warning.
-
-### `lib.logging.warn(packId, fmt, ...)`
-
-Unconditionally emits a module-scoped warning.
-
-### `lib.logging.logIf(name, enabled, fmt, ...)`
-
-Conditionally emits a module-scoped log line.
 
 ## `lib.widgets`
 

@@ -11,6 +11,8 @@ globals = {
     "reload", 
     "_PLUGIN", 
     "AdamantModpackLib_Internal", 
+    "AdamantModpackLib_MutationState",
+    "AdamantModpackLib_OverlayState",
     "GetConfigBackend",
     "ScreenData"
     }

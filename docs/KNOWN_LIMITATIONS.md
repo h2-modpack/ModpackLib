@@ -10,10 +10,8 @@ When a coordinated module changes its structural contract during hot reload, Lib
 
 The module rebuild path is:
 
-- `prepareDefinition(...)`
-- `createStore(...)`
-- `createModuleHost(...)`
-- `host.activate()`
+- `lib.createModule(...)`
+- `host.tryActivate()`
 - `standaloneHost(...)` when running outside Framework coordination
 
 The Framework rebuild is correct, but it is not coalesced across a multi-module reload wave.

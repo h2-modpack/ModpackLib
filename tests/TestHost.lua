@@ -20,21 +20,21 @@ local function createActivatedHost(pluginGuid, opts, activationOpts)
     opts.owner = activationOpts.owner
     opts.registerHooks = activationOpts.registerHooks
     opts.registerIntegrations = activationOpts.registerIntegrations
-    local host, authorHost = lib.createModuleHost(opts)
-    authorHost.activate()
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create(opts)
+    authorHost.tryActivate()
     return host, authorHost
 end
 
 function TestHost:testStandaloneHostWarnsWhenSessionCommitFails()
     local drawCalls = 0
     local pluginGuid = "test-standalone-commit"
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         modpack = "standalone-pack",
         id = "StandaloneTest",
         name = "Standalone Test",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
@@ -81,12 +81,12 @@ end
 
 function TestHost:testStandaloneHostCanResolveCurrentModuleHostFromLibRegistry()
     local pluginGuid = "test-standalone-registry"
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "StandaloneRegistryHost",
         name = "Standalone Registry Host",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
@@ -109,14 +109,14 @@ end
 function TestHost:testHostFlushNotifiesSettingsObserver()
     local calls = 0
     local observedValue = nil
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "SettingsObserverHost",
         name = "Settings Observer Host",
         storage = {
             { type = "bool", alias = "Value", default = false },
         },
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Value = false,
     }, definition)
     createActivatedHost("test-settings-observer-host", {
@@ -144,12 +144,12 @@ function TestHost:testPatchMutationReceivesAuthorHost()
     local target = { Value = false }
     local patchHost = nil
     local patchStore = nil
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "PatchHostModule",
         name = "Patch Host Module",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
@@ -173,13 +173,13 @@ function TestHost:testPatchMutationReceivesAuthorHost()
 end
 
 function TestHost:testSideEffectingHostMethodsRequireActivation()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "InactiveHost",
         name = "Inactive Host",
         storage = {},
     })
-    local store, session = lib.createStore({}, definition)
-    local host = lib.createModuleHost({
+    local store, session = CreateModuleState({}, definition)
+    local host = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "test-inactive-host",
         definition = definition,
         store = store,
@@ -194,7 +194,7 @@ end
 
 function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
     local capturedAuthorSession = nil
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "ResetHost",
         name = "Reset Host",
         storage = {
@@ -202,7 +202,7 @@ function TestHost:testHostAndAuthorSessionResetToDefaultsDelegateToLibHelper()
             { type = "int", alias = "Count", default = 2, min = 0, max = 9 },
         },
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         EnabledFlag = true,
         Count = 7,
     }, definition)
@@ -239,13 +239,13 @@ function TestHost:testCreateModuleHostPassesAuthorHostToCallbacks()
     local callbackHost = nil
     local drawHost = nil
     local quickHost = nil
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         modpack = "author-pack",
         id = "AuthorHostModule",
         name = "Author Host Module",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = true,
     }, definition)
@@ -277,7 +277,6 @@ function TestHost:testCreateModuleHostPassesAuthorHostToCallbacks()
     lu.assertTrue(callbackHost.isEnabled())
     lu.assertEquals(type(callbackHost.log), "function")
     lu.assertEquals(type(callbackHost.logIf), "function")
-    lu.assertEquals(type(callbackHost.activate), "function")
     lu.assertEquals(type(callbackHost.tryActivate), "function")
     lu.assertNil(callbackHost.read)
     lu.assertNil(callbackHost.setEnabled)
@@ -291,16 +290,16 @@ function TestHost:testCreateModuleHostPassesAuthorHostToCallbacks()
 end
 
 function TestHost:testFullHostOwnsAuthorHostCapabilities()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "FullHostCapabilities",
         name = "Full Host Capabilities",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local host, authorHost = lib.createModuleHost({
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "test-full-host-capabilities",
         definition = definition,
         store = store,
@@ -313,23 +312,20 @@ function TestHost:testFullHostOwnsAuthorHostCapabilities()
     lu.assertEquals(type(host.getMeta), "function")
     lu.assertEquals(type(host.log), "function")
     lu.assertEquals(type(host.logIf), "function")
-    lu.assertEquals(type(host.activate), "function")
     lu.assertEquals(type(host.tryActivate), "function")
-    lu.assertEquals(authorHost.activate, host.activate)
     lu.assertEquals(authorHost.tryActivate, host.tryActivate)
 end
 
 function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFrameworkRebuildIsPending()
-    local applyCalls = 0
     local packId = "reload-pack"
     local rebuildReason = nil
 
-    lib.lifecycle.registerCoordinator(packId, { ModEnabled = true })
-    lib.lifecycle.registerCoordinatorRebuild(packId, function(reason)
+    lib.coordinator.register(packId, { ModEnabled = true })
+    lib.coordinator.registerRebuild(packId, function(reason)
         rebuildReason = reason
         return true
     end)
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         modpack = packId,
         id = "ReloadHost",
         name = "Reload Host",
@@ -337,7 +333,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
             { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
         EnabledFlag = false,
@@ -349,16 +345,12 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         drawTab = function() end,
     })
 
-    local originalApplyOnLoad = lib.lifecycle.applyOnLoad
-    lib.lifecycle.applyOnLoad = function(...)
-        applyCalls = applyCalls + 1
-        return originalApplyOnLoad(...)
-    end
+    local applyCalls = 0
 
     local owner = {
         _definitionStructuralFingerprint = definition._structuralFingerprint,
     }
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = packId,
         id = "ReloadHost",
         name = "Reload Host",
@@ -366,7 +358,7 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
             { type = "bool", alias = "OtherFlag", default = false },
         },
     })
-    local reloadStore, reloadSession = lib.createStore({
+    local reloadStore, reloadSession = CreateModuleState({
         Enabled = true,
         DebugMode = false,
         OtherFlag = false,
@@ -375,13 +367,18 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         definition = prepared,
         store = reloadStore,
         session = reloadSession,
+        registerManualMutation = {
+            apply = function()
+                applyCalls = applyCalls + 1
+            end,
+            revert = function() end,
+        },
         drawTab = function() end,
     })
     local reloadedHost = lib.getLiveModuleHost("reload-pack.ReloadHost")
 
-    lib.lifecycle.applyOnLoad = originalApplyOnLoad
-    lib.lifecycle.registerCoordinator(packId, nil)
-    lib.lifecycle.registerCoordinatorRebuild(packId, nil)
+    lib.coordinator.register(packId, nil)
+    lib.coordinator.registerRebuild(packId, nil)
     lu.assertEquals(applyCalls, 0)
     lu.assertNotNil(rebuildReason)
     lu.assertEquals(lib.getLiveModuleHost("reload-pack.ReloadHost"), reloadedHost)
@@ -393,12 +390,12 @@ function TestHost:testActivationFailureRestoresLiveHostAndIntegrations()
     local providerId = "RollbackProvider"
     local previousApi = { value = "previous" }
 
-    local firstDefinition = lib.prepareDefinition({}, {
+    local firstDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "ActivationRollback",
         name = "Activation Rollback",
         storage = {},
     })
-    local firstStore, firstSession = lib.createStore({
+    local firstStore, firstSession = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, firstDefinition)
@@ -410,16 +407,16 @@ function TestHost:testActivationFailureRestoresLiveHostAndIntegrations()
     })
     lib.integrations.register(integrationId, providerId, previousApi)
 
-    local secondDefinition = lib.prepareDefinition({}, {
+    local secondDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "ActivationRollback",
         name = "Activation Rollback",
         storage = {},
     })
-    local secondStore, secondSession = lib.createStore({
+    local secondStore, secondSession = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, secondDefinition)
-    local secondHost, secondAuthorHost = lib.createModuleHost({
+    local secondHost, secondAuthorHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = pluginGuid,
         definition = secondDefinition,
         store = secondStore,
@@ -431,11 +428,11 @@ function TestHost:testActivationFailureRestoresLiveHostAndIntegrations()
         drawTab = function() end,
     })
 
-    lu.assertErrorMsgContains("integration boom", function()
-        secondAuthorHost.activate()
-    end)
+    local ok, err = secondAuthorHost.tryActivate()
     local api = lib.integrations.get(integrationId)
 
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "integration boom")
     lu.assertEquals(lib.getLiveModuleHost(pluginGuid), firstHost)
     lu.assertEquals(api, previousApi)
     lu.assertErrorMsgContains("host.not_activated", function()
@@ -447,16 +444,16 @@ end
 
 function TestHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBrokenHost()
     local pluginGuid = "test-try-activate-failure"
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "TryActivateFailure",
         name = "Try Activate Failure",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local host, authorHost = lib.createModuleHost({
+    local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = pluginGuid,
         definition = definition,
         store = store,
@@ -482,16 +479,16 @@ end
 
 function TestHost:testTryActivateModuleSucceedsThroughFullHost()
     local pluginGuid = "test-try-activate-success"
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "TryActivateSuccess",
         name = "Try Activate Success",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
-    local host = lib.createModuleHost({
+    local host = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = pluginGuid,
         definition = definition,
         store = store,
@@ -511,12 +508,12 @@ function TestHost:testActivationRefreshRemovesOmittedIntegrations()
     local integrationId = "test.activation.refresh"
     local providerId = "ActivationRefresh"
 
-    local firstDefinition = lib.prepareDefinition({}, {
+    local firstDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = providerId,
         name = "Activation Refresh",
         storage = {},
     })
-    local firstStore, firstSession = lib.createStore({
+    local firstStore, firstSession = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, firstDefinition)
@@ -533,12 +530,12 @@ function TestHost:testActivationRefreshRemovesOmittedIntegrations()
 
     lu.assertNotNil(lib.integrations.get(integrationId))
 
-    local secondDefinition = lib.prepareDefinition({}, {
+    local secondDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = providerId,
         name = "Activation Refresh",
         storage = {},
     })
-    local secondStore, secondSession = lib.createStore({
+    local secondStore, secondSession = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, secondDefinition)
@@ -554,31 +551,32 @@ function TestHost:testActivationRefreshRemovesOmittedIntegrations()
 end
 
 function TestHost:testActivationRejectsReentrantActivateCalls()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "ReentrantActivate",
         name = "Reentrant Activate",
         storage = {},
     })
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = true,
         DebugMode = false,
     }, definition)
     local host, authorHost
-    host, authorHost = lib.createModuleHost({
+    host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "test-reentrant-activate",
         definition = definition,
         store = store,
         session = session,
         registerIntegrations = function()
-            authorHost.activate()
+            authorHost.tryActivate()
         end,
         drawTab = function() end,
     })
 
-    lu.assertErrorMsgContains("host.activation_in_progress", function()
-        authorHost.activate()
-    end)
-    lu.assertErrorMsgContains("host.not_activated", function()
-        host.flush()
-    end)
+    local ok, err = authorHost.tryActivate()
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(lib.getLiveModuleHost("test-reentrant-activate"), host)
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "host.activation_in_progress")
 end

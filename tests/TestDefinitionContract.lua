@@ -12,7 +12,7 @@ end
 
 function TestDefinitionContract:testCreateStoreErrorsOnUnknownTopLevelDefinitionKey()
     lu.assertErrorMsgContains("unknown definition key 'ui'", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "Example",
             name = "Example",
             storage = {
@@ -25,7 +25,7 @@ end
 
 function TestDefinitionContract:testValidateDefinitionErrorsOnOldVocabularyKeysAsUnknown()
     lu.assertErrorMsgContains("unknown definition key 'category'", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             modpack = "test-pack",
             id = "ExampleSpecial",
             name = "Example Special",
@@ -39,7 +39,7 @@ end
 
 function TestDefinitionContract:testPrepareDefinitionRejectsBehaviorFieldsAsUnknownKeys()
     lu.assertErrorMsgContains("unknown definition key 'affectsRunData'", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "Example",
             name = "Example",
             affectsRunData = true,
@@ -47,7 +47,7 @@ function TestDefinitionContract:testPrepareDefinitionRejectsBehaviorFieldsAsUnkn
     end)
 
     lu.assertErrorMsgContains("unknown definition key 'apply'", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "Example",
             name = "Example",
             apply = function() end,

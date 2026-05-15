@@ -421,7 +421,7 @@ Because after the milestone is already reached, `once_loaded.*` executes immedia
 
 Good pattern:
 - `config = chalk.auto(...)`
-- recreate `store, session = lib.createStore(config, definition)`
+- recreate the module through `lib.createModule(...)`
 - recreate module/framework derived state
 
 Recreate wrapper objects during reload so they point at the rebuilt module state.

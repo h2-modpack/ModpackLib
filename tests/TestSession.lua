@@ -3,7 +3,7 @@ local lu = require('luaunit')
 local function prepareDefinition(definition)
     definition.id = definition.id or "SessionTest"
     definition.name = definition.name or "Session Test"
-    return lib.prepareDefinition({}, definition)
+    return AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, definition)
 end
 
 local function makeScalarDefinition()
@@ -96,7 +96,7 @@ TestStore = {}
 
 function TestStore:testCreateStoreReadsAndWritesScalarAliases()
     local config = { Enabled = false, MaxGods = 4 }
-    local store, session = lib.createStore(config, makeScalarDefinition())
+    local store, session = CreateModuleState(config, makeScalarDefinition())
 
     lu.assertFalse(store.read("Enabled"))
     lu.assertEquals(store.read("MaxGods"), 4)
@@ -115,7 +115,7 @@ end
 
 function TestStore:testPackedAliasReadWriteUpdatesOwningRoot()
     local config = { Packed = 0 }
-    local store, session = lib.createStore(config, makePackedDefinition())
+    local store, session = CreateModuleState(config, makePackedDefinition())
 
     lu.assertFalse(store.read("EnabledBit"))
     lu.assertEquals(store.read("ModeBits"), 0)
@@ -134,7 +134,7 @@ end
 
 function TestStore:testTransientAliasesAreNotReadableThroughStore()
     local config = { Enabled = false }
-    local store, session = lib.createStore(config, makeTransientDefinition())
+    local store, session = CreateModuleState(config, makeTransientDefinition())
 
     lu.assertErrorMsgContains("store.invalid_read_surface", function()
         store.read("FilterText")
@@ -144,7 +144,7 @@ end
 
 function TestStore:testRuntimeAliasesUseNarrowStoreAccessor()
     local config = { Enabled = true, RecordingArmed = false, RunMarker = 2 }
-    local store, session = lib.createStore(config, makeRuntimeDefinition())
+    local store, session = CreateModuleState(config, makeRuntimeDefinition())
 
     lu.assertTrue(store.read("Enabled"))
     lu.assertFalse(store.read("RecordingArmed"))
@@ -175,7 +175,7 @@ function TestStore:testDowngradedUnstagedWriteRejectionDoesNotWrite()
     CaptureWarnings()
 
     local config = { Enabled = true, RecordingArmed = false }
-    local store = lib.createStore(config, makeRuntimeDefinition())
+    local store = CreateModuleState(config, makeRuntimeDefinition())
 
     lu.assertFalse(store.writeUnstaged("Enabled", false))
 
@@ -188,7 +188,7 @@ end
 
 function TestStore:testSessionRejectsRuntimeWrites()
     local config = { Enabled = true, RecordingArmed = false }
-    local _, session = lib.createStore(config, makeRuntimeDefinition())
+    local _, session = CreateModuleState(config, makeRuntimeDefinition())
 
     local ok, err = pcall(function()
         session.write("RecordingArmed", true)
@@ -206,7 +206,7 @@ function TestStore:testDowngradedSessionRuntimeWriteStillDoesNotStage()
     CaptureWarnings()
 
     local config = { Enabled = true, RecordingArmed = false }
-    local _, session = lib.createStore(config, makeRuntimeDefinition())
+    local _, session = CreateModuleState(config, makeRuntimeDefinition())
 
     session.write("RecordingArmed", true)
 
@@ -222,7 +222,7 @@ TestSession = {}
 
 function TestSession:testSessionStagesScalarAliases()
     local config = { Enabled = true, MaxGods = 5 }
-    local store, session = lib.createStore(config, makeScalarDefinition())
+    local store, session = CreateModuleState(config, makeScalarDefinition())
 
     lu.assertTrue(session.view.Enabled)
     lu.assertEquals(session.view.MaxGods, 5)
@@ -239,7 +239,7 @@ end
 
 function TestSession:testPackedAliasEditReencodesPackedRootOnFlush()
     local config = { Packed = 0 }
-    local store, session = lib.createStore(config, makePackedDefinition())
+    local store, session = CreateModuleState(config, makePackedDefinition())
 
     session.write("ModeBits", 2)
 
@@ -256,7 +256,7 @@ end
 
 function TestSession:testInternalReloadFromConfigRebuildsPackedChildren()
     local config = { Packed = 0 }
-    local store, session = lib.createStore(config, makePackedDefinition())
+    local store, session = CreateModuleState(config, makePackedDefinition())
 
     config.Packed = 5
     session._reloadFromConfig()
@@ -268,10 +268,10 @@ end
 
 function TestSession:testResyncSessionDetectsPackedDrift()
     local config = { Packed = 0 }
-    local store, session = lib.createStore(config, makePackedDefinition())
+    local store, session = CreateModuleState(config, makePackedDefinition())
 
     config.Packed = 5
-    local mismatches = lib.lifecycle.resyncSession({ name = "PackedSession" }, session)
+    local mismatches = HostLifecycle.resyncSession({ name = "PackedSession" }, session)
 
     table.sort(mismatches)
     lu.assertEquals(mismatches, { "EnabledBit", "ModeBits", "Packed" })
@@ -282,7 +282,7 @@ end
 
 function TestSession:testReadonlyViewRejectsWrites()
     local config = { Enabled = true, MaxGods = 5 }
-    local store, session = lib.createStore(config, makeScalarDefinition())
+    local store, session = CreateModuleState(config, makeScalarDefinition())
 
     local ok, err = pcall(function()
         session.view.Enabled = false
@@ -294,7 +294,7 @@ end
 
 function TestSession:testTransientAliasesLiveOnlyInSession()
     local config = { Enabled = false }
-    local store, session = lib.createStore(config, makeTransientDefinition())
+    local store, session = CreateModuleState(config, makeTransientDefinition())
 
     lu.assertEquals(session.view.FilterText, "")
     lu.assertEquals(session.view.FilterMode, "all")
@@ -314,7 +314,7 @@ end
 
 function TestSession:testInternalReloadFromConfigResetsTransientAliasesToDefaults()
     local config = { Enabled = true }
-    local store, session = lib.createStore(config, makeTransientDefinition())
+    local store, session = CreateModuleState(config, makeTransientDefinition())
 
     session.write("FilterText", "Hera")
     session.write("FilterMode", "banned")
@@ -329,7 +329,7 @@ end
 
 function TestSession:testResetRestoresTransientAliasDefault()
     local config = { Enabled = true }
-    local store, session = lib.createStore(config, makeTransientDefinition())
+    local store, session = CreateModuleState(config, makeTransientDefinition())
 
     session.write("FilterText", "Hermes")
     session.reset("FilterText")
@@ -340,7 +340,7 @@ end
 
 function TestSession:testResetRestoresPersistedAliasDefaultAndMarksDirty()
     local config = { Enabled = true, MaxGods = 5 }
-    local store, session = lib.createStore(config, makeScalarDefinition())
+    local store, session = CreateModuleState(config, makeScalarDefinition())
 
     session.reset("Enabled")
 
@@ -353,7 +353,7 @@ end
 
 function TestSession:testResetRestoresPackedChildDefault()
     local config = { Packed = 0 }
-    local store, session = lib.createStore(config, makePackedDefinition())
+    local store, session = CreateModuleState(config, makePackedDefinition())
 
     session.write("EnabledBit", true)
     session.write("ModeBits", 3)
@@ -366,7 +366,7 @@ end
 
 function TestSession:testTableStorageHydratesDefaultRows()
     local config = {}
-    local store, session = lib.createStore(config, makeTableDefinition())
+    local store, session = CreateModuleState(config, makeTableDefinition())
 
     lu.assertEquals(session.table("Tiers"):count(), 1)
     lu.assertTrue(session.table("Tiers"):read(1, "Enabled"))
@@ -377,7 +377,7 @@ end
 
 function TestSession:testTableStorageStagesRowWritesAndFlushesRoot()
     local config = {}
-    local store, session = lib.createStore(config, makeTableDefinition())
+    local store, session = CreateModuleState(config, makeTableDefinition())
     local tiers = session.table("Tiers")
 
     lu.assertTrue(tiers:append({ Enabled = false, Limit = 4, ChoiceA = true }))
@@ -402,7 +402,7 @@ end
 
 function TestSession:testTableRowHandleReadsAndWritesThroughParentTable()
     local config = {}
-    local store, session = lib.createStore(config, makeTableDefinition())
+    local store, session = CreateModuleState(config, makeTableDefinition())
     local tiers = session.table("Tiers")
 
     tiers:append({ Limit = 3, ChoiceA = true })
@@ -435,7 +435,7 @@ function TestSession:testStoreTableReadOnlyHandleClampsRawPersistedRows()
             { Limit = 4 },
         },
     }
-    local store = lib.createStore(config, makeTableDefinition())
+    local store = CreateModuleState(config, makeTableDefinition())
     local tiers = store.table("Tiers")
 
     lu.assertEquals(#config.Tiers, 3)
@@ -446,7 +446,7 @@ function TestSession:testStoreTableReadOnlyHandleClampsRawPersistedRows()
 end
 
 function TestSession:testTableRowHandleIsPositionalAndMissingRowsAreNil()
-    local _, session = lib.createStore({}, makeTableDefinition())
+    local _, session = CreateModuleState({}, makeTableDefinition())
     local tiers = session.table("Tiers")
     local row = tiers:rowHandle(2)
 
@@ -459,7 +459,7 @@ end
 
 function TestSession:testTableStorageMutatesRowsAsCompactList()
     local config = {}
-    local _, session = lib.createStore(config, makeTableDefinition())
+    local _, session = CreateModuleState(config, makeTableDefinition())
     local tiers = session.table("Tiers")
 
     tiers:append({ Limit = 1 })
@@ -479,7 +479,7 @@ function TestSession:testTableStorageMutatesRowsAsCompactList()
 end
 
 function TestSession:testTableStorageClearReportsNoChangeWhenAlreadyDefault()
-    local _, session = lib.createStore({}, makeMinRowsTableDefinition())
+    local _, session = CreateModuleState({}, makeMinRowsTableDefinition())
     local rows = session.table("Rows")
 
     lu.assertEquals(rows:count(), 1)
@@ -489,7 +489,7 @@ function TestSession:testTableStorageClearReportsNoChangeWhenAlreadyDefault()
 end
 
 function TestSession:testTableStorageUnknownRowAliasFails()
-    local _, session = lib.createStore({}, makeTableDefinition())
+    local _, session = CreateModuleState({}, makeTableDefinition())
     local tiers = session.table("Tiers")
 
     lu.assertErrorMsgContains("storage.unknown_table_row_alias", function()
@@ -504,7 +504,7 @@ function TestSession:testTableStorageUnknownRowAliasFails()
 end
 
 function TestSession:testTableStorageHandleRequiresColonSyntax()
-    local _, session = lib.createStore({}, makeTableDefinition())
+    local _, session = CreateModuleState({}, makeTableDefinition())
     local tiers = session.table("Tiers")
 
     lu.assertErrorMsgContains("storage.invalid_table_handle_args", function()
@@ -516,7 +516,7 @@ function TestSession:testTableStorageHandleRequiresColonSyntax()
 end
 
 function TestSession:testTableStorageAppendRespectsMaxRows()
-    local _, session = lib.createStore({}, makeTableDefinition())
+    local _, session = CreateModuleState({}, makeTableDefinition())
     local tiers = session.table("Tiers")
 
     lu.assertTrue(tiers:append())
@@ -526,7 +526,7 @@ function TestSession:testTableStorageAppendRespectsMaxRows()
 end
 
 function TestSession:testTableStorageDoesNotLeakRowAliasesGlobally()
-    local _, session = lib.createStore({}, makeTableDefinition())
+    local _, session = CreateModuleState({}, makeTableDefinition())
 
     lu.assertErrorMsgContains("session.unknown_read_alias", function()
         session.read("Limit")
@@ -537,7 +537,7 @@ function TestSession:testTableStorageDoesNotLeakRowAliasesGlobally()
 end
 
 function TestSession:testSessionWriteUnknownAliasFails()
-    local _, session = lib.createStore({}, makeRuntimeDefinition())
+    local _, session = CreateModuleState({}, makeRuntimeDefinition())
 
     lu.assertErrorMsgContains("unknown alias 'Nope'", function()
         session.write("Nope", true)
@@ -545,7 +545,7 @@ function TestSession:testSessionWriteUnknownAliasFails()
 end
 
 function TestSession:testSessionReadUnknownAliasFails()
-    local _, session = lib.createStore({}, makeRuntimeDefinition())
+    local _, session = CreateModuleState({}, makeRuntimeDefinition())
 
     lu.assertErrorMsgContains("session.unknown_read_alias", function()
         session.read("Nope")
@@ -553,7 +553,7 @@ function TestSession:testSessionReadUnknownAliasFails()
 end
 
 function TestSession:testSessionResetUnknownAliasFails()
-    local _, session = lib.createStore({}, makeScalarDefinition())
+    local _, session = CreateModuleState({}, makeScalarDefinition())
 
     lu.assertErrorMsgContains("unknown alias 'Nope'", function()
         session.reset("Nope")
@@ -566,7 +566,7 @@ function TestSession:testDowngradedSessionResetUnknownAliasReturnsSafely()
     policy.severity = "warn"
     CaptureWarnings()
 
-    local _, session = lib.createStore({}, makeRuntimeDefinition())
+    local _, session = CreateModuleState({}, makeRuntimeDefinition())
 
     session.reset("Nope")
 
@@ -578,7 +578,7 @@ function TestSession:testDowngradedSessionResetUnknownAliasReturnsSafely()
 end
 
 function TestSession:testSessionTableWrongAliasFails()
-    local _, session = lib.createStore({}, makeScalarDefinition())
+    local _, session = CreateModuleState({}, makeScalarDefinition())
 
     lu.assertErrorMsgContains("is not table storage", function()
         session.table("Enabled")
@@ -598,7 +598,7 @@ function TestSession:testDowngradedSessionTableErrorsReturnNilSafely()
         table.insert(lines, msg)
     end
 
-    local _, session = lib.createStore({ Enabled = true, MaxGods = 5 }, makeScalarDefinition())
+    local _, session = CreateModuleState({ Enabled = true, MaxGods = 5 }, makeScalarDefinition())
     local missing = session.table("Missing")
     local wrongType = session.table("MaxGods")
 
@@ -624,7 +624,7 @@ function TestSession:testDowngradedStoreTableErrorsReturnNilSafely()
         table.insert(lines, msg)
     end
 
-    local store = lib.createStore({ Enabled = true, MaxGods = 5 }, makeScalarDefinition())
+    local store = CreateModuleState({ Enabled = true, MaxGods = 5 }, makeScalarDefinition())
     local missing = store.table("Missing")
     local wrongType = store.table("MaxGods")
 
@@ -638,7 +638,7 @@ function TestSession:testDowngradedStoreTableErrorsReturnNilSafely()
 end
 
 function TestSession:testReadonlyViewDoesNotExposeMutableTableRoot()
-    local _, session = lib.createStore({}, makeTableDefinition())
+    local _, session = CreateModuleState({}, makeTableDefinition())
 
     local snapshot = session.view.Tiers
     snapshot[1].Limit = 5
@@ -668,12 +668,12 @@ function TestSession:testTableStorageHashRoundTripsRows()
 end
 
 function TestSession:testSessionActionsAreDirtyAndLastWriteWins()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "SessionActionTest",
         name = "Session Action Test",
         storage = {},
     })
-    local _, session = lib.createStore({}, definition)
+    local _, session = CreateModuleState({}, definition)
 
     lu.assertFalse(session.hasActions())
     lu.assertFalse(session.isDirty())

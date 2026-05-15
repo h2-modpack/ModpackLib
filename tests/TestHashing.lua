@@ -74,7 +74,7 @@ end
 function TestHashing:testPackedAliasesResolveFromPreparedNode()
     local storage = prepareStorage()
     local aliases = lib.hashing.getAliases(storage)
-    local packedAliases = AdamantModpackLib_Internal.storage.getPackedAliases(aliases.Packed)
+    local packedAliases = AdamantModpackLib_Internal.storage.packed.getPackedAliases(aliases.Packed)
 
     lu.assertEquals(#packedAliases, 2)
     lu.assertEquals(packedAliases[1].alias, "EnabledBit")

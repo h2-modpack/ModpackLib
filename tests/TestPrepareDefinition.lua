@@ -3,26 +3,26 @@ local lu = require('luaunit')
 TestPrepareDefinition = {}
 
 function TestPrepareDefinition:setUp()
-    lib.lifecycle.registerCoordinator("test-pack", nil)
-    lib.lifecycle.registerCoordinatorRebuild("test-pack", nil)
+    lib.coordinator.register("test-pack", nil)
+    lib.coordinator.registerRebuild("test-pack", nil)
     CaptureWarnings()
 end
 
 function TestPrepareDefinition:tearDown()
-    lib.lifecycle.registerCoordinator("test-pack", nil)
-    lib.lifecycle.registerCoordinatorRebuild("test-pack", nil)
+    lib.coordinator.register("test-pack", nil)
+    lib.coordinator.registerRebuild("test-pack", nil)
     RestoreWarnings()
 end
 
 local function createAndActivate(pluginGuid, definition, store, session)
-    local _, authorHost = lib.createModuleHost({
+    local _, authorHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = pluginGuid,
         definition = definition,
         store = store,
         session = session,
         drawTab = function() end,
     })
-    return authorHost.activate()
+    return authorHost.tryActivate()
 end
 
 function TestPrepareDefinition:testPrepareDefinitionReturnsPreparedClone()
@@ -44,7 +44,7 @@ function TestPrepareDefinition:testPrepareDefinitionReturnsPreparedClone()
         },
     }
 
-    local prepared = lib.prepareDefinition(owner, raw)
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, raw)
     raw.name = "Changed Name"
     raw.storage[1].alias = "ChangedAlias"
     raw.hashGroupPlan[1].keyPrefix = "changed_group"
@@ -63,7 +63,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionMarksStructuralReloadMismatch()
     local owner = {}
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -72,7 +72,7 @@ function TestPrepareDefinition:testPrepareDefinitionMarksStructuralReloadMismatc
         },
     })
 
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -88,7 +88,7 @@ function TestPrepareDefinition:testPrepareDefinitionMarksStructuralReloadMismatc
 end
 
 function TestPrepareDefinition:testPrepareDefinitionInjectsBuiltInStorage()
-    local prepared = lib.prepareDefinition({}, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -107,7 +107,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsReservedBuiltInStorageAliases()
     lu.assertErrorMsgContains("storage alias 'Enabled' is reserved by Lib", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             modpack = "test-pack",
             id = "Example",
             name = "Example",
@@ -120,7 +120,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidMetadataFieldTypes()
     lu.assertErrorMsgContains("definition.invalid_field_type", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             modpack = "test-pack",
             id = "Example",
             name = 7,
@@ -131,7 +131,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsDefinitionWithoutId()
     lu.assertErrorMsgContains("definition.missing_id", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             name = "Missing ID",
             storage = {},
         })
@@ -140,7 +140,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidDefinitionId()
     lu.assertErrorMsgContains("definition.id 'Bad.Id' must start with a letter", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "Bad.Id",
             name = "Bad ID",
             storage = {},
@@ -150,7 +150,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsDefinitionWithoutName()
     lu.assertErrorMsgContains("definition.missing_name", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "MissingName",
             storage = {},
         })
@@ -161,13 +161,13 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
     local owner = {}
     local rebuildReason = nil
 
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
-    lib.lifecycle.registerCoordinatorRebuild("test-pack", function(reason)
+    lib.coordinator.register("test-pack", { ModEnabled = true })
+    lib.coordinator.registerRebuild("test-pack", function(reason)
         rebuildReason = reason
         return true
     end)
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -176,7 +176,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
         },
     })
 
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -185,7 +185,7 @@ function TestPrepareDefinition:testCreateModuleHostRequestsCoordinatorRebuildOnS
         },
     })
 
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = false,
         DebugMode = false,
         OtherFlag = false,
@@ -204,9 +204,9 @@ end
 function TestPrepareDefinition:testCreateModuleHostErrorsWhenCoordinatedRebuildCallbackIsMissing()
     local owner = {}
 
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
+    lib.coordinator.register("test-pack", { ModEnabled = true })
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -215,7 +215,7 @@ function TestPrepareDefinition:testCreateModuleHostErrorsWhenCoordinatedRebuildC
         },
     })
 
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -224,15 +224,15 @@ function TestPrepareDefinition:testCreateModuleHostErrorsWhenCoordinatedRebuildC
         },
     })
 
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = false,
         DebugMode = false,
         OtherFlag = false,
     }, prepared)
-    lu.assertErrorMsgContains("host.structural_rebuild_unavailable", function()
-        createAndActivate("test-module", prepared, store, session)
-    end)
+    local ok, err = createAndActivate("test-module", prepared, store, session)
 
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "host.structural_rebuild_unavailable")
     lu.assertTrue(owner.requiresFullReload)
     lu.assertNotNil(AdamantModpackLib_Internal.pendingCoordinatorRebuilds[prepared])
 end
@@ -240,12 +240,12 @@ end
 function TestPrepareDefinition:testCreateModuleHostErrorsAndKeepsPendingReasonWhenRebuildRequestIsRejected()
     local owner = {}
 
-    lib.lifecycle.registerCoordinator("test-pack", { ModEnabled = true })
-    lib.lifecycle.registerCoordinatorRebuild("test-pack", function()
+    lib.coordinator.register("test-pack", { ModEnabled = true })
+    lib.coordinator.registerRebuild("test-pack", function()
         return false
     end)
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -254,7 +254,7 @@ function TestPrepareDefinition:testCreateModuleHostErrorsAndKeepsPendingReasonWh
         },
     })
 
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -263,15 +263,15 @@ function TestPrepareDefinition:testCreateModuleHostErrorsAndKeepsPendingReasonWh
         },
     })
 
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         Enabled = false,
         DebugMode = false,
         OtherFlag = false,
     }, prepared)
-    lu.assertErrorMsgContains("host.structural_rebuild_unavailable", function()
-        createAndActivate("test-module", prepared, store, session)
-    end)
+    local ok, err = createAndActivate("test-module", prepared, store, session)
 
+    lu.assertFalse(ok)
+    lu.assertStrContains(err, "host.structural_rebuild_unavailable")
     lu.assertTrue(owner.requiresFullReload)
     lu.assertNotNil(AdamantModpackLib_Internal.pendingCoordinatorRebuilds[prepared])
 end
@@ -279,7 +279,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionKeepsStableStructuralFingerprint()
     local owner = {}
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -288,7 +288,7 @@ function TestPrepareDefinition:testPrepareDefinitionKeepsStableStructuralFingerp
         },
     })
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -303,7 +303,7 @@ end
 
 function TestPrepareDefinition:testCreateStoreAcceptsPreparedDefinition()
     local owner = {}
-    local definition = lib.prepareDefinition(owner, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -312,7 +312,7 @@ function TestPrepareDefinition:testCreateStoreAcceptsPreparedDefinition()
         },
     })
 
-    local store, session = lib.createStore({
+    local store, session = CreateModuleState({
         EnabledFlag = true,
     }, definition)
 
@@ -323,9 +323,9 @@ end
 
 function TestPrepareDefinition:testCreateStoreRejectsRawDefinition()
     lu.assertErrorMsgContains(
-        "createStore expects a prepared definition",
+        "createModuleState expects a prepared definition",
         function()
-            lib.createStore({}, {
+            CreateModuleState({}, {
                 storage = {
                     { type = "bool", alias = "EnabledFlag", default = false },
                 },
@@ -334,7 +334,7 @@ function TestPrepareDefinition:testCreateStoreRejectsRawDefinition()
 end
 
 function TestPrepareDefinition:testCreateStoreRejectsNonTableConfig()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "RejectNonTableConfig",
         name = "Reject Non Table Config",
         storage = {
@@ -343,22 +343,22 @@ function TestPrepareDefinition:testCreateStoreRejectsNonTableConfig()
     })
 
     lu.assertErrorMsgContains("store.invalid_config", function()
-        lib.createStore(nil, definition)
+        CreateModuleState(nil, definition)
     end)
 end
 
 function TestPrepareDefinition:testCreateModuleHostRejectsRawDefinition()
-    local prepared = lib.prepareDefinition({}, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "RejectRawDefinition",
         name = "Reject Raw Definition",
         storage = {
             { type = "bool", alias = "EnabledFlag", default = false },
         },
     })
-    local store, session = lib.createStore({}, prepared)
+    local store, session = CreateModuleState({}, prepared)
 
     lu.assertErrorMsgContains("prepared definition is required", function()
-        lib.createModuleHost({
+        AdamantModpackLib_Internal.moduleHost.create({
             pluginGuid = "test-raw-host",
             definition = {
                 storage = {
@@ -373,12 +373,12 @@ function TestPrepareDefinition:testCreateModuleHostRejectsRawDefinition()
 end
 
 function TestPrepareDefinition:testCreateStoreRequiresStorage()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "NoStorage",
         name = "No Storage",
     })
 
-    local store, session = lib.createStore({}, definition)
+    local store, session = CreateModuleState({}, definition)
 
     lu.assertFalse(store.read("Enabled"))
     lu.assertFalse(session.read("DebugMode"))
@@ -386,7 +386,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionPreservesHashGroupPlan()
     local owner = {}
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -415,7 +415,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidHashGroupPrefix()
     lu.assertErrorMsgContains("hashGroupPlan[1].keyPrefix 'bad-prefix' must start with a letter", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "BadHashGroup",
             name = "Bad Hash Group",
             storage = {
@@ -435,7 +435,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionUsesStorageDefaultsInFingerprint()
     local owner = {}
-    local prepared = lib.prepareDefinition(owner, {
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -456,7 +456,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionTreatsStorageDefaultChangesAsStructural()
     local owner = {}
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -465,7 +465,7 @@ function TestPrepareDefinition:testPrepareDefinitionTreatsStorageDefaultChangesA
         },
     })
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -481,7 +481,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsLegacyDataDefaultsArgument()
     lu.assertErrorMsgContains("storage defaults on definition.storage nodes", function()
-        lib.prepareDefinition({}, { Count = 1 }, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, { Count = 1 }, {
             modpack = "test-pack",
             id = "Example",
             name = "Example",
@@ -495,7 +495,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionTracksQuickContentForLowerLevelHosts()
     local owner = {}
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "QuickSurface",
         name = "Quick Surface",
@@ -503,7 +503,7 @@ function TestPrepareDefinition:testPrepareDefinitionTracksQuickContentForLowerLe
         hasQuickContent = false,
     })
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "QuickSurface",
         name = "Quick Surface",
@@ -518,7 +518,7 @@ end
 
 function TestPrepareDefinition:testPrepareDefinitionRejectsUnknownStructuralSurfaceOption()
     lu.assertErrorMsgContains("unknown option 'quickContent'", function()
-        lib.prepareDefinition({}, {
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             id = "UnknownSurface",
             name = "Unknown Surface",
         }, {
@@ -531,7 +531,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionFingerprintIgnoresExternalTables()
     local owner = {}
 
-    local first = lib.prepareDefinition(owner, {
+    local first = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -539,7 +539,7 @@ function TestPrepareDefinition:testPrepareDefinitionFingerprintIgnoresExternalTa
             { type = "int", alias = "Count", default = 3, min = 0, max = 10 },
         },
     })
-    local second = lib.prepareDefinition(owner, {
+    local second = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -556,7 +556,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksHashGroupPlanChanges()
     local owner = {}
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -576,7 +576,7 @@ function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksHashGroupPl
         },
     })
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -604,7 +604,7 @@ end
 function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksTooltipChanges()
     local owner = {}
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",
@@ -612,7 +612,7 @@ function TestPrepareDefinition:testPrepareDefinitionFingerprintTracksTooltipChan
         storage = {},
     })
 
-    lib.prepareDefinition(owner, {
+    AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
         modpack = "test-pack",
         id = "Example",
         name = "Example",

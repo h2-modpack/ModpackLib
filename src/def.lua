@@ -128,7 +128,6 @@ local lib = {}
 ---@class AdamantModpackLib.AuthorHost
 ---Activates module hooks, integrations, live-host registration, and initial runtime sync.
 ---Call once after construction.
----@field activate fun(): AdamantModpackLib.AuthorHost
 ---@field tryActivate fun(): boolean, string? Safely activates the host and returns an error instead of throwing.
 ---@field isEnabled fun(): boolean
 ---@field getIdentity fun(): AdamantModpackLib.ModuleIdentity
@@ -147,9 +146,6 @@ local lib = {}
 
 ---@class AdamantModpackLib.PreparedDefinition: AdamantModpackLib.ModuleDefinition
 
----@class AdamantModpackLib.PrepareDefinitionOpts
----@field hasQuickContent? boolean Whether the lower-level host will expose drawQuickContent; used for structural reload tracking.
-
 ---@class AdamantModpackLib.ManualMutation
 ---@field apply fun(host: AdamantModpackLib.AuthorHost?, store: AdamantModpackLib.ManagedStore)
 ---@field revert fun(host: AdamantModpackLib.AuthorHost?, store: AdamantModpackLib.ManagedStore)
@@ -165,34 +161,6 @@ local lib = {}
 
 ---@alias AdamantModpackLib.RegisterHooks
 ---| fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
-
----@class AdamantModpackLib.ModuleHostOpts
----@field owner? table Persistent module owner used for hook refresh ownership when `registerHooks` is provided.
----@field definition AdamantModpackLib.PreparedDefinition
----@field pluginGuid string Plugin guid captured at module file load time.
----@field store AdamantModpackLib.ManagedStore
----@field session AdamantModpackLib.Session
----@field registerHooks? AdamantModpackLib.RegisterHooks
----@field registerPatchMutation? fun(
----    plan: AdamantModpackLib.MutationPlan,
----    host: AdamantModpackLib.AuthorHost,
----    store: AdamantModpackLib.ManagedStore
----)
----@field registerManualMutation? AdamantModpackLib.ManualMutation
---- Post-commit observer for rebuilding derived runtime/UI structures.
----@field onSettingsCommitted? fun(
----    host: AdamantModpackLib.AuthorHost,
----    store: AdamantModpackLib.ManagedStore,
----    commit: AdamantModpackLib.CommitContext
----)
----@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
----@field registerOverlays? fun(
----    overlays: AdamantModpackLib.RetainedOverlayRegistrar,
----    host: AdamantModpackLib.AuthorHost,
----    store: AdamantModpackLib.ManagedStore
----)
----@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
----@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
 ---@class AdamantModpackLib.ModuleCreateOpts
 --- Persistent module owner used for structural hot-reload tracking and hook refresh ownership.
@@ -242,7 +210,6 @@ local lib = {}
 ---@field applyOnLoad fun(): boolean, string?
 ---@field applyMutation fun(): boolean, string?
 ---@field revertMutation fun(): boolean, string?
----@field activate fun(): AdamantModpackLib.AuthorHost
 ---@field tryActivate fun(): boolean, string?
 ---@field drawTab fun(imgui: table)
 ---@field drawQuickContent? fun(imgui: table)
@@ -438,121 +405,29 @@ local lib = {}
 ---@field optionsPerLine? number
 ---@field optionGap? number
 
----@class AdamantModpackLib.LifecycleApi
----@type AdamantModpackLib.LifecycleApi
-lib.lifecycle = {}
+---@class AdamantModpackLib.CoordinatorApi
+---@type AdamantModpackLib.CoordinatorApi
+lib.coordinator = {}
 
 ---@param packId string
 ---@param config AdamantModpackLib.CoordinatorConfig
-function lib.lifecycle.registerCoordinator(packId, config)
+function lib.coordinator.register(packId, config)
 end
 
 ---@param packId string
 ---@param callback fun(reason: table): boolean
-function lib.lifecycle.registerCoordinatorRebuild(packId, callback)
+function lib.coordinator.registerRebuild(packId, callback)
 end
 
 ---@param packId string
 ---@param reason table
 ---@return boolean requested
-function lib.lifecycle.requestCoordinatorRebuild(packId, reason)
+function lib.coordinator.requestRebuild(packId, reason)
 end
 
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@return AdamantModpackLib.MutationShape? shape
----@return AdamantModpackLib.MutationInfo info
-function lib.lifecycle.inferMutation(mutationBundle)
-end
-
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@return boolean affects
-function lib.lifecycle.affectsRunData(mutationBundle)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore?
----@return boolean ok
----@return string? err
-function lib.lifecycle.applyMutation(def, mutationBundle, host, store)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore?
----@return boolean ok
----@return string? err
-function lib.lifecycle.revertMutation(def, mutationBundle, host, store)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore?
----@return boolean ok
----@return string? err
-function lib.lifecycle.reapplyMutation(def, mutationBundle, host, store)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore
----@return boolean ok
----@return string? err
-function lib.lifecycle.applyOnLoad(def, mutationBundle, host, store)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param settingsObserver fun(
----    host: AdamantModpackLib.AuthorHost?,
----    store: AdamantModpackLib.ManagedStore,
----    commit: AdamantModpackLib.CommitContext
----)?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore
----@param commit? AdamantModpackLib.CommitContext
----@return boolean ok
----@return string? err
-function lib.lifecycle.notifySettingsCommitted(def, settingsObserver, host, store, commit)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param session AdamantModpackLib.Session
----@return string[] mismatches
-function lib.lifecycle.resyncSession(def, session)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@param settingsObserver fun(
----    host: AdamantModpackLib.AuthorHost?,
----    store: AdamantModpackLib.ManagedStore,
----    commit: AdamantModpackLib.CommitContext
----)?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore
----@param session AdamantModpackLib.Session
----@return boolean ok
----@return string? err
-function lib.lifecycle.commitSession(def, mutationBundle, settingsObserver, host, store, session)
-end
-
----@param def AdamantModpackLib.ModuleDefinition
----@param mutationBundle AdamantModpackLib.MutationBundle?
----@param host AdamantModpackLib.AuthorHost?
----@param store AdamantModpackLib.ManagedStore
----@param enabled boolean
----@return boolean ok
----@return string? err
-function lib.lifecycle.setEnabled(def, mutationBundle, host, store, enabled)
-end
-
----@param store AdamantModpackLib.ManagedStore
----@param enabled boolean
-function lib.lifecycle.setDebugMode(store, enabled)
+---@param packId string?
+---@return boolean registered
+function lib.coordinator.isRegistered(packId)
 end
 
 ---@class AdamantModpackLib.MutationApi
@@ -566,27 +441,6 @@ end
 
 ---@return AdamantModpackLib.MutationPlan
 function lib.mutation.createPlan()
-end
-
----@class AdamantModpackLib.LoggingApi
----@type AdamantModpackLib.LoggingApi
-lib.logging = {}
-
----@param packId string
----@param enabled boolean
----@param fmt string
-function lib.logging.warnIf(packId, enabled, fmt, ...)
-end
-
----@param packId string
----@param fmt string
-function lib.logging.warn(packId, fmt, ...)
-end
-
----@param name string
----@param enabled boolean
----@param fmt string
-function lib.logging.logIf(name, enabled, fmt, ...)
 end
 
 ---@class AdamantModpackLib.IntegrationsApi
@@ -658,52 +512,6 @@ end
 function lib.gameObject.clear(object, packId, moduleId, key)
 end
 
----@class AdamantModpackLib.HudTextOverlayOpts
----@field id string Stable overlay id.
----@field componentName? string Explicit retained HUD component name.
----@field layout? table Hades II HUD component layout fields such as `RightOffset`, `BottomOffset`, `X`, and `Y`.
----@field textArgs? table Text format overrides.
----@field text? string|fun(): string
----@field visible? boolean|fun(): boolean
-
----@class AdamantModpackLib.HudTextOverlayHandle
----@field setText fun(text: string|fun(): string)
----@field setVisible fun(visible: boolean|fun(): boolean)
----@field refresh fun()
----@field unregister fun()
-
----@class AdamantModpackLib.StackedTextOverlayHandle : AdamantModpackLib.HudTextOverlayHandle
----@field refreshText fun()
-
----@class AdamantModpackLib.StackedRowOverlayHandle
----@field setColumnText fun(key: string, text: string|fun(): string): boolean
----@field setVisible fun(visible: boolean|fun(): boolean)
----@field refresh fun()
----@field refreshText fun()
----@field unregister fun()
-
----@class AdamantModpackLib.StackedTextOverlayOpts : AdamantModpackLib.HudTextOverlayOpts
----@field region? string Stack region name. Defaults to `middleRightStack`.
----@field order? integer Sort key within the region.
----@field textArgs? table Text style overrides. Stacked regions own size, justification, and offsets.
-
----@class AdamantModpackLib.StackedRowColumnOpts
----@field key? string Stable column key used by row handles.
----@field componentName? string Explicit retained HUD component name for this column.
----@field minWidth? number Reserved layout width used to keep following columns aligned; text is not clipped.
----@field justify? "Left"|"Center"|"Right" Column text justification. Defaults to the stack region justification.
----@field text? string|fun(): string
----@field textArgs? table Text style overrides. Stacked regions own `FontSize`, `VerticalJustification`, `OffsetX`, and `OffsetY`.
-
----@class AdamantModpackLib.StackedRowOverlayOpts
----@field id string Stable overlay row id.
----@field componentName? string Base retained HUD component name.
----@field region? string Stack region name. Defaults to `middleRightStack`.
----@field order? integer Sort key within the region.
----@field columnGap? number Reserved space between columns.
----@field columns AdamantModpackLib.StackedRowColumnOpts[] Ordered columns, declared left-to-right.
----@field visible? boolean|fun(): boolean
-
 ---@class AdamantModpackLib.RetainedOverlayColumn
 ---@field key? string Stable column key used by retained values.
 ---@field componentName? string Explicit retained HUD component name for this column.
@@ -773,32 +581,10 @@ lib.overlays = {}
 ---@class AdamantModpackLib.UiSuppressionToken
 ---@field release fun()
 
----@param opts AdamantModpackLib.HudTextOverlayOpts
----@return AdamantModpackLib.HudTextOverlayHandle handle
-function lib.overlays.registerHudText(opts)
-end
-
----@param opts AdamantModpackLib.StackedTextOverlayOpts
----@return AdamantModpackLib.StackedTextOverlayHandle handle
-function lib.overlays.registerStackedText(opts)
-end
-
----@param opts AdamantModpackLib.StackedRowOverlayOpts
----@return AdamantModpackLib.StackedRowOverlayHandle handle
-function lib.overlays.registerStackedRow(opts)
-end
-
 ---@param owner string Stable explicit owner id for system overlays.
 ---@param register fun(overlays: AdamantModpackLib.RetainedOverlayRegistrar)
 ---@return boolean ok
 function lib.overlays.defineOwned(owner, register)
-end
-
-function lib.overlays.refreshHudText()
-end
-
----@param regionName? string Optional stack region to refresh.
-function lib.overlays.refreshStackedText(regionName)
 end
 
 ---@return boolean suppressed
@@ -1078,19 +864,9 @@ end
 ---@type AdamantModpackLib.Config
 lib.config = {}
 
----@param owner table?
----@param definition AdamantModpackLib.ModuleDefinition
----@param opts? AdamantModpackLib.PrepareDefinitionOpts
----@return AdamantModpackLib.PreparedDefinition definition
-function lib.prepareDefinition(owner, definition, opts)
-end
-
----@param modConfig table
----@param definition AdamantModpackLib.PreparedDefinition
----@return AdamantModpackLib.ManagedStore store
----@return AdamantModpackLib.Session session
-function lib.createStore(modConfig, definition)
-end
+---@class AdamantModpackLib.ModuleState
+---@field store AdamantModpackLib.ManagedStore
+---@field session AdamantModpackLib.Session
 
 ---@param storage AdamantModpackLib.StorageSchema
 ---@param session AdamantModpackLib.Session
@@ -1113,23 +889,6 @@ end
 function lib.tryCreateModule(opts)
 end
 
----@param opts AdamantModpackLib.ModuleHostOpts
----@return AdamantModpackLib.ModuleHost host
----@return AdamantModpackLib.AuthorHost authorHost
-function lib.createModuleHost(opts)
-end
-
----@param host AdamantModpackLib.ModuleHost
----@return AdamantModpackLib.AuthorHost host
-function lib.activateModuleHost(host)
-end
-
----@param host AdamantModpackLib.ModuleHost
----@return boolean ok
----@return string? err
-function lib.tryActivateModule(host)
-end
-
 ---@param pluginGuid string Plugin guid used when creating the module host.
 ---@return AdamantModpackLib.StandaloneRuntime runtime
 function lib.standaloneHost(pluginGuid)
@@ -1138,17 +897,6 @@ end
 ---@param pluginGuid string?
 ---@return AdamantModpackLib.ModuleHost? host
 function lib.getLiveModuleHost(pluginGuid)
-end
-
----@param packId string?
----@return boolean coordinated
-function lib.isModuleCoordinated(packId)
-end
-
----@param store AdamantModpackLib.ManagedStore?
----@param packId string?
----@return boolean enabled
-function lib.isModuleEnabled(store, packId)
 end
 
 return lib

@@ -30,12 +30,12 @@ local host = lib.createModule({
     drawTab = internal.DrawTab,
     drawQuickContent = internal.DrawQuickContent,
 })
-host.activate()
+host.tryActivate()
 ```
 
 `owner` is used for structural hot-reload tracking and hook refresh ownership.
 Pass `registerHooks` when the module uses `lib.hooks.*`.
-`host.activate()` registers the live host for coordinated discovery and standalone hosting.
+`host.tryActivate()` registers the live host for coordinated discovery and standalone hosting.
 Every module definition must declare a stable `id` and display `name`; `modpack`
 is optional and marks modules that participate in Framework coordination.
 
@@ -65,8 +65,7 @@ is optional and marks modules that participate in Framework coordination.
 ## Public Surface
 
 - `lib.config`
-- `lib.logging`
-- `lib.lifecycle`
+- `lib.coordinator`
 - `lib.mutation`
 - `lib.hashing`
 - `lib.hooks`
@@ -77,23 +76,14 @@ is optional and marks modules that participate in Framework coordination.
 Common top-level helpers:
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
-- `lib.prepareDefinition(...)`
-- `lib.createStore(...)`
-- `lib.createModuleHost(...)`
-- `lib.activateModuleHost(...)`
-- `lib.tryActivateModule(...)`
 - `lib.standaloneHost(...)`
-- `lib.isModuleEnabled(...)`
-- `lib.isModuleCoordinated(...)`
+- `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`
 
 Most authors start with `lib.createModule(...)`.
 Pack orchestrators that should skip invalid modules instead of stopping sibling
 modules can use `lib.tryCreateModule(...)` plus `host.tryActivate()`.
 See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the recommended project shape.
-
-For custom construction, the lower-level `prepareDefinition(...)`,
-`createStore(...)`, and `createModuleHost(...)` primitives remain available.
 
 ## Validation
 

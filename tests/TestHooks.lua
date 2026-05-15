@@ -111,17 +111,17 @@ local function createHostWithHooks(owner, registerHooks, activationOpts)
             return {}
         end,
     }
-    local host = lib.createModuleHost({
+    local host = AdamantModpackLib_Internal.moduleHost.create({
         owner = owner,
         pluginGuid = "hook-test-module",
-        definition = lib.prepareDefinition({}, { id = "HookTest", name = "Hook Test", storage = {} }),
+        definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, { id = "HookTest", name = "Hook Test", storage = {} }),
         store = store,
         session = session,
         registerHooks = registerHooks,
         registerIntegrations = activationOpts.registerIntegrations,
         drawTab = function() end,
     })
-    return lib.activateModuleHost(host)
+    return AdamantModpackLib_Internal.moduleHost.activate(host)
 end
 
 function TestHooks:testWrapRegistersOnceAndUpdatesHandler()
@@ -418,9 +418,9 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
     local packId = "hook-pack"
     local applyCalls = 0
     local revertCalls = 0
-    lib.lifecycle.registerCoordinator(packId, { ModEnabled = true })
+    lib.coordinator.register(packId, { ModEnabled = true })
 
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
@@ -449,7 +449,7 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
             return {}
         end,
     }
-    local host = lib.createModuleHost({
+    local host = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "hook-pack.Alpha",
         definition = definition,
         registerManualMutation = {
@@ -464,11 +464,11 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
         session = session,
         drawTab = function() end,
     })
-    lib.activateModuleHost(host)
+    AdamantModpackLib_Internal.moduleHost.activate(host)
 
     lu.assertEquals(applyCalls, 1)
     lu.assertEquals(revertCalls, 0)
-    lib.lifecycle.registerCoordinator(packId, nil)
+    lib.coordinator.register(packId, nil)
 end
 
 function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState()
@@ -477,7 +477,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
     local firstRevertCalls = 0
     local secondApplyCalls = 0
     local secondRevertCalls = 0
-    lib.lifecycle.registerCoordinator(packId, { ModEnabled = true })
+    lib.coordinator.register(packId, { ModEnabled = true })
 
     local function createSession()
         return {
@@ -506,14 +506,14 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         end,
     }
 
-    local firstDefinition = lib.prepareDefinition({}, {
+    local firstDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
             storage = {},
         })
     local firstSession = createSession()
-    local firstHost = lib.createModuleHost({
+    local firstHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "hook-reload-pack.Alpha",
         definition = firstDefinition,
         registerManualMutation = {
@@ -528,16 +528,16 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         session = firstSession,
         drawTab = function() end,
     })
-    lib.activateModuleHost(firstHost)
+    AdamantModpackLib_Internal.moduleHost.activate(firstHost)
 
-    local secondDefinition = lib.prepareDefinition({}, {
+    local secondDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
             modpack = packId,
             id = "Alpha",
             name = "Alpha",
             storage = {},
         })
     local secondSession = createSession()
-    local secondHost = lib.createModuleHost({
+    local secondHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "hook-reload-pack.Alpha",
         definition = secondDefinition,
         registerManualMutation = {
@@ -552,15 +552,15 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         session = secondSession,
         drawTab = function() end,
     })
-    lib.activateModuleHost(secondHost)
+    AdamantModpackLib_Internal.moduleHost.activate(secondHost)
 
     lu.assertEquals(firstApplyCalls, 1)
     lu.assertEquals(firstRevertCalls, 1)
     lu.assertEquals(secondApplyCalls, 1)
     lu.assertEquals(secondRevertCalls, 0)
 
-    lib.lifecycle.registerCoordinator(packId, nil)
-    lib.lifecycle.revertMutation({
+    lib.coordinator.register(packId, nil)
+    AdamantModpackLib_Internal.mutation.revert({
         modpack = packId,
         id = "Alpha",
         name = "Alpha",

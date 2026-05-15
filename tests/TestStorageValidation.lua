@@ -178,7 +178,7 @@ end
 
 function TestStorageValidation:testResetSessionToDefaultsResetsChangedPersistentRoots()
     local config = { Flag = true, Count = 3, Filter = "ignored" }
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "ResetPersistentRoots",
         name = "Reset Persistent Roots",
         storage = {
@@ -187,7 +187,7 @@ function TestStorageValidation:testResetSessionToDefaultsResetsChangedPersistent
             { type = "string", alias = "Filter", persist = false, hash = false, default = "", maxLen = 32 },
         },
     })
-    local _, session = lib.createStore(config, definition)
+    local _, session = CreateModuleState(config, definition)
 
     session.write("Filter", "live")
     local changed, count = lib.resetStorageToDefaults(definition.storage, session)
@@ -201,7 +201,7 @@ end
 
 function TestStorageValidation:testResetSessionToDefaultsCanExcludeAliases()
     local config = { Flag = true, ViewRegion = "Surface" }
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "ResetExcludeAliases",
         name = "Reset Exclude Aliases",
         storage = {
@@ -209,7 +209,7 @@ function TestStorageValidation:testResetSessionToDefaultsCanExcludeAliases()
             { type = "string", alias = "ViewRegion", default = "Underworld" },
         },
     })
-    local _, session = lib.createStore(config, definition)
+    local _, session = CreateModuleState(config, definition)
 
     local changed, count = lib.resetStorageToDefaults(definition.storage, session, {
         exclude = { ViewRegion = true },

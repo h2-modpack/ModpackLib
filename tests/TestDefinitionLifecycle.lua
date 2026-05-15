@@ -31,7 +31,7 @@ local function HybridMutation(patch, apply, revert)
 end
 
 local function makeStore(enabled)
-    return lib.createStore({ Enabled = enabled }, lib.prepareDefinition({}, {
+    return CreateModuleState({ Enabled = enabled }, AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "LifecycleStore",
         name = "Lifecycle Store",
         storage = {},
@@ -243,35 +243,11 @@ function TestDefinitionLifecycle:testSetElementErrorsOnNonTableTarget()
     lu.assertError(plan.apply)
 end
 
-function TestDefinitionLifecycle:testInferMutationShapeManual()
-    local mode, info = lib.lifecycle.inferMutation(ManualMutation(function() end, function() end))
-
-    lu.assertEquals(mode, "manual")
-    lu.assertTrue(info.hasManual)
-    lu.assertFalse(info.hasPatch)
-end
-
-function TestDefinitionLifecycle:testInferMutationShapePatch()
-    local mode, info = lib.lifecycle.inferMutation(PatchMutation(function() end))
-
-    lu.assertEquals(mode, "patch")
-    lu.assertTrue(info.hasPatch)
-    lu.assertFalse(info.hasManual)
-end
-
-function TestDefinitionLifecycle:testInferMutationShapeHybrid()
-    local mode, info = lib.lifecycle.inferMutation(HybridMutation(function() end, function() end, function() end))
-
-    lu.assertEquals(mode, "hybrid")
-    lu.assertTrue(info.hasPatch)
-    lu.assertTrue(info.hasManual)
-end
-
 function TestDefinitionLifecycle:testAffectsRunDataIgnoresDeprecatedFlag()
-    lu.assertTrue(lib.lifecycle.affectsRunData({ affectsRunData = true }))
-    lu.assertFalse(lib.lifecycle.affectsRunData({ affectsRunData = false }))
-    lu.assertFalse(lib.lifecycle.affectsRunData({ dataMutation = true }))
-    lu.assertFalse(lib.lifecycle.affectsRunData({}))
+    lu.assertTrue(AdamantModpackLib_Internal.mutation.affectsRunData({ affectsRunData = true }))
+    lu.assertFalse(AdamantModpackLib_Internal.mutation.affectsRunData({ affectsRunData = false }))
+    lu.assertFalse(AdamantModpackLib_Internal.mutation.affectsRunData({ dataMutation = true }))
+    lu.assertFalse(AdamantModpackLib_Internal.mutation.affectsRunData({}))
 end
 
 function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlush()
@@ -281,7 +257,7 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlus
         Enabled = true,
         Value = false,
     }
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "CommitSessionObserver",
         name = "Commit Session Observer",
         storage = {
@@ -292,14 +268,14 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlus
             },
         },
     })
-    local store, session = lib.createStore(config, definition)
+    local store, session = CreateModuleState(config, definition)
     local settingsObserver = function(_, activeStore)
         calls = calls + 1
         observedValue = activeStore.read("Value")
     end
 
     session.write("Value", true)
-    local ok, err = lib.lifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
+    local ok, err = HostLifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -307,7 +283,7 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverAfterFlus
     lu.assertTrue(observedValue)
     lu.assertTrue(config.Value)
 
-    ok, err = lib.lifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
+    ok, err = HostLifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(calls, 1)
@@ -320,12 +296,12 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverForAction
     local config = {
         Enabled = true,
     }
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "CommitSessionActionObserver",
         name = "Commit Session Action Observer",
         storage = {},
     })
-    local store, session = lib.createStore(config, definition)
+    local store, session = CreateModuleState(config, definition)
     local settingsObserver = function(_, _, commit)
         calls = calls + 1
         observedAction = commit.readAction("recording")
@@ -333,7 +309,7 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverForAction
     end
 
     session.stageAction("recording", { kind = "start" })
-    local ok, err = lib.lifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
+    local ok, err = HostLifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -343,7 +319,7 @@ function TestDefinitionLifecycle:testCommitSessionCallsSettingsObserverForAction
     lu.assertFalse(session.hasActions())
     lu.assertFalse(session.isDirty())
 
-    ok, err = lib.lifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
+    ok, err = HostLifecycle.commitSession(definition, nil, settingsObserver, nil, store, session)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(calls, 1)
@@ -357,12 +333,12 @@ function TestDefinitionLifecycle:testApplyDefinitionSupportsPatchOnly()
             plan:set(target, "Value", 7)
         end)
 
-    local ok, err = lib.lifecycle.applyMutation(def, mutation, nil, store)
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 7)
 
-    ok, err = lib.lifecycle.revertMutation(def, mutation, nil, store)
+    ok, err = AdamantModpackLib_Internal.mutation.revert(def, mutation, nil, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -379,7 +355,7 @@ function TestDefinitionLifecycle:testPatchRuntimeSurvivesRecreatedStoreByModuleI
             plan:set(target, "Value", 7)
         end)
 
-    local ok, err = lib.lifecycle.applyMutation(defA, mutationA, nil, storeA)
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(defA, mutationA, nil, storeA)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 7)
@@ -393,12 +369,12 @@ function TestDefinitionLifecycle:testPatchRuntimeSurvivesRecreatedStoreByModuleI
             plan:set(target, "Value", 9)
         end)
 
-    ok, err = lib.lifecycle.applyMutation(defB, mutationB, nil, storeB)
+    ok, err = AdamantModpackLib_Internal.mutation.apply(defB, mutationB, nil, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 9)
 
-    ok, err = lib.lifecycle.revertMutation(defB, mutationB, nil, storeB)
+    ok, err = AdamantModpackLib_Internal.mutation.revert(defB, mutationB, nil, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -415,14 +391,14 @@ function TestDefinitionLifecycle:testApplyOnLoadRevertsStablePatchWhenReloadedDi
             plan:set(target, "Value", 7)
         end)
 
-    local ok, err = lib.lifecycle.applyMutation(def, mutation, nil, storeA)
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, storeA)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 7)
 
     local storeB = makeStore(false)
 
-    ok, err = lib.lifecycle.applyOnLoad(def, mutation, nil, storeB)
+    ok, err = HostLifecycle.applyOnLoad(def, mutation, nil, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -441,7 +417,7 @@ function TestDefinitionLifecycle:testManualRuntimeSurvivesRecreatedStoreByModule
         target.Value = target.Value - 1
     end)
 
-    local ok, err = lib.lifecycle.applyMutation(defA, mutationA, nil, storeA)
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(defA, mutationA, nil, storeA)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 1)
@@ -457,12 +433,12 @@ function TestDefinitionLifecycle:testManualRuntimeSurvivesRecreatedStoreByModule
         target.Value = target.Value - 10
     end)
 
-    ok, err = lib.lifecycle.applyMutation(defB, mutationB, nil, storeB)
+    ok, err = AdamantModpackLib_Internal.mutation.apply(defB, mutationB, nil, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 10)
 
-    ok, err = lib.lifecycle.revertMutation(defB, mutationB, nil, storeB)
+    ok, err = AdamantModpackLib_Internal.mutation.revert(defB, mutationB, nil, storeB)
     lu.assertTrue(ok)
     lu.assertNil(err)
     lu.assertEquals(target.Value, 0)
@@ -479,7 +455,7 @@ function TestDefinitionLifecycle:testApplyOnLoadDisabledDoesNotCallInactiveManua
         revertCalls = revertCalls + 1
     end)
 
-    local ok, err = lib.lifecycle.applyOnLoad(def, mutation, nil, store)
+    local ok, err = HostLifecycle.applyOnLoad(def, mutation, nil, store)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -490,11 +466,11 @@ function TestDefinitionLifecycle:testApplyDefinitionNoOpsWhenLifecycleMissingAnd
     local store = makeStore(false)
     local def = { id = "NoLifecycle" }
 
-    local ok, err = lib.lifecycle.applyMutation(def, nil, nil, store)
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, nil, nil, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
 
-    ok, err = lib.lifecycle.revertMutation(def, nil, nil, store)
+    ok, err = AdamantModpackLib_Internal.mutation.revert(def, nil, nil, store)
     lu.assertTrue(ok)
     lu.assertNil(err)
 end
@@ -507,7 +483,7 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledCommitsOnlyAfterSuccess
         applied = true
     end, function() end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, mutation, nil, store, true)
+    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -522,7 +498,7 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedEnab
         error("enable boom")
     end, function() end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, mutation, nil, store, true)
+    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
 
     lu.assertFalse(ok)
     lu.assertStrContains(tostring(err), "enable boom")
@@ -536,7 +512,7 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedDisa
         error("disable boom")
     end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, mutation, nil, store, false)
+    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, false)
 
     lu.assertFalse(ok)
     lu.assertStrContains(tostring(err), "disable boom")
@@ -553,7 +529,7 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledReappliesWhenAlreadyEna
         table.insert(calls, "revert")
     end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, mutation, nil, store, true)
+    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -569,7 +545,7 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledNoOpsWhenAlreadyDisable
         revertCalls = revertCalls + 1
     end)
 
-    local ok, err = lib.lifecycle.setEnabled(def, mutation, nil, store, false)
+    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, false)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
@@ -587,7 +563,7 @@ function TestDefinitionLifecycle:testReapplyDefinitionStopsWhenRevertFails()
         error("revert boom")
     end)
 
-    local ok, err = lib.lifecycle.reapplyMutation(def, mutation, nil, store)
+    local ok, err = AdamantModpackLib_Internal.mutation.reapply(def, mutation, nil, store)
 
     lu.assertFalse(ok)
     lu.assertStrContains(tostring(err), "revert boom")
@@ -610,12 +586,12 @@ function TestDefinitionLifecycle:testHybridOrderingIsPatchThenManualOnApplyAndMa
             target.Value = -1
         end)
 
-    local ok = lib.lifecycle.applyMutation(def, mutation, nil, store)
+    local ok = AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, store)
     lu.assertTrue(ok)
     lu.assertEquals(order, { "build", "manual-apply" })
     lu.assertEquals(target.Value, 15)
 
-    ok = lib.lifecycle.revertMutation(def, mutation, nil, store)
+    ok = AdamantModpackLib_Internal.mutation.revert(def, mutation, nil, store)
     lu.assertTrue(ok)
     lu.assertEquals(order, { "build", "manual-apply", "manual-revert" })
     lu.assertEquals(target.Value, 0)

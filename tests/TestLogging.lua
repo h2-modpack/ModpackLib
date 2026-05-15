@@ -20,30 +20,6 @@ function TestLogging:tearDown()
     lib.config.DebugMode = false
 end
 
-function TestLogging:testWarnAlwaysFormatsWithPackPrefix()
-    lib.logging.warn("pack", "hello %s", "world")
-
-    lu.assertEquals(self.lines, { "[pack] hello world" })
-end
-
-function TestLogging:testWarnIfHonorsEnabledFlag()
-    lib.logging.warnIf("pack", false, "hidden")
-    lib.logging.warnIf("pack", true, "visible %d", 7)
-
-    lu.assertEquals(self.lines, { "[pack] visible 7" })
-end
-
-function TestLogging:testLogIfHonorsEnabledFlagAndHandlesPlainMessages()
-    lib.logging.logIf("system", false, "hidden")
-    lib.logging.logIf("system", true, "plain message")
-    lib.logging.logIf("system", true, "formatted %s", "message")
-
-    lu.assertEquals(self.lines, {
-        "[system] plain message",
-        "[system] formatted message",
-    })
-end
-
 function TestLogging:testViolationWarnUsesPolicyId()
     AdamantModpackLib_Internal.violationPolicy["test.warn"] = {
         severity = "warn",
@@ -66,24 +42,31 @@ end
 
 function TestLogging:testViolationPolicyMatchesSourceCallSites()
     local files = {
-        "src/core/definition.lua",
-        "src/core/game_object.lua",
-        "src/core/hooks.lua",
-        "src/core/host.lua",
-        "src/core/integrations.lua",
-        "src/core/lifecycle.lua",
-        "src/core/module.lua",
-        "src/core/overlays.lua",
-        "src/core/standalone_host.lua",
-        "src/core/store.lua",
-        "src/core/internal/logging.lua",
-        "src/core/internal/session.lua",
-        "src/core/internal/storage.lua",
-        "src/core/internal/storage_packed.lua",
-        "src/core/internal/storage_table.lua",
-        "src/core/internal/storage_types.lua",
-        "src/core/internal/store.lua",
-        "src/widgets/widget_helpers.lua",
+        "src/core/module_bootstrap/definition.lua",
+        "src/core/game_object/game_object.lua",
+        "src/core/hooks/hooks.lua",
+        "src/core/hooks/private_registry.lua",
+        "src/core/module_bootstrap/host.lua",
+        "src/core/module_bootstrap/private_host_lifecycle.lua",
+        "src/core/integrations/integrations.lua",
+        "src/core/integrations/private_registry.lua",
+        "src/core/coordinator/coordinator.lua",
+        "src/core/module_bootstrap/module.lua",
+        "src/core/overlays/overlays.lua",
+        "src/core/overlays/private_renderer.lua",
+        "src/core/overlays/private_retained.lua",
+        "src/core/overlays/private_state.lua",
+        "src/core/standalone_host/standalone_host.lua",
+        "src/core/module_state/module_state.lua",
+        "src/core/logging/logging.lua",
+        "src/core/helpers/values.lua",
+        "src/core/module_state/private_session.lua",
+        "src/core/storage/storage.lua",
+        "src/core/storage/private_packed.lua",
+        "src/core/storage/private_table.lua",
+        "src/core/storage/private_types.lua",
+        "src/core/module_state/private_store.lua",
+        "src/core/widgets/widget_helpers.lua",
     }
 
     for _, path in ipairs(files) do
@@ -98,24 +81,31 @@ end
 
 function TestLogging:testViolationPolicyHasNoOrphanIds()
     local files = {
-        "src/core/definition.lua",
-        "src/core/game_object.lua",
-        "src/core/hooks.lua",
-        "src/core/host.lua",
-        "src/core/integrations.lua",
-        "src/core/lifecycle.lua",
-        "src/core/module.lua",
-        "src/core/overlays.lua",
-        "src/core/standalone_host.lua",
-        "src/core/store.lua",
-        "src/core/internal/logging.lua",
-        "src/core/internal/session.lua",
-        "src/core/internal/storage.lua",
-        "src/core/internal/storage_packed.lua",
-        "src/core/internal/storage_table.lua",
-        "src/core/internal/storage_types.lua",
-        "src/core/internal/store.lua",
-        "src/widgets/widget_helpers.lua",
+        "src/core/module_bootstrap/definition.lua",
+        "src/core/game_object/game_object.lua",
+        "src/core/hooks/hooks.lua",
+        "src/core/hooks/private_registry.lua",
+        "src/core/module_bootstrap/host.lua",
+        "src/core/module_bootstrap/private_host_lifecycle.lua",
+        "src/core/integrations/integrations.lua",
+        "src/core/integrations/private_registry.lua",
+        "src/core/coordinator/coordinator.lua",
+        "src/core/module_bootstrap/module.lua",
+        "src/core/overlays/overlays.lua",
+        "src/core/overlays/private_renderer.lua",
+        "src/core/overlays/private_retained.lua",
+        "src/core/overlays/private_state.lua",
+        "src/core/standalone_host/standalone_host.lua",
+        "src/core/module_state/module_state.lua",
+        "src/core/logging/logging.lua",
+        "src/core/helpers/values.lua",
+        "src/core/module_state/private_session.lua",
+        "src/core/storage/storage.lua",
+        "src/core/storage/private_packed.lua",
+        "src/core/storage/private_table.lua",
+        "src/core/storage/private_types.lua",
+        "src/core/module_state/private_store.lua",
+        "src/core/widgets/widget_helpers.lua",
     }
     local referenced = {}
 

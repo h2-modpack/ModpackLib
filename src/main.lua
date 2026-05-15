@@ -27,20 +27,13 @@ internal.pendingCoordinatorRebuilds = internal.pendingCoordinatorRebuilds
 
 ---@class AdamantModpackLib
 ---@field config table
----@field createStore fun(modConfig: table, definition: ModuleDefinition): ManagedStore, Session
 ---@field resetStorageToDefaults fun(storage: StorageSchema, session: Session, opts: table|nil)
 ---@field createModule fun(opts: ModuleCreateOpts): AuthorHost, ManagedStore
 ---@field tryCreateModule fun(opts: ModuleCreateOpts): AuthorHost|nil, ManagedStore|nil, string|nil
----@field createModuleHost fun(opts: ModuleHostOpts): ModuleHost, AuthorHost
----@field activateModuleHost fun(host: ModuleHost): AuthorHost
----@field tryActivateModule fun(host: ModuleHost): boolean, string|nil
 ---@field standaloneHost fun(pluginGuid: string): StandaloneRuntime
 ---@field getLiveModuleHost fun(pluginGuid: string|nil): ModuleHost|nil
----@field isModuleCoordinated fun(packId: string|nil): boolean
----@field isModuleEnabled fun(store: ManagedStore, packId: string|nil): boolean
----@field lifecycle table
+---@field coordinator table
 ---@field mutation table
----@field logging table
 ---@field gameObject table
 ---@field hashing table
 ---@field imguiHelpers table
@@ -49,9 +42,6 @@ internal.pendingCoordinatorRebuilds = internal.pendingCoordinatorRebuilds
 ---@field nav table
 
 import 'core/init.lua'
-import 'widgets/init.lua'
-
-local fallbackHud = import 'core/private/fallback_hud.lua'
 
 -- Standalone framework debug toggle - hidden when Core/Framework registers coordinators.
 rom.gui.add_to_menu_bar(function()
@@ -80,7 +70,3 @@ if type(rom.gui.add_always_draw_imgui) == "function" and type(rom.gui.is_open) =
         wasGuiOpen = isGuiOpen
     end)
 end
-
-modutil.once_loaded.game(function()
-    fallbackHud.createMarker()
-end)

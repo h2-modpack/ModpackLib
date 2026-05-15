@@ -45,10 +45,10 @@ local function makeStore(definition, config)
     config = config or {}
     definition.id = definition.id or "DataDefaults"
     definition.name = definition.name or "Data Defaults"
-    if not AdamantModpackLib_Internal.definition.isPrepared(definition) then
-        definition = lib.prepareDefinition({}, definition)
+    if not (type(definition) == "table" and rawget(definition, "_preparedDefinition") == true) then
+        definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, definition)
     end
-    local store, session = lib.createStore(config, definition)
+    local store, session = CreateModuleState(config, definition)
     return store, session, config
 end
 
@@ -334,7 +334,7 @@ function TestDataDefaults:testMissingAliasUsesStorageDefault()
 end
 
 function TestDataDefaults:testPreparedStorageDefaultsAreStableAcrossCreateStoreCalls()
-    local definition = lib.prepareDefinition({}, {
+    local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = "StablePreparedDefaults",
         name = "Stable Prepared Defaults",
         storage = {
