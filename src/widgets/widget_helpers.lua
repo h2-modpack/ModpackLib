@@ -1,6 +1,4 @@
 local internal = AdamantModpackLib_Internal
-local widgetHelpers = {}
-local storageInternal = internal.storage
 
 ---@alias Color number[]
 ---@alias ChoiceValue any
@@ -8,7 +6,9 @@ local storageInternal = internal.storage
 ---@alias ValueColorMap table<any, Color>
 ---@alias PackedSelectionMode "singleEnabled"|"singleDisabled"
 
-function widgetHelpers.NormalizeColor(value)
+local PACKED_CHOICE_NONE_VALUE = false
+
+local function NormalizeColor(value)
     if type(value) ~= "table" then
         return nil
     end
@@ -22,7 +22,7 @@ function widgetHelpers.NormalizeColor(value)
     return { r, g, b, a }
 end
 
-function widgetHelpers.NormalizeChoiceValue(node, value)
+local function NormalizeChoiceValue(node, value)
     local values = node.values
     if type(values) ~= "table" or #values == 0 then
         return value ~= nil and value or node.default
@@ -47,30 +47,30 @@ function widgetHelpers.NormalizeChoiceValue(node, value)
     return values[1]
 end
 
-function widgetHelpers.ChoiceDisplay(node, value)
+local function ChoiceDisplay(node, value)
     if node.displayValues and node.displayValues[value] ~= nil then
         return tostring(node.displayValues[value])
     end
     return tostring(value)
 end
 
-function widgetHelpers.NormalizeInteger(node, value)
-    return storageInternal.NormalizeInteger(node, value)
+local function NormalizeInteger(node, value)
+    return internal.storage.NormalizeInteger(node, value)
 end
 
-function widgetHelpers.ShowTooltip(imgui, tooltip)
+local function ShowTooltip(imgui, tooltip)
     if type(tooltip) == "string" and tooltip ~= "" and imgui.IsItemHovered() then
         imgui.SetTooltip(tooltip)
     end
 end
 
-function widgetHelpers.AdvanceInlineGap(imgui, gap)
+local function AdvanceInlineGap(imgui, gap)
     if tonumber(gap) and gap > 0 then
         imgui.SetCursorPosX(imgui.GetCursorPosX() + gap)
     end
 end
 
-function widgetHelpers.ResolveGap(imgui, value, fallback)
+local function ResolveGap(imgui, value, fallback)
     local gap = tonumber(value)
     if gap == nil or gap < 0 then
         if fallback ~= nil then
@@ -86,12 +86,12 @@ function widgetHelpers.ResolveGap(imgui, value, fallback)
     return gap
 end
 
-function widgetHelpers.SameLineWithGap(imgui, gap)
+local function SameLineWithGap(imgui, gap)
     imgui.SameLine()
-    widgetHelpers.AdvanceInlineGap(imgui, gap)
+    AdvanceInlineGap(imgui, gap)
 end
 
-function widgetHelpers.DrawWithValueColor(imgui, color, drawFn)
+local function DrawWithValueColor(imgui, color, drawFn)
     if type(color) ~= "table" then
         return drawFn()
     end
@@ -103,11 +103,11 @@ function widgetHelpers.DrawWithValueColor(imgui, color, drawFn)
     return a, b, c, d
 end
 
-function widgetHelpers.MakeSelectableId(label, uniqueId)
+local function MakeSelectableId(label, uniqueId)
     return tostring(label or "") .. "##" .. tostring(uniqueId or "")
 end
 
-function widgetHelpers.GetPackedChoiceMode(node)
+local function GetPackedChoiceMode(node)
     local mode = node.selectionMode
     if mode == nil or mode == "" then
         return "singleEnabled"
@@ -115,25 +115,21 @@ function widgetHelpers.GetPackedChoiceMode(node)
     return mode
 end
 
-function widgetHelpers.GetPackedChoiceLabel(node, child)
+local function GetPackedChoiceLabel(node, child)
     if type(node.displayValues) == "table" and node.displayValues[child.alias] ~= nil then
         return tostring(node.displayValues[child.alias])
     end
     return tostring(child.label or child.alias or "")
 end
 
-function widgetHelpers.GetPackedChoiceNoneValue()
-    return false
-end
-
-function widgetHelpers.IsPackedChoiceActive(mode, value)
+local function IsPackedChoiceActive(mode, value)
     if mode == "singleDisabled" then
         return value == false
     end
     return value == true
 end
 
-function widgetHelpers.GetPackedChoiceWriteValue(mode, isActive)
+local function GetPackedChoiceWriteValue(mode, isActive)
     if mode == "singleDisabled" then
         if isActive then
             return false
@@ -143,9 +139,8 @@ function widgetHelpers.GetPackedChoiceWriteValue(mode, isActive)
     return isActive == true
 end
 
-function widgetHelpers.ClassifyPackedChoice(node, session, children)
-    local mode = widgetHelpers.GetPackedChoiceMode(node)
-    local noneValue = widgetHelpers.GetPackedChoiceNoneValue(mode)
+local function ClassifyPackedChoice(node, session, children)
+    local mode = GetPackedChoiceMode(node)
     local activeCount = 0
     local totalCount = 0
     local lastActiveChild = nil
@@ -154,9 +149,9 @@ function widgetHelpers.ClassifyPackedChoice(node, session, children)
         totalCount = totalCount + 1
         local value = session.read(child.alias)
         if value == nil then
-            value = noneValue
+            value = PACKED_CHOICE_NONE_VALUE
         end
-        if widgetHelpers.IsPackedChoiceActive(mode, value) then
+        if IsPackedChoiceActive(mode, value) then
             activeCount = activeCount + 1
             lastActiveChild = child
         end
@@ -175,15 +170,15 @@ function widgetHelpers.ClassifyPackedChoice(node, session, children)
         state = state,
         selectedChild = state == "single" and lastActiveChild or nil,
         mode = mode,
-        noneValue = noneValue,
+        noneValue = PACKED_CHOICE_NONE_VALUE,
     }
 end
 
-function widgetHelpers.ApplyPackedChoiceSelection(session, children, selectedAlias, selection)
+local function ApplyPackedChoiceSelection(session, children, selectedAlias, selection)
     local changed = false
     for _, child in ipairs(children or {}) do
         local shouldBeActive = child.alias == selectedAlias
-        local nextValue = widgetHelpers.GetPackedChoiceWriteValue(selection.mode, shouldBeActive)
+        local nextValue = GetPackedChoiceWriteValue(selection.mode, shouldBeActive)
         local currentValue = session.read(child.alias)
         if currentValue == nil then
             currentValue = selection.noneValue
@@ -196,7 +191,7 @@ function widgetHelpers.ApplyPackedChoiceSelection(session, children, selectedAli
     return changed
 end
 
-function widgetHelpers.ClearPackedChoiceSelection(session, children, selection)
+local function ClearPackedChoiceSelection(session, children, selection)
     local changed = false
     for _, child in ipairs(children or {}) do
         local currentValue = session.read(child.alias)
@@ -211,7 +206,7 @@ function widgetHelpers.ClearPackedChoiceSelection(session, children, selection)
     return changed
 end
 
-function widgetHelpers.ResolvePackedChildren(session, alias)
+local function ResolvePackedChildren(session, alias)
     if type(session) ~= "table" or type(session.getAliasSchema) ~= "function" then
         internal.violate(
             "widgets.invalid_packed_session",
@@ -220,7 +215,23 @@ function widgetHelpers.ResolvePackedChildren(session, alias)
     end
 
     local node = session.getAliasSchema(alias)
-    return storageInternal.getPackedAliases(node)
+    return internal.storage.getPackedAliases(node)
 end
 
-return widgetHelpers
+return {
+    NormalizeColor = NormalizeColor,
+    NormalizeChoiceValue = NormalizeChoiceValue,
+    ChoiceDisplay = ChoiceDisplay,
+    NormalizeInteger = NormalizeInteger,
+    ShowTooltip = ShowTooltip,
+    AdvanceInlineGap = AdvanceInlineGap,
+    ResolveGap = ResolveGap,
+    SameLineWithGap = SameLineWithGap,
+    DrawWithValueColor = DrawWithValueColor,
+    MakeSelectableId = MakeSelectableId,
+    GetPackedChoiceLabel = GetPackedChoiceLabel,
+    ClassifyPackedChoice = ClassifyPackedChoice,
+    ApplyPackedChoiceSelection = ApplyPackedChoiceSelection,
+    ClearPackedChoiceSelection = ClearPackedChoiceSelection,
+    ResolvePackedChildren = ResolvePackedChildren,
+}
