@@ -17,6 +17,11 @@ local state = internal.overlays
 local values = internal.values
 state.uiSuppressors = state.uiSuppressors or {}
 state.nextUiSuppressorId = state.nextUiSuppressorId or 0
+state.retained = state.retained or {}
+state.retained.tableRegistries = state.retained.tableRegistries or setmetatable({}, { __mode = "k" })
+state.retained.explicitRegistries = state.retained.explicitRegistries or {}
+state.retained.nextOwnerId = state.retained.nextOwnerId or 0
+state.retained.intervalDriverRegistered = state.retained.intervalDriverRegistered == true
 
 local REGIONS = {
     middleRightStack = {
@@ -256,6 +261,400 @@ local function stackedHandleId(region, id)
     return "stacked:" .. tostring(region) .. ":" .. tostring(id)
 end
 
+local function retainedHandleId(registry, name)
+    return tostring(registry.ownerId) .. ":" .. tostring(name)
+end
+
+local function retainedRowId(registry, name, index)
+    return retainedHandleId(registry, name) .. ":row:" .. tostring(index)
+end
+
+local function getRetainedRegistry(owner, create)
+    if type(owner) == "string" then
+        local registry = state.retained.explicitRegistries[owner]
+        if not registry and create then
+            local hookOwner = {}
+            registry = {
+                owner = hookOwner,
+                ownerId = owner,
+                generation = 0,
+                refreshing = false,
+                elements = {},
+                events = {
+                    commit = {},
+                    intervals = {},
+                    afterHooks = {},
+                },
+            }
+            state.retained.explicitRegistries[owner] = registry
+            state.retained.tableRegistries[hookOwner] = registry
+        end
+        return registry
+    end
+
+    if type(owner) ~= "table" then
+        internal.violate("overlays.invalid_registration", "lib.overlays: owner must be a persistent table or string")
+    end
+
+    local registry = state.retained.tableRegistries[owner]
+    if not registry and create then
+        state.retained.nextOwnerId = state.retained.nextOwnerId + 1
+        registry = {
+            owner = owner,
+            ownerId = "owner" .. tostring(state.retained.nextOwnerId),
+            generation = 0,
+            refreshing = false,
+            elements = {},
+            events = {
+                commit = {},
+                intervals = {},
+                afterHooks = {},
+            },
+        }
+        state.retained.tableRegistries[owner] = registry
+    end
+    return registry
+end
+
+local function copyArray(source)
+    local copy = {}
+    for index, value in ipairs(source or {}) do
+        copy[index] = value
+    end
+    return copy
+end
+
+local function copyMap(source)
+    local copy = {}
+    for key, value in pairs(source or {}) do
+        copy[key] = value
+    end
+    return copy
+end
+
+local function unregisterRetainedElement(slot)
+    if not slot then
+        return
+    end
+    if slot.kind == "line" and slot.handle then
+        slot.handle.unregister()
+        slot.handle = nil
+        return
+    end
+    if slot.kind == "table" and slot.handles then
+        for _, handle in ipairs(slot.handles) do
+            handle.unregister()
+        end
+        slot.handles = {}
+    end
+end
+
+local function readLineColumn(slot, column)
+    local valuesTable = slot.values
+    if type(valuesTable) ~= "table" then
+        return valuesTable
+    end
+    return valuesTable[column.key]
+end
+
+local function normalizeLineColumns(spec)
+    if type(spec.columns) == "table" and #spec.columns > 0 then
+        return spec.columns
+    end
+    return {
+        {
+            key = "text",
+            minWidth = spec.minWidth,
+            justify = spec.justify,
+            textArgs = spec.textArgs,
+        },
+    }
+end
+
+local function normalizeRetainedColumn(column, index, textResolver)
+    return {
+        key = column.key or tostring(index),
+        componentName = column.componentName,
+        minWidth = column.minWidth,
+        justify = column.justify,
+        visible = column.visible,
+        textArgs = column.textArgs,
+        text = textResolver,
+    }
+end
+
+local function createRetainedLine(registry, name, spec, existingValues)
+    local slot = {
+        kind = "line",
+        name = name,
+        generation = registry.generation,
+        spec = spec,
+        values = existingValues,
+    }
+    local columns = {}
+    for index, column in ipairs(normalizeLineColumns(spec)) do
+        local key = column.key or tostring(index)
+        columns[#columns + 1] = normalizeRetainedColumn(column, index, function()
+            return readLineColumn(slot, { key = key }) or ""
+        end)
+    end
+    slot.handle = overlays.registerStackedRow({
+        id = retainedHandleId(registry, name),
+        componentName = spec.componentName,
+        region = spec.region,
+        order = spec.order,
+        columnGap = spec.columnGap,
+        visible = spec.visible,
+        columns = columns,
+    })
+    return slot
+end
+
+local function readTableCell(slot, rowIndex, column)
+    local row = slot.rows and slot.rows[rowIndex] or nil
+    if type(row) ~= "table" then
+        return ""
+    end
+    return row[column.key] or ""
+end
+
+local function createRetainedTable(registry, name, spec, existingRows, existingRowIndexByKey)
+    local maxRows = math.max(0, math.floor(tonumber(spec.maxRows) or 0))
+    local slot = {
+        kind = "table",
+        name = name,
+        generation = registry.generation,
+        spec = spec,
+        rows = existingRows or {},
+        rowIndexByKey = existingRowIndexByKey or {},
+        handles = {},
+    }
+
+    for rowIndex = 1, maxRows do
+        local columns = {}
+        for columnIndex, column in ipairs(spec.columns or {}) do
+            local key = column.key or tostring(columnIndex)
+            columns[#columns + 1] = normalizeRetainedColumn(column, columnIndex, function()
+                return readTableCell(slot, rowIndex, { key = key })
+            end)
+        end
+
+        slot.handles[rowIndex] = overlays.registerStackedRow({
+            id = retainedRowId(registry, name, rowIndex),
+            componentName = spec.componentName and (spec.componentName .. "_" .. tostring(rowIndex)) or nil,
+            region = spec.region,
+            order = (tonumber(spec.order) or overlays.order.module) + rowIndex - 1,
+            columnGap = spec.columnGap,
+            visible = function()
+                local visible = resolveValue(spec.visible)
+                return visible ~= false and slot.rows[rowIndex] ~= nil
+            end,
+            columns = columns,
+        })
+    end
+
+    return slot
+end
+
+local function snapshotRetainedSlot(slot)
+    if slot.kind == "line" then
+        return {
+            kind = slot.kind,
+            name = slot.name,
+            generation = slot.generation,
+            spec = slot.spec,
+            values = slot.values,
+        }
+    end
+    return {
+        kind = slot.kind,
+        name = slot.name,
+        generation = slot.generation,
+        spec = slot.spec,
+        rows = slot.rows,
+        rowIndexByKey = slot.rowIndexByKey,
+    }
+end
+
+local function snapshotRetainedRegistry(registry)
+    local elements = {}
+    for name, slot in pairs(registry.elements) do
+        elements[name] = snapshotRetainedSlot(slot)
+    end
+    return {
+        ownerId = registry.ownerId,
+        generation = registry.generation,
+        refreshing = registry.refreshing,
+        elements = elements,
+        events = {
+            commit = copyArray(registry.events.commit),
+            intervals = copyMap(registry.events.intervals),
+            afterHooks = copyMap(registry.events.afterHooks),
+        },
+    }
+end
+
+local function restoreRetainedRegistry(registry, snapshot)
+    for _, slot in pairs(registry.elements) do
+        unregisterRetainedElement(slot)
+    end
+
+    registry.ownerId = snapshot.ownerId
+    registry.generation = snapshot.generation
+    registry.refreshing = snapshot.refreshing
+    registry.events = {
+        commit = copyArray(snapshot.events.commit),
+        intervals = copyMap(snapshot.events.intervals),
+        afterHooks = copyMap(snapshot.events.afterHooks),
+    }
+    registry.elements = {}
+
+    for name, slotSnapshot in pairs(snapshot.elements) do
+        if slotSnapshot.kind == "line" then
+            local slot = createRetainedLine(registry, name, slotSnapshot.spec, slotSnapshot.values)
+            slot.generation = slotSnapshot.generation
+            registry.elements[name] = slot
+        elseif slotSnapshot.kind == "table" then
+            local slot = createRetainedTable(
+                registry,
+                name,
+                slotSnapshot.spec,
+                slotSnapshot.rows,
+                slotSnapshot.rowIndexByKey
+            )
+            slot.generation = slotSnapshot.generation
+            registry.elements[name] = slot
+        end
+    end
+end
+
+local function makeRetainedContext(registry)
+    local owner = registry.owner
+    local authorHost = registry.authorHost
+    local store = registry.store
+    local ctx = {}
+
+    function ctx.read(alias)
+        if store and type(store.read) == "function" then
+            return store.read(alias)
+        end
+        return nil
+    end
+
+    function ctx.isEnabled()
+        if authorHost and type(authorHost.isEnabled) == "function" then
+            return authorHost.isEnabled()
+        end
+        return true
+    end
+
+    function ctx.log(fmt, ...)
+        if authorHost and type(authorHost.log) == "function" then
+            return authorHost.log(fmt, ...)
+        end
+        print(internal.formatLogMessage("[overlays:" .. tostring(registry.ownerId) .. "] ", fmt, ...))
+    end
+
+    function ctx.logIf(fmt, ...)
+        if authorHost and type(authorHost.logIf) == "function" then
+            return authorHost.logIf(fmt, ...)
+        end
+    end
+
+    function ctx.setLine(name, valuesTable)
+        local slot = registry.elements[name]
+        if slot and slot.kind == "line" then
+            slot.values = valuesTable
+            return true
+        end
+        return false
+    end
+
+    function ctx.setTable(name, rows)
+        local slot = registry.elements[name]
+        if not (slot and slot.kind == "table") then
+            return false
+        end
+        slot.rows = {}
+        slot.rowIndexByKey = {}
+        for index, row in ipairs(rows or {}) do
+            if index > #slot.handles then
+                break
+            end
+            slot.rows[index] = row
+            if type(row) == "table" and row.key ~= nil then
+                slot.rowIndexByKey[row.key] = index
+            end
+        end
+        return true
+    end
+
+    function ctx.setCell(tableName, rowKey, columnKey, value)
+        local slot = registry.elements[tableName]
+        if not (slot and slot.kind == "table") then
+            return false
+        end
+        local rowIndex = slot.rowIndexByKey[rowKey]
+        local row = rowIndex and slot.rows[rowIndex] or nil
+        if type(row) ~= "table" then
+            return false
+        end
+        row[columnKey] = value
+        return true
+    end
+
+    function ctx.refresh(name)
+        local slot = registry.elements[name]
+        if not slot then
+            return false
+        end
+        if slot.kind == "line" then
+            slot.handle.refresh()
+        elseif slot.kind == "table" then
+            for _, handle in ipairs(slot.handles) do
+                handle.refresh()
+            end
+        end
+        return true
+    end
+
+    function ctx.refreshRegion(region)
+        overlays.refreshStackedText(region)
+    end
+
+    function ctx.refreshAll()
+        overlays.refreshStackedText()
+        overlays.refreshHudText(true)
+    end
+
+    ctx.owner = owner
+    return ctx
+end
+
+local function ensureIntervalDriver()
+    if state.retained.intervalDriverRegistered then
+        return
+    end
+    state.retained.intervalDriverRegistered = true
+    if rom and rom.gui and type(rom.gui.add_always_draw_imgui) == "function" then
+        rom.gui.add_always_draw_imgui(function()
+            internal.overlays.dispatchIntervals(os.clock())
+        end)
+    end
+end
+
+local function validateRetainedName(apiName, name)
+    if type(name) ~= "string" or name == "" then
+        internal.violate("overlays.invalid_registration", "lib.overlays.%s: name must be a non-empty string", apiName)
+    end
+end
+
+local function validateRetainedSpec(apiName, spec)
+    if type(spec) ~= "table" then
+        internal.violate("overlays.invalid_registration", "lib.overlays.%s: spec must be a table", apiName)
+    end
+end
+
 local function getRegionEntries(regionName)
     local entries = {}
     for _, entry in pairs(state.stackedText) do
@@ -379,6 +778,226 @@ function overlays.suppressForUi()
             end
         end,
     }
+end
+
+local function createRetainedSurface(registry)
+    return {
+        createLine = function(name, spec)
+            validateRetainedName("createLine", name)
+            validateRetainedSpec("createLine", spec)
+            registry.seenElements[name] = true
+
+            local previous = registry.elements[name]
+            local previousValues = previous and previous.kind == "line" and previous.values or nil
+            if previous then
+                unregisterRetainedElement(previous)
+            end
+
+            registry.elements[name] = createRetainedLine(registry, name, spec, previousValues)
+        end,
+        createTable = function(name, spec)
+            validateRetainedName("createTable", name)
+            validateRetainedSpec("createTable", spec)
+            if type(spec.columns) ~= "table" or #spec.columns == 0 then
+                internal.violate(
+                    "overlays.invalid_registration",
+                    "lib.overlays.createTable: columns must be a non-empty array"
+                )
+            end
+            registry.seenElements[name] = true
+
+            local previous = registry.elements[name]
+            local previousRows = previous and previous.kind == "table" and previous.rows or nil
+            local previousRowIndexByKey = previous and previous.kind == "table" and previous.rowIndexByKey or nil
+            if previous then
+                unregisterRetainedElement(previous)
+            end
+
+            registry.elements[name] = createRetainedTable(
+                registry,
+                name,
+                spec,
+                previousRows,
+                previousRowIndexByKey
+            )
+        end,
+        onCommit = function(callback)
+            if type(callback) ~= "function" then
+                internal.violate("overlays.invalid_registration", "lib.overlays.onCommit: callback must be a function")
+            end
+            registry.pendingEvents.commit[#registry.pendingEvents.commit + 1] = callback
+        end,
+        onInterval = function(name, seconds, callback, opts)
+            validateRetainedName("onInterval", name)
+            if type(callback) ~= "function" then
+                internal.violate("overlays.invalid_registration", "lib.overlays.onInterval: callback must be a function")
+            end
+            seconds = tonumber(seconds)
+            if not seconds or seconds <= 0 then
+                internal.violate("overlays.invalid_registration", "lib.overlays.onInterval: seconds must be positive")
+            end
+            registry.pendingEvents.intervals[name] = {
+                name = name,
+                seconds = seconds,
+                callback = callback,
+                opts = opts or {},
+                lastRun = registry.events.intervals[name] and registry.events.intervals[name].lastRun or nil,
+            }
+            ensureIntervalDriver()
+        end,
+        afterHook = function(path, callback)
+            validateRetainedName("afterHook", path)
+            if type(callback) ~= "function" then
+                internal.violate("overlays.invalid_registration", "lib.overlays.afterHook: callback must be a function")
+            end
+            registry.pendingEvents.afterHooks[path] = {
+                path = path,
+                callback = callback,
+            }
+            public.hooks.WrapOwned(registry.owner, path, "overlay.after:" .. path, function(base, ...)
+                local args = { ... }
+                local results = { base(...) }
+                internal.overlays.dispatchAfterHook(registry.owner, path, args, results)
+                return table.unpack(results)
+            end)
+        end,
+    }
+end
+
+function internal.overlays.beginTransaction(owner)
+    local registry = getRetainedRegistry(owner, true)
+    local snapshot = snapshotRetainedRegistry(registry)
+    local closed = false
+
+    return {
+        commit = function()
+            closed = true
+        end,
+        rollback = function()
+            if closed then
+                return
+            end
+            restoreRetainedRegistry(registry, snapshot)
+            closed = true
+        end,
+    }
+end
+
+function internal.overlays.refresh(owner, ownerId, authorHost, store, register)
+    if type(register) ~= "function" then
+        internal.violate("overlays.invalid_registration", "internal.overlays.refresh: register must be a function")
+    end
+
+    local registry = getRetainedRegistry(owner, true)
+    if type(ownerId) == "string" and ownerId ~= "" then
+        registry.ownerId = ownerId
+    end
+    registry.authorHost = authorHost
+    registry.store = store
+    registry.generation = registry.generation + 1
+    registry.refreshing = true
+    registry.seenElements = {}
+    registry.pendingEvents = {
+        commit = {},
+        intervals = {},
+        afterHooks = {},
+    }
+
+    local ok, err = pcall(register, createRetainedSurface(registry))
+    registry.refreshing = false
+
+    if ok then
+        for name, slot in pairs(registry.elements) do
+            if not registry.seenElements[name] then
+                unregisterRetainedElement(slot)
+                registry.elements[name] = nil
+            else
+                slot.generation = registry.generation
+            end
+        end
+        registry.events = registry.pendingEvents
+    end
+
+    registry.seenElements = nil
+    registry.pendingEvents = nil
+
+    if not ok then
+        error(err, 0)
+    end
+end
+
+function internal.overlays.dispatchCommit(owner, commit)
+    local registry = getRetainedRegistry(owner, false)
+    if not registry then
+        return
+    end
+
+    local ctx = makeRetainedContext(registry)
+    for _, callback in ipairs(registry.events.commit or {}) do
+        callback(ctx, commit)
+    end
+end
+
+function internal.overlays.dispatchIntervals(now)
+    now = tonumber(now) or os.clock()
+    local function dispatchRegistry(registry)
+        local ctx = nil
+        for _, event in pairs(registry.events.intervals or {}) do
+            local shouldRun = true
+            if event.opts and type(event.opts.when) == "function" then
+                shouldRun = event.opts.when() == true
+            end
+            if shouldRun and (event.lastRun == nil or now - event.lastRun >= event.seconds) then
+                event.lastRun = now
+                ctx = ctx or makeRetainedContext(registry)
+                event.callback(ctx, {
+                    name = event.name,
+                    now = now,
+                })
+            end
+        end
+    end
+
+    for _, registry in pairs(state.retained.explicitRegistries) do
+        dispatchRegistry(registry)
+    end
+    for _, registry in pairs(state.retained.tableRegistries) do
+        dispatchRegistry(registry)
+    end
+end
+
+function internal.overlays.dispatchAfterHook(owner, path, args, results)
+    local registry = getRetainedRegistry(owner, false)
+    local event = registry and registry.events.afterHooks and registry.events.afterHooks[path] or nil
+    if not event then
+        return
+    end
+
+    local ctx = makeRetainedContext(registry)
+    event.callback(ctx, {
+        path = path,
+        args = args or {},
+        result = results and results[1] or nil,
+        results = results or {},
+    })
+end
+
+function overlays.defineOwned(owner, register)
+    if type(owner) ~= "string" or owner == "" then
+        internal.violate("overlays.invalid_registration", "lib.overlays.defineOwned: owner must be a non-empty string")
+    end
+    local transaction = internal.overlays.beginTransaction(owner)
+    local ok, err = pcall(function()
+        internal.overlays.refresh(owner, owner, nil, nil, register)
+    end)
+    if ok then
+        transaction.commit()
+        internal.overlays.dispatchCommit(owner, {})
+        return true
+    end
+
+    transaction.rollback()
+    error(err, 0)
 end
 
 local function refreshOverlayVisibility()

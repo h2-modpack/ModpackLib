@@ -22,16 +22,19 @@ function fallbackHud.createMarker()
         return
     end
     fallbackHud._initialized = true
-    fallbackHud._handle = public.overlays.registerStackedText({
-        id = "lib:fallbackHud",
-        componentName = "ModpackMark_StandaloneLib",
-        region = "middleRightStack",
-        order = 0,
-        text = function()
-            return MARKER_TEXT
-        end,
-        visible = shouldShowFallbackMarker,
-    })
+    public.overlays.defineOwned("adamant-lib.fallback-hud", function(overlays)
+        overlays.createLine("marker", {
+            componentName = "ModpackMark_StandaloneLib",
+            region = "middleRightStack",
+            order = 0,
+            visible = shouldShowFallbackMarker,
+            minWidth = 80,
+        })
+        overlays.onCommit(function(ctx)
+            ctx.setLine("marker", MARKER_TEXT)
+            ctx.refresh("marker")
+        end)
+    end)
 end
 
 return fallbackHud

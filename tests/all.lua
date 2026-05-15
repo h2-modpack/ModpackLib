@@ -24,6 +24,7 @@ require('tests/TestLogging')
 require('tests/TestMutation')
 require('tests/TestStandaloneHost')
 require('tests/TestOverlays')
+require('tests/TestRetainedOverlays')
 
 local lu = require('luaunit')
 os.exit(lu.LuaUnit.run())

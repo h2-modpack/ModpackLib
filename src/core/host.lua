@@ -33,6 +33,7 @@ local HostState = setmetatable({}, { __mode = "k" })
 ---@field registerManualMutation table|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
 ---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
+---@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
 
@@ -79,6 +80,7 @@ local KnownHostOpts = {
     registerManualMutation = true,
     onSettingsCommitted = true,
     registerIntegrations = true,
+    registerOverlays = true,
     drawTab = true,
     drawQuickContent = true,
 }
@@ -137,6 +139,7 @@ function public.createModuleHost(opts)
     local session = opts.session
     local registerHooks = opts.registerHooks
     local registerIntegrations = opts.registerIntegrations
+    local registerOverlays = opts.registerOverlays
     if type(def) ~= "table" or def._preparedDefinition ~= true then
         internal.violate("host.invalid_create_opts", "createModuleHost: prepared definition is required")
     end
@@ -169,7 +172,22 @@ function public.createModuleHost(opts)
     if registerIntegrations ~= nil and type(registerIntegrations) ~= "function" then
         internal.violate("host.invalid_create_opts", "createModuleHost: registerIntegrations must be a function")
     end
+    if registerOverlays ~= nil then
+        if type(registerOverlays) ~= "function" then
+            internal.violate("host.invalid_create_opts", "createModuleHost: registerOverlays must be a function")
+        end
+        if type(owner) ~= "table" then
+            internal.violate("host.invalid_create_opts", "createModuleHost: owner is required when registerOverlays is provided")
+        end
+    end
     local hookOwner = owner or {}
+
+    local function notifySettingsCommitted(activeHost, activeStore, commit)
+        if settingsObserver ~= nil then
+            settingsObserver(activeHost, activeStore, commit)
+        end
+        internal.overlays.dispatchCommit(hookOwner, commit)
+    end
 
     ---@type AuthorSession
     local authorSession = {
@@ -234,7 +252,7 @@ function public.createModuleHost(opts)
     function host.writeAndFlush(alias, value)
         requireActivated("writeAndFlush")
         session.write(alias, value)
-        local ok, err = public.lifecycle.commitSession(def, mutationBundle, settingsObserver, authorHost, store, session)
+        local ok, err = public.lifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
         return ok, err
     end
 
@@ -248,7 +266,7 @@ function public.createModuleHost(opts)
         if not session.isDirty() then
             return true
         end
-        return public.lifecycle.commitSession(def, mutationBundle, settingsObserver, authorHost, store, session)
+        return public.lifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
     end
 
     function host.reloadFromConfig()
@@ -271,7 +289,7 @@ function public.createModuleHost(opts)
         if not session.isDirty() then
             return true, nil, false
         end
-        local ok, err = public.lifecycle.commitSession(def, mutationBundle, settingsObserver, authorHost, store, session)
+        local ok, err = public.lifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
         return ok, err, ok == true
     end
 
@@ -360,6 +378,7 @@ function public.createModuleHost(opts)
         owner = hookOwner,
         registerHooks = registerHooks,
         registerIntegrations = registerIntegrations,
+        registerOverlays = registerOverlays,
         authorSession = authorSession,
         authorHost = authorHost,
         activated = false,
@@ -381,6 +400,7 @@ function public.activateModuleHost(host)
     local owner = state.owner
     local registerHooks = state.registerHooks
     local registerIntegrations = state.registerIntegrations
+    local registerOverlays = state.registerOverlays
     local store = state.store
     local authorHost = state.authorHost
     local def = state.definition
@@ -400,6 +420,7 @@ function public.activateModuleHost(host)
     local hadPreviousHost = previousHost ~= nil
     local hookTransaction = internal.hooks.beginTransaction(owner)
     local integrationTransaction = internal.integrations.beginTransaction()
+    local overlayTransaction = internal.overlays.beginTransaction(owner)
     state.activating = true
 
     internal.liveModuleHosts[pluginGuid] = host
@@ -412,6 +433,11 @@ function public.activateModuleHost(host)
         internal.integrations.refresh(def.id, function()
             if registerIntegrations then
                 return registerIntegrations(authorHost, store)
+            end
+        end)
+        internal.overlays.refresh(owner, pluginGuid, authorHost, store, function(overlays)
+            if registerOverlays then
+                return registerOverlays(overlays, authorHost, store)
             end
         end)
 
@@ -442,6 +468,7 @@ function public.activateModuleHost(host)
         state.activating = false
         hookTransaction.rollback()
         integrationTransaction.rollback()
+        overlayTransaction.rollback()
         if hadPreviousHost then
             internal.liveModuleHosts[pluginGuid] = previousHost
         else
@@ -452,6 +479,7 @@ function public.activateModuleHost(host)
 
     hookTransaction.commit()
     integrationTransaction.commit()
+    overlayTransaction.commit()
     state.activating = false
     state.activated = true
     return authorHost

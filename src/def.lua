@@ -186,6 +186,11 @@ local lib = {}
 ---    commit: AdamantModpackLib.CommitContext
 ---)
 ---@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
+---@field registerOverlays? fun(
+---    overlays: AdamantModpackLib.RetainedOverlayRegistrar,
+---    host: AdamantModpackLib.AuthorHost,
+---    store: AdamantModpackLib.ManagedStore
+---)
 ---@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 ---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
@@ -209,6 +214,11 @@ local lib = {}
 ---    commit: AdamantModpackLib.CommitContext
 ---)
 ---@field registerIntegrations? fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
+---@field registerOverlays? fun(
+---    overlays: AdamantModpackLib.RetainedOverlayRegistrar,
+---    host: AdamantModpackLib.AuthorHost,
+---    store: AdamantModpackLib.ManagedStore
+---)
 ---@field drawTab fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 ---@field drawQuickContent? fun(imgui: table, session: AdamantModpackLib.AuthorSession, host: AdamantModpackLib.AuthorHost)
 
@@ -694,6 +704,67 @@ end
 ---@field columns AdamantModpackLib.StackedRowColumnOpts[] Ordered columns, declared left-to-right.
 ---@field visible? boolean|fun(): boolean
 
+---@class AdamantModpackLib.RetainedOverlayColumn
+---@field key? string Stable column key used by retained values.
+---@field componentName? string Explicit retained HUD component name for this column.
+---@field minWidth? number Reserved layout width used to keep following columns aligned.
+---@field justify? "Left"|"Center"|"Right" Column text justification.
+---@field visible? boolean|fun(): boolean
+---@field textArgs? table Text style overrides.
+
+---@class AdamantModpackLib.RetainedLineSpec
+---@field componentName? string Base retained HUD component name.
+---@field region? string Stack region name. Defaults to `middleRightStack`.
+---@field order? integer Sort key within the region.
+---@field columnGap? number Reserved space between columns.
+---@field columns? AdamantModpackLib.RetainedOverlayColumn[] Ordered columns, declared left-to-right.
+---@field visible? boolean|fun(): boolean
+---@field minWidth? number Width for one-column convenience lines.
+---@field justify? "Left"|"Center"|"Right" Justification for one-column convenience lines.
+---@field textArgs? table Text style overrides for one-column convenience lines.
+
+---@class AdamantModpackLib.RetainedTableSpec
+---@field componentName? string Base retained HUD component name.
+---@field region? string Stack region name. Defaults to `middleRightStack`.
+---@field order? integer Sort key for the first row within the region.
+---@field maxRows integer Maximum retained rows to allocate.
+---@field columnGap? number Reserved space between columns.
+---@field columns AdamantModpackLib.RetainedOverlayColumn[] Ordered columns, declared left-to-right.
+---@field visible? boolean|fun(): boolean
+
+---@class AdamantModpackLib.OverlayProjectionContext
+---@field read fun(alias: string): any
+---@field isEnabled fun(): boolean
+---@field log fun(fmt: string, ...)
+---@field logIf fun(fmt: string, ...)
+---@field setLine fun(name: string, values: table|string): boolean
+---@field setTable fun(name: string, rows: table[]): boolean
+---@field setCell fun(tableName: string, rowKey: any, columnKey: string, value: any): boolean
+---@field refresh fun(name: string): boolean
+---@field refreshRegion fun(region: string)
+---@field refreshAll fun()
+
+---@class AdamantModpackLib.OverlayHookEvent
+---@field path string
+---@field args table
+---@field result any
+---@field results table
+
+---@class AdamantModpackLib.RetainedOverlayRegistrar
+---@field createLine fun(name: string, spec: AdamantModpackLib.RetainedLineSpec)
+---@field createTable fun(name: string, spec: AdamantModpackLib.RetainedTableSpec)
+---@field onCommit fun(callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, commit: AdamantModpackLib.CommitContext))
+---@field onInterval fun(
+---    name: string,
+---    seconds: number,
+---    callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, event: table),
+---    opts?: table
+---)
+---@field afterHook fun(
+---    path: string,
+---    callback: fun(ctx: AdamantModpackLib.OverlayProjectionContext, event: AdamantModpackLib.OverlayHookEvent)
+---)
+
 ---@class AdamantModpackLib.OverlaysApi
 ---@field order table<string, integer> Shared overlay order bands.
 ---@type AdamantModpackLib.OverlaysApi
@@ -715,6 +786,12 @@ end
 ---@param opts AdamantModpackLib.StackedRowOverlayOpts
 ---@return AdamantModpackLib.StackedRowOverlayHandle handle
 function lib.overlays.registerStackedRow(opts)
+end
+
+---@param owner string Stable explicit owner id for system overlays.
+---@param register fun(overlays: AdamantModpackLib.RetainedOverlayRegistrar)
+---@return boolean ok
+function lib.overlays.defineOwned(owner, register)
 end
 
 function lib.overlays.refreshHudText()

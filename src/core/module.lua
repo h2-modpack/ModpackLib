@@ -10,6 +10,7 @@ local internal = AdamantModpackLib_Internal
 ---@field registerManualMutation table|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
 ---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
+---@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
 ---@field drawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
 
@@ -23,6 +24,7 @@ local KnownModuleOpts = {
     registerManualMutation = true,
     onSettingsCommitted = true,
     registerIntegrations = true,
+    registerOverlays = true,
     drawTab = true,
     drawQuickContent = true,
 }
@@ -67,6 +69,7 @@ function public.createModule(opts)
         registerManualMutation = opts.registerManualMutation,
         onSettingsCommitted = opts.onSettingsCommitted,
         registerIntegrations = opts.registerIntegrations,
+        registerOverlays = opts.registerOverlays,
         drawTab = opts.drawTab,
         drawQuickContent = opts.drawQuickContent,
     })
