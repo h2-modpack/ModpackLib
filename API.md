@@ -38,9 +38,9 @@ Module/host creation requires:
 
 Optional module capabilities are passed to module/host creation:
 - `registerPatchMutation`
-- `registerManualMutation`
 - `onSettingsCommitted`
 - `registerHooks`
+- `registerOverlays`
 - `registerIntegrations`
 - `drawQuickContent`
 
@@ -652,27 +652,24 @@ Raw numeric bit write helper.
 
 ## `lib.mutation`
 
-### `lib.mutation.createBackup()`
-
-Returns:
-- `backup(tbl, ...)`
-- `restore()`
-
-For reversible table mutation capture.
-
 ### `lib.mutation.createPlan()`
 
 Creates a reversible mutation plan with:
 - `plan:set(...)`
 - `plan:setMany(...)`
-- `plan:transform(...)`
+- `plan:transform(tbl, key, fn)`
 - `plan:append(...)`
 - `plan:appendUnique(...)`
 - `plan:removeElement(...)`
 - `plan:setElement(...)`
-- `plan:apply()`
-- `plan:revert()`
 
+`registerPatchMutation(plan, host, store)` is the supported module mutation
+entrypoint. Manual apply/revert mutation callbacks are not supported.
+Plans are declarative from the module-author surface; Lib owns execution during
+load, enable/disable, profile load, hot reload, and rollback paths.
+
+`plan:transform(...)` tracks and restores only `tbl[key]`. Its callback receives
+a copied current value and returns the replacement value for that key.
 
 ## `lib.coordinator`
 

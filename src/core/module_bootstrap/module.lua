@@ -7,7 +7,6 @@ local internal = AdamantModpackLib_Internal
 ---@field definition ModuleDefinition
 ---@field registerHooks fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerPatchMutation fun(plan: table, host: AuthorHost, store: ManagedStore)|nil
----@field registerManualMutation table|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
 ---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
@@ -21,7 +20,6 @@ local KnownModuleOpts = {
     definition = true,
     registerHooks = true,
     registerPatchMutation = true,
-    registerManualMutation = true,
     onSettingsCommitted = true,
     registerIntegrations = true,
     registerOverlays = true,
@@ -68,7 +66,6 @@ function public.createModule(opts)
         session = session,
         registerHooks = opts.registerHooks,
         registerPatchMutation = opts.registerPatchMutation,
-        registerManualMutation = opts.registerManualMutation,
         onSettingsCommitted = opts.onSettingsCommitted,
         registerIntegrations = opts.registerIntegrations,
         registerOverlays = opts.registerOverlays,

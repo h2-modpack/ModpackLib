@@ -88,6 +88,8 @@ Lib owns the shared reload-sensitive plumbing:
 - coordinator registration
 - coordinated module startup/runtime sync
 - stable ModUtil hook dispatch
+- integration provider refresh
+- retained overlay registration and refresh
 - mutation runtime tracking for module reloads
 - standalone host suppression for coordinated modules
 
@@ -99,6 +101,7 @@ Modules own their local rebuild:
 - keep persisted runtime reads on `store`
 - keep staged UI edits on the author-facing `session`
 - declare runtime hooks from `internal.RegisterHooks(host, store)`
+- declare retained overlays from `registerOverlays(overlays, host, store)`
 
 ## Bootstrap Pattern
 

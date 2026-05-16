@@ -367,12 +367,10 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
         definition = prepared,
         store = reloadStore,
         session = reloadSession,
-        registerManualMutation = {
-            apply = function()
-                applyCalls = applyCalls + 1
-            end,
-            revert = function() end,
-        },
+        registerPatchMutation = function(plan)
+            applyCalls = applyCalls + 1
+            plan:set({}, "unused", true)
+        end,
         drawTab = function() end,
     })
     local reloadedHost = lib.getLiveModuleHost("reload-pack.ReloadHost")
@@ -440,6 +438,73 @@ function TestHost:testActivationFailureRestoresLiveHostAndIntegrations()
     end)
 
     lib.integrations.unregisterProvider(providerId)
+end
+
+function TestHost:testRuntimeSyncFailureRestoresPreviousPatchMutation()
+    local packId = "activation-runtime-rollback-pack"
+    local pluginGuid = "test-activation-runtime-rollback"
+    local target = { Value = "base" }
+    local previousCoordinator = AdamantModpackLib_Internal.coordinators[packId]
+    local previousLiveHost = lib.getLiveModuleHost(pluginGuid)
+
+    lib.coordinator.register(packId, { ModEnabled = true })
+
+    local firstDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        modpack = packId,
+        id = "ActivationRuntimeRollback",
+        name = "Activation Runtime Rollback",
+        storage = {},
+    })
+    local firstStore, firstSession = CreateModuleState({
+        Enabled = true,
+        DebugMode = false,
+    }, firstDefinition)
+    local firstHost = createActivatedHost(pluginGuid, {
+        definition = firstDefinition,
+        store = firstStore,
+        session = firstSession,
+        registerPatchMutation = function(plan)
+            plan:set(target, "Value", "first")
+        end,
+        drawTab = function() end,
+    })
+
+    local secondDefinition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+        modpack = packId,
+        id = "ActivationRuntimeRollback",
+        name = "Activation Runtime Rollback",
+        storage = {},
+    })
+    local secondStore, secondSession = CreateModuleState({
+        Enabled = true,
+        DebugMode = false,
+    }, secondDefinition)
+    local secondHost, secondAuthorHost = AdamantModpackLib_Internal.moduleHost.create({
+        pluginGuid = pluginGuid,
+        definition = secondDefinition,
+        store = secondStore,
+        session = secondSession,
+        registerPatchMutation = function()
+            error("replacement boom")
+        end,
+        drawTab = function() end,
+    })
+
+    local ok, err = secondAuthorHost.tryActivate()
+    local liveHost = lib.getLiveModuleHost(pluginGuid)
+    local targetValue = target.Value
+
+    lib.coordinator.register(packId, previousCoordinator)
+    AdamantModpackLib_Internal.liveModuleHosts[pluginGuid] = previousLiveHost
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(liveHost, secondHost)
+    lu.assertNotEquals(liveHost, firstHost)
+    lu.assertEquals(targetValue, "first")
+    lu.assertEquals(#Warnings, 1)
+    lu.assertStrContains(Warnings[1], "host.coordinated_runtime_sync_failed")
+    lu.assertStrContains(Warnings[1], "replacement boom")
 end
 
 function TestHost:testTryActivateModuleReturnsErrorAndDoesNotPublishBrokenHost()

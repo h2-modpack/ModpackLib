@@ -28,7 +28,6 @@ local hostLifecycle = import('core/module_bootstrap/private_host_lifecycle.lua',
 ---@field session Session
 ---@field registerHooks fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerPatchMutation fun(plan: table, host: AuthorHost, store: ManagedStore)|nil
----@field registerManualMutation table|nil
 ---@field onSettingsCommitted fun(host: AuthorHost, store: ManagedStore, commit: table)|nil
 ---@field registerIntegrations fun(host: AuthorHost, store: ManagedStore)|nil
 ---@field registerOverlays fun(overlays: table, host: AuthorHost, store: ManagedStore)|nil
@@ -74,7 +73,6 @@ local KnownHostOpts = {
     session = true,
     registerHooks = true,
     registerPatchMutation = true,
-    registerManualMutation = true,
     onSettingsCommitted = true,
     registerIntegrations = true,
     registerOverlays = true,
@@ -92,30 +90,17 @@ end
 
 local function BuildMutationBundle(opts)
     local patchMutation = opts.registerPatchMutation
-    local manualMutation = opts.registerManualMutation
 
     if patchMutation ~= nil and type(patchMutation) ~= "function" then
         internal.violate("host.invalid_create_opts", "moduleHost.create: registerPatchMutation must be a function")
-    end
-    if manualMutation ~= nil then
-        if type(manualMutation) ~= "table" then
-            internal.violate("host.invalid_create_opts", "moduleHost.create: registerManualMutation must be a table")
-        end
-        if type(manualMutation.apply) ~= "function" or type(manualMutation.revert) ~= "function" then
-            internal.violate(
-                "host.invalid_create_opts",
-                "moduleHost.create: registerManualMutation requires apply and revert functions"
-            )
-        end
     end
     if opts.onSettingsCommitted ~= nil and type(opts.onSettingsCommitted) ~= "function" then
         internal.violate("host.invalid_create_opts", "moduleHost.create: onSettingsCommitted must be a function")
     end
 
     return {
-        affectsRunData = patchMutation ~= nil or manualMutation ~= nil,
+        affectsRunData = patchMutation ~= nil,
         patchMutation = patchMutation,
-        manualMutation = manualMutation,
     }, opts.onSettingsCommitted
 end
 

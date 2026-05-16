@@ -6,24 +6,27 @@ internal.mutation = internal.mutation or {}
 AdamantModpackLib_MutationState = AdamantModpackLib_MutationState or {
     storeRuntime = setmetatable({}, { __mode = "k" }),
     moduleRuntime = {},
+    planExecutors = setmetatable({}, { __mode = "k" }),
 }
 local mutationState = AdamantModpackLib_MutationState
+mutationState.planExecutors = mutationState.planExecutors or setmetatable({}, { __mode = "k" })
 
 local values = internal.values
+public.mutation.createBackup = nil
 
 ---@class MutationPlan
 ---@field set fun(self: MutationPlan, tbl: table, key: any, value: any): MutationPlan
 ---@field setMany fun(self: MutationPlan, tbl: table, kv: table): MutationPlan
----@field transform fun(self: MutationPlan, tbl: table, key: any, fn: fun(current: any, key: any, tbl: table): any): MutationPlan
+---@field transform fun(self: MutationPlan, tbl: table, key: any, fn: fun(current: any): any): MutationPlan
 ---@field append fun(self: MutationPlan, tbl: table, key: any, value: any): MutationPlan
 ---@field appendUnique fun(self: MutationPlan, tbl: table, key: any, value: any, eqFn: fun(a: any, b: any): boolean|nil): MutationPlan
 ---@field removeElement fun(self: MutationPlan, tbl: table, key: any, value: any, eqFn: fun(a: any, b: any): boolean|nil): MutationPlan
 ---@field setElement fun(self: MutationPlan, tbl: table, key: any, oldVal: any, newVal: any, eq: fun(any, any): boolean?): MutationPlan
----@field apply fun(): boolean
----@field revert fun(): boolean
+
+local planExecutors = mutationState.planExecutors
 
 ---@return function backup, function restore
-function public.mutation.createBackup()
+function internal.mutation.createBackup()
     local NIL = {}
     local savedValues = {}
 
@@ -61,7 +64,7 @@ end
 
 ---@return MutationPlan
 function public.mutation.createPlan()
-    local backup, restore = public.mutation.createBackup()
+    local backup, restore = internal.mutation.createBackup()
     local operations = {}
     local applied = false
     local plan = {}
@@ -156,7 +159,7 @@ function public.mutation.createPlan()
                 end
             elseif op.kind == "transform" then
                 backup(tbl, key)
-                tbl[key] = op.fn(tbl[key], key, tbl)
+                tbl[key] = values.deepCopy(op.fn(values.deepCopy(tbl[key])))
             elseif op.kind == "append" then
                 local list = tbl[key]
                 if list == nil then
@@ -220,7 +223,7 @@ function public.mutation.createPlan()
         end
     end
 
-    function plan.apply()
+    local function applyPlan()
         if applied then
             return false
         end
@@ -235,7 +238,7 @@ function public.mutation.createPlan()
         return true
     end
 
-    function plan.revert()
+    local function revertPlan()
         if not applied then
             return false
         end
@@ -244,16 +247,34 @@ function public.mutation.createPlan()
         return true
     end
 
+    planExecutors[plan] = {
+        apply = applyPlan,
+        revert = revertPlan,
+    }
+
     return plan --[[@as MutationPlan]]
 end
 
----@alias MutationShape "patch"|"manual"|"hybrid"
+local function GetPlanExecutor(plan, action)
+    local executor = planExecutors[plan]
+    if not executor then
+        error("mutation plan is not executable", 0)
+    end
+    return executor[action]
+end
+
+function internal.mutation.applyPlan(plan)
+    return GetPlanExecutor(plan, "apply")()
+end
+
+function internal.mutation.revertPlan(plan)
+    return GetPlanExecutor(plan, "revert")()
+end
+
+---@alias MutationShape "patch"
 
 ---@class MutationInfo
 ---@field hasPatch boolean
----@field hasApply boolean
----@field hasRevert boolean
----@field hasManual boolean
 
 local function GetRuntimeKey(def, store)
     if def and type(def.id) == "string" and def.id ~= "" then
@@ -279,7 +300,7 @@ local function SetRuntimeState(def, store, state)
     if not bucket then
         return
     end
-    if state == nil or (state.plan == nil and state.manualRevert == nil) then
+    if state == nil or state.plan == nil then
         bucket[key] = nil
         return
     end
@@ -292,10 +313,32 @@ local function SetActiveMutationPlan(def, store, plan)
     SetRuntimeState(def, store, runtime)
 end
 
-local function SetActiveManualRevert(def, store, revertFn)
-    local runtime = GetRuntimeState(def, store) or {}
-    runtime.manualRevert = revertFn
-    SetRuntimeState(def, store, runtime)
+local function CaptureActiveMutation(def, store)
+    local runtime = GetRuntimeState(def, store)
+    if not runtime then
+        return nil
+    end
+    return {
+        plan = runtime.plan,
+    }
+end
+
+local function HasActiveMutationSnapshot(snapshot)
+    return snapshot and snapshot.plan ~= nil
+end
+
+local function RestoreActiveMutation(def, store, snapshot)
+    if not HasActiveMutationSnapshot(snapshot) then
+        return true, nil
+    end
+
+    local okPlan, errPlan = pcall(internal.mutation.applyPlan, snapshot.plan)
+    if not okPlan then
+        return false, errPlan
+    end
+
+    SetActiveMutationPlan(def, store, snapshot.plan)
+    return true, nil
 end
 
 local function BuildMutationPlan(mutationBundle, authorHost, store)
@@ -316,7 +359,7 @@ local function RevertActivePlan(def, store)
         return true, nil, false
     end
 
-    local okPlan, errPlan = pcall(activePlan.revert, activePlan)
+    local okPlan, errPlan = pcall(internal.mutation.revertPlan, activePlan)
     runtime.plan = nil
     SetRuntimeState(def, store, runtime)
     if not okPlan then
@@ -325,66 +368,20 @@ local function RevertActivePlan(def, store)
     return true, nil, true
 end
 
-local function RevertActiveManual(def, authorHost, store)
-    local runtime = GetRuntimeState(def, store)
-    local revertFn = runtime and runtime.manualRevert or nil
-    if revertFn == nil then
-        return true, nil, false
-    end
-
-    local okManual, errManual = pcall(revertFn, authorHost, store)
-    runtime.manualRevert = nil
-    SetRuntimeState(def, store, runtime)
-    if not okManual then
-        return false, errManual, true
-    end
-    return true, nil, true
-end
-
-local function RevertActiveMutation(def, authorHost, store)
-    local firstErr = nil
-    local didActive = false
-
-    local okManual, errManual, didManual = RevertActiveManual(def, authorHost, store)
-    if not okManual and not firstErr then
-        firstErr = errManual
-    end
-    didActive = didActive or didManual
-
-    local okPlan, errPlan, didPlan = RevertActivePlan(def, store)
-    if not okPlan and not firstErr then
-        firstErr = errPlan
-    end
-    didActive = didActive or didPlan
-
-    if firstErr then
-        return false, firstErr, didActive
-    end
-
-    return true, nil, didActive
+local function RevertActiveMutation(def, store)
+    return RevertActivePlan(def, store)
 end
 
 local function InferMutation(mutationBundle)
-    local manual = mutationBundle and mutationBundle.manualMutation or nil
     local hasPatch = mutationBundle and type(mutationBundle.patchMutation) == "function" or false
-    local hasApply = manual and type(manual.apply) == "function" or false
-    local hasRevert = manual and type(manual.revert) == "function" or false
-    local hasManual = hasApply and hasRevert
 
     local inferred = nil
-    if hasPatch and hasManual then
-        inferred = "hybrid"
-    elseif hasPatch then
+    if hasPatch then
         inferred = "patch"
-    elseif hasManual then
-        inferred = "manual"
     end
 
     return inferred, {
         hasPatch = hasPatch,
-        hasApply = hasApply,
-        hasRevert = hasRevert,
-        hasManual = hasManual,
     }
 end
 
@@ -392,7 +389,9 @@ end
 ---@param mutationBundle table|nil Candidate mutation bundle.
 ---@return boolean affects True when the definition opts into run-data mutation behavior.
 function internal.mutation.affectsRunData(mutationBundle)
-    return mutationBundle and mutationBundle.affectsRunData == true or false
+    return mutationBundle
+        and (mutationBundle.affectsRunData == true or type(mutationBundle.patchMutation) == "function")
+        or false
 end
 
 --- Applies a module's current mutation lifecycle to live run data.
@@ -403,46 +402,43 @@ end
 ---@return string|nil err Error message when the apply step fails.
 function internal.mutation.apply(def, mutationBundle, authorHost, store)
     local inferred, info = InferMutation(mutationBundle)
+    local previousMutation = CaptureActiveMutation(def, store)
 
-    local okActive, errActive = RevertActiveMutation(def, authorHost, store)
+    local okActive, errActive = RevertActiveMutation(def, store)
     if not okActive then
         return false, errActive
+    end
+
+    local function failApply(err)
+        if HasActiveMutationSnapshot(previousMutation) then
+            local okRestore, restoreErr = RestoreActiveMutation(def, store, previousMutation)
+            if not okRestore then
+                return false, tostring(err) .. " (previous mutation restore failed: " .. tostring(restoreErr) .. ")"
+            end
+        end
+        return false, err
     end
 
     if not inferred then
         if not internal.mutation.affectsRunData(mutationBundle) then
             return true, nil
         end
-        return false, "no supported mutation lifecycle found"
+        return failApply("no supported mutation lifecycle found")
     end
 
-    local builtPlan = nil
     if info.hasPatch then
         local okBuild, result = pcall(BuildMutationPlan, mutationBundle, authorHost, store)
         if not okBuild then
-            return false, result
+            return failApply(result)
         end
-        builtPlan = result
+        local builtPlan = result
         if builtPlan then
-            local okApply, errApply = pcall(builtPlan.apply, builtPlan)
+            local okApply, errApply = pcall(internal.mutation.applyPlan, builtPlan)
             if not okApply then
-                return false, errApply
+                return failApply(errApply)
             end
             SetActiveMutationPlan(def, store, builtPlan)
         end
-    end
-
-    if info.hasManual then
-        local manual = mutationBundle.manualMutation
-        local okManual, errManual = pcall(manual.apply, authorHost, store)
-        if not okManual then
-            if builtPlan then
-                pcall(builtPlan.revert, builtPlan)
-                SetActiveMutationPlan(def, store, nil)
-            end
-            return false, errManual
-        end
-        SetActiveManualRevert(def, store, manual.revert)
     end
 
     return true, nil
@@ -453,8 +449,8 @@ end
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when active mutation state was absent or reverted successfully.
 ---@return string|nil err Error message when active cleanup fails.
-function internal.mutation.revertActive(def, authorHost, store)
-    local ok, err = RevertActiveMutation(def, authorHost, store)
+function internal.mutation.revertActive(def, _, store)
+    local ok, err = RevertActiveMutation(def, store)
     return ok, err
 end
 
@@ -464,10 +460,10 @@ end
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reverted successfully.
 ---@return string|nil err Error message when the revert step fails.
-function internal.mutation.revert(def, mutationBundle, authorHost, store)
+function internal.mutation.revert(def, mutationBundle, _, store)
     local inferred, info = InferMutation(mutationBundle)
     if not inferred then
-        local okActive, errActive, didActive = RevertActiveMutation(def, authorHost, store)
+        local okActive, errActive, didActive = RevertActiveMutation(def, store)
         if not okActive then
             return false, errActive
         end
@@ -477,28 +473,11 @@ function internal.mutation.revert(def, mutationBundle, authorHost, store)
         return false, "no supported mutation lifecycle found"
     end
 
-    local firstErr = nil
-
-    if info.hasManual then
-        local manual = mutationBundle.manualMutation
-        local okActiveManual, errActiveManual, didActiveManual = RevertActiveManual(def, authorHost, store)
-        if not okActiveManual and not firstErr then
-            firstErr = errActiveManual
-        elseif not didActiveManual then
-            local okManual, errManual = pcall(manual.revert, authorHost, store)
-            if not okManual and not firstErr then
-                firstErr = errManual
-            end
+    if info.hasPatch then
+        local okPlan, errPlan = RevertActivePlan(def, store)
+        if not okPlan then
+            return false, errPlan
         end
-    end
-
-    local okPlan, errPlan = RevertActivePlan(def, store)
-    if not okPlan and not firstErr then
-        firstErr = errPlan
-    end
-
-    if firstErr then
-        return false, firstErr
     end
 
     return true, nil

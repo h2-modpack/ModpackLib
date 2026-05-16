@@ -184,6 +184,25 @@ function TestCreateModule:testCreateModuleRequiresOwner()
     end)
 end
 
+function TestCreateModule:testCreateModuleTreatsManualMutationAsUnknownOption()
+    lu.assertErrorMsgContains("unknown option 'registerManualMutation'", function()
+        lib.createModule({
+            owner = {},
+            pluginGuid = "test-create-module-manual-mutation-unknown",
+            config = {},
+            definition = {
+                id = "ManualMutationUnknown",
+                name = "Manual Mutation Unknown",
+            },
+            registerManualMutation = {
+                apply = function() end,
+                revert = function() end,
+            },
+            drawTab = function() end,
+        })
+    end)
+end
+
 function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceOnly()
     local firstOwner = {}
 

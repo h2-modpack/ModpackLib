@@ -9,7 +9,7 @@ local lib = {}
 ---@alias AdamantModpackLib.ChoiceDisplayValues table<any, string>
 ---@alias AdamantModpackLib.ValueColorMap table<any, AdamantModpackLib.Color>
 ---@alias AdamantModpackLib.PackedSelectionMode "singleEnabled"|"singleDisabled"
----@alias AdamantModpackLib.MutationShape "patch"|"manual"|"hybrid"
+---@alias AdamantModpackLib.MutationShape "patch"
 
 ---@class AdamantModpackLib.Config
 ---@field DebugMode boolean Whether Lib should emit internal diagnostic warnings.
@@ -146,10 +146,6 @@ local lib = {}
 
 ---@class AdamantModpackLib.PreparedDefinition: AdamantModpackLib.ModuleDefinition
 
----@class AdamantModpackLib.ManualMutation
----@field apply fun(host: AdamantModpackLib.AuthorHost?, store: AdamantModpackLib.ManagedStore)
----@field revert fun(host: AdamantModpackLib.AuthorHost?, store: AdamantModpackLib.ManagedStore)
-
 ---@class AdamantModpackLib.MutationBundle
 ---@field affectsRunData boolean
 ---@field patchMutation? fun(
@@ -157,7 +153,6 @@ local lib = {}
 ---    host: AdamantModpackLib.AuthorHost?,
 ---    store: AdamantModpackLib.ManagedStore
 ---)
----@field manualMutation? AdamantModpackLib.ManualMutation
 
 ---@alias AdamantModpackLib.RegisterHooks
 ---| fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
@@ -174,7 +169,6 @@ local lib = {}
 ---    host: AdamantModpackLib.AuthorHost,
 ---    store: AdamantModpackLib.ManagedStore
 ---)
----@field registerManualMutation? AdamantModpackLib.ManualMutation
 --- Post-commit observer for rebuilding derived runtime/UI structures.
 ---@field onSettingsCommitted? fun(
 ---    host: AdamantModpackLib.AuthorHost,
@@ -236,9 +230,6 @@ local lib = {}
 
 ---@class AdamantModpackLib.MutationInfo
 ---@field hasPatch boolean
----@field hasApply boolean
----@field hasRevert boolean
----@field hasManual boolean
 
 ---@alias AdamantModpackLib.MutationPlanFn fun(self: AdamantModpackLib.MutationPlan, ...: any): AdamantModpackLib.MutationPlan
 
@@ -250,8 +241,6 @@ local lib = {}
 ---@field appendUnique AdamantModpackLib.MutationPlanFn
 ---@field removeElement AdamantModpackLib.MutationPlanFn
 ---@field setElement AdamantModpackLib.MutationPlanFn
----@field apply fun(): boolean
----@field revert fun(): boolean
 
 ---@class AdamantModpackLib.IntegrationProvider
 ---@field providerId string
@@ -433,11 +422,6 @@ end
 ---@class AdamantModpackLib.MutationApi
 ---@type AdamantModpackLib.MutationApi
 lib.mutation = {}
-
----@return fun(tbl: table, ...: any) backup
----@return fun() restore
-function lib.mutation.createBackup()
-end
 
 ---@return AdamantModpackLib.MutationPlan
 function lib.mutation.createPlan()

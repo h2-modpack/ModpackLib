@@ -57,8 +57,12 @@ is optional and marks modules that participate in Framework coordination.
   Third-party stack reference for ReLoad, ModUtil, and Chalk behavior.
 - [docs/HOT_RELOAD_ARCHITECTURE.md](docs/HOT_RELOAD_ARCHITECTURE.md)
   Stack hot-reload contract for Lib, Framework, Core, and coordinated modules.
+- [docs/MIGRATING_MUTATIONS.md](docs/MIGRATING_MUTATIONS.md)
+  Migration notes for the patch-only runtime mutation API.
 - [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
   Accepted architecture boundaries and runtime constraints.
+- [docs/FUTURE_RISKS.md](docs/FUTURE_RISKS.md)
+  Forward-looking design notes for tempting changes with non-obvious tradeoffs.
 - [CONTRIBUTING.md](CONTRIBUTING.md)
   Contributor expectations for changing the public Lib contract.
 
@@ -69,7 +73,10 @@ is optional and marks modules that participate in Framework coordination.
 - `lib.mutation`
 - `lib.hashing`
 - `lib.hooks`
+- `lib.overlays`
 - `lib.integrations`
+- `lib.gameObject`
+- `lib.imguiHelpers`
 - `lib.widgets`
 - `lib.nav`
 
@@ -77,6 +84,7 @@ Common top-level helpers:
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
 - `lib.standaloneHost(...)`
+- `lib.getLiveModuleHost(...)`
 - `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`
 

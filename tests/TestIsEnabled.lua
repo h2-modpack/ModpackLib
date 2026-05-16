@@ -87,7 +87,7 @@ function TestIsCoordinated:testClearedByNilRegister()
 end
 
 -- =============================================================================
--- registerCoordinator — multiple packs coexist
+-- coordinator.register — multiple packs coexist
 -- =============================================================================
 
 TestRegisterCoordinator = {}

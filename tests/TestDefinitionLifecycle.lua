@@ -2,31 +2,18 @@ local lu = require('luaunit')
 
 TestDefinitionLifecycle = {}
 
+local function ApplyPlan(plan)
+    return AdamantModpackLib_Internal.mutation.applyPlan(plan)
+end
+
+local function RevertPlan(plan)
+    return AdamantModpackLib_Internal.mutation.revertPlan(plan)
+end
+
 local function PatchMutation(fn)
     return {
         affectsRunData = true,
         patchMutation = fn,
-    }
-end
-
-local function ManualMutation(apply, revert)
-    return {
-        affectsRunData = true,
-        manualMutation = {
-            apply = apply,
-            revert = revert,
-        },
-    }
-end
-
-local function HybridMutation(patch, apply, revert)
-    return {
-        affectsRunData = true,
-        patchMutation = patch,
-        manualMutation = {
-            apply = apply,
-            revert = revert,
-        },
     }
 end
 
@@ -44,9 +31,9 @@ function TestDefinitionLifecycle:testSetApplyAndRevert()
 
     plan:set(tbl, "HP", 250)
 
-    lu.assertTrue(plan:apply())
+    lu.assertTrue(ApplyPlan(plan))
     lu.assertEquals(tbl.HP, 250)
-    lu.assertTrue(plan.revert())
+    lu.assertTrue(RevertPlan(plan))
     lu.assertEquals(tbl.HP, 100)
 end
 
@@ -56,11 +43,11 @@ function TestDefinitionLifecycle:testSetClonesTableValue()
     local tbl = { Data = { Damage = 10 } }
 
     plan:set(tbl, "Data", replacement)
-    plan:apply()
+    ApplyPlan(plan)
     replacement.Damage = 999
 
     lu.assertEquals(tbl.Data.Damage, 100)
-    plan:revert()
+    RevertPlan(plan)
     lu.assertEquals(tbl.Data.Damage, 10)
 end
 
@@ -69,13 +56,13 @@ function TestDefinitionLifecycle:testSetManyApplyAndRevert()
     local tbl = { A = 1, B = 2, C = 3 }
 
     plan:setMany(tbl, { A = 10, B = 20 })
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(tbl.A, 10)
     lu.assertEquals(tbl.B, 20)
     lu.assertEquals(tbl.C, 3)
 
-    plan:revert()
+    RevertPlan(plan)
     lu.assertEquals(tbl.A, 1)
     lu.assertEquals(tbl.B, 2)
     lu.assertEquals(tbl.C, 3)
@@ -91,10 +78,10 @@ function TestDefinitionLifecycle:testTransformApplyAndRevert()
         return nextValue
     end)
 
-    plan:apply()
+    ApplyPlan(plan)
     lu.assertEquals(tbl.Requirements, { "A", "B" })
 
-    plan:revert()
+    RevertPlan(plan)
     lu.assertEquals(tbl.Requirements, { "A" })
 end
 
@@ -103,11 +90,11 @@ function TestDefinitionLifecycle:testAppendCreatesMissingListAndRestoresNil()
     local tbl = {}
 
     plan:append(tbl, "Values", "A")
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(tbl.Values, { "A" })
 
-    plan:revert()
+    RevertPlan(plan)
     lu.assertNil(tbl.Values)
 end
 
@@ -120,10 +107,10 @@ function TestDefinitionLifecycle:testAppendUniqueUsesDeepEquivalenceByDefault()
     }
 
     plan:appendUnique(tbl, "Requirements", { Path = { "CurrentRun", "Hero" }, Value = 1 })
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(#tbl.Requirements, 1)
-    plan:revert()
+    RevertPlan(plan)
     lu.assertEquals(#tbl.Requirements, 1)
 end
 
@@ -134,7 +121,7 @@ function TestDefinitionLifecycle:testAppendUniqueCanUseCustomComparator()
     plan:appendUnique(tbl, "Values", { Name = "A", Count = 2 }, function(a, b)
         return a.Name == b.Name
     end)
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(#tbl.Values, 1)
 end
@@ -144,12 +131,12 @@ function TestDefinitionLifecycle:testApplyAndRevertAreRepeatSafe()
     local tbl = { Values = {} }
 
     plan:append(tbl, "Values", "A")
-    lu.assertTrue(plan:apply())
-    lu.assertFalse(plan:apply())
+    lu.assertTrue(ApplyPlan(plan))
+    lu.assertFalse(ApplyPlan(plan))
     lu.assertEquals(tbl.Values, { "A" })
 
-    lu.assertTrue(plan:revert())
-    lu.assertFalse(plan:revert())
+    lu.assertTrue(RevertPlan(plan))
+    lu.assertFalse(RevertPlan(plan))
     lu.assertEquals(tbl.Values, {})
 end
 
@@ -158,7 +145,9 @@ function TestDefinitionLifecycle:testAppendErrorsOnNonTableTarget()
     local tbl = { Values = 5 }
 
     plan:append(tbl, "Values", "A")
-    lu.assertError(plan.apply)
+    lu.assertError(function()
+        ApplyPlan(plan)
+    end)
 end
 
 function TestDefinitionLifecycle:testAppendUniqueDoesNotAliasInsertedTable()
@@ -167,7 +156,7 @@ function TestDefinitionLifecycle:testAppendUniqueDoesNotAliasInsertedTable()
     local tbl = { Values = {} }
 
     plan:appendUnique(tbl, "Values", entry)
-    plan:apply()
+    ApplyPlan(plan)
     entry.Meta.Count = 999
 
     lu.assertEquals(tbl.Values[1].Meta.Count, 1)
@@ -178,11 +167,11 @@ function TestDefinitionLifecycle:testRemoveElementApplyAndRevert()
     local tbl = { Values = { "A", "B", "C" } }
 
     plan:removeElement(tbl, "Values", "B")
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(tbl.Values, { "A", "C" })
 
-    plan:revert()
+    RevertPlan(plan)
     lu.assertEquals(tbl.Values, { "A", "B", "C" })
 end
 
@@ -193,7 +182,7 @@ function TestDefinitionLifecycle:testRemoveElementCanUseCustomComparator()
     plan:removeElement(tbl, "Values", { Name = "A", Count = 999 }, function(a, b)
         return a.Name == b.Name
     end)
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(#tbl.Values, 1)
     lu.assertEquals(tbl.Values[1].Name, "B")
@@ -204,11 +193,11 @@ function TestDefinitionLifecycle:testSetElementApplyAndRevert()
     local tbl = { Values = { "A", "B", "C" } }
 
     plan:setElement(tbl, "Values", "B", "Z")
-    plan:apply()
+    ApplyPlan(plan)
 
     lu.assertEquals(tbl.Values, { "A", "Z", "C" })
 
-    plan:revert()
+    RevertPlan(plan)
     lu.assertEquals(tbl.Values, { "A", "B", "C" })
 end
 
@@ -220,7 +209,7 @@ function TestDefinitionLifecycle:testSetElementClonesReplacementTable()
     plan:setElement(tbl, "Values", { Name = "B" }, replacement, function(a, b)
         return a.Name == b.Name
     end)
-    plan:apply()
+    ApplyPlan(plan)
     replacement.Meta.Count = 999
 
     lu.assertEquals(tbl.Values[2].Name, "Z")
@@ -232,7 +221,9 @@ function TestDefinitionLifecycle:testRemoveElementErrorsOnNonTableTarget()
     local tbl = { Values = 5 }
 
     plan:removeElement(tbl, "Values", "A")
-    lu.assertError(plan.apply)
+    lu.assertError(function()
+        ApplyPlan(plan)
+    end)
 end
 
 function TestDefinitionLifecycle:testSetElementErrorsOnNonTableTarget()
@@ -240,11 +231,14 @@ function TestDefinitionLifecycle:testSetElementErrorsOnNonTableTarget()
     local tbl = { Values = 5 }
 
     plan:setElement(tbl, "Values", "A", "B")
-    lu.assertError(plan.apply)
+    lu.assertError(function()
+        ApplyPlan(plan)
+    end)
 end
 
 function TestDefinitionLifecycle:testAffectsRunDataIgnoresDeprecatedFlag()
     lu.assertTrue(AdamantModpackLib_Internal.mutation.affectsRunData({ affectsRunData = true }))
+    lu.assertTrue(AdamantModpackLib_Internal.mutation.affectsRunData({ patchMutation = function() end }))
     lu.assertFalse(AdamantModpackLib_Internal.mutation.affectsRunData({ affectsRunData = false }))
     lu.assertFalse(AdamantModpackLib_Internal.mutation.affectsRunData({ dataMutation = true }))
     lu.assertFalse(AdamantModpackLib_Internal.mutation.affectsRunData({}))
@@ -404,64 +398,6 @@ function TestDefinitionLifecycle:testApplyOnLoadRevertsStablePatchWhenReloadedDi
     lu.assertEquals(target.Value, 1)
 end
 
-function TestDefinitionLifecycle:testManualRuntimeSurvivesRecreatedStoreByModuleId()
-    local target = { Value = 0 }
-    local storeA = makeStore(true)
-    local defA = {
-        modpack = "test-pack",
-        id = "StableManualRuntime",
-    }
-    local mutationA = ManualMutation(function()
-        target.Value = target.Value + 1
-    end, function()
-        target.Value = target.Value - 1
-    end)
-
-    local ok, err = AdamantModpackLib_Internal.mutation.apply(defA, mutationA, nil, storeA)
-    lu.assertTrue(ok)
-    lu.assertNil(err)
-    lu.assertEquals(target.Value, 1)
-
-    local storeB = makeStore(true)
-    local defB = {
-        modpack = "test-pack",
-        id = "StableManualRuntime",
-    }
-    local mutationB = ManualMutation(function()
-        target.Value = target.Value + 10
-    end, function()
-        target.Value = target.Value - 10
-    end)
-
-    ok, err = AdamantModpackLib_Internal.mutation.apply(defB, mutationB, nil, storeB)
-    lu.assertTrue(ok)
-    lu.assertNil(err)
-    lu.assertEquals(target.Value, 10)
-
-    ok, err = AdamantModpackLib_Internal.mutation.revert(defB, mutationB, nil, storeB)
-    lu.assertTrue(ok)
-    lu.assertNil(err)
-    lu.assertEquals(target.Value, 0)
-end
-
-function TestDefinitionLifecycle:testApplyOnLoadDisabledDoesNotCallInactiveManualRevert()
-    local store = makeStore(false)
-    local revertCalls = 0
-    local def = {
-        modpack = "test-pack",
-        id = "InactiveManualRevert",
-    }
-    local mutation = ManualMutation(function() end, function()
-        revertCalls = revertCalls + 1
-    end)
-
-    local ok, err = HostLifecycle.applyOnLoad(def, mutation, nil, store)
-
-    lu.assertTrue(ok)
-    lu.assertNil(err)
-    lu.assertEquals(revertCalls, 0)
-end
-
 function TestDefinitionLifecycle:testApplyDefinitionNoOpsWhenLifecycleMissingAndRunDataUnaffected()
     local store = makeStore(false)
     local def = { id = "NoLifecycle" }
@@ -475,28 +411,89 @@ function TestDefinitionLifecycle:testApplyDefinitionNoOpsWhenLifecycleMissingAnd
     lu.assertNil(err)
 end
 
+function TestDefinitionLifecycle:testApplyDefinitionFailsWhenAffectedPatchLifecycleMissing()
+    local store = makeStore(false)
+    local def = { id = "MissingPatchLifecycle" }
+
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, { affectsRunData = true }, nil, store)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "no supported mutation lifecycle found")
+end
+
+function TestDefinitionLifecycle:testApplyFailureRestoresPreviousPatchRuntime()
+    local target = { Value = "base" }
+    local storeA = makeStore(true)
+    local def = {
+        modpack = "test-pack",
+        id = "RestorePatchRuntimeOnApplyFailure",
+    }
+    local mutationA = PatchMutation(function(plan)
+        plan:set(target, "Value", "first")
+    end)
+
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, mutationA, nil, storeA)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, "first")
+
+    local storeB = makeStore(true)
+    local mutationB = PatchMutation(function()
+        error("replacement patch boom")
+    end)
+
+    ok, err = AdamantModpackLib_Internal.mutation.apply(def, mutationB, nil, storeB)
+
+    lu.assertFalse(ok)
+    lu.assertStrContains(tostring(err), "replacement patch boom")
+    lu.assertEquals(target.Value, "first")
+
+    ok, err = AdamantModpackLib_Internal.mutation.revert(def, mutationA, nil, storeB)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, "base")
+end
+
+function TestDefinitionLifecycle:testApplyOnLoadDisabledDoesNotBuildInactivePatch()
+    local store = makeStore(false)
+    local buildCalls = 0
+    local def = {
+        modpack = "test-pack",
+        id = "InactivePatchRevert",
+    }
+    local mutation = PatchMutation(function()
+        buildCalls = buildCalls + 1
+    end)
+
+    local ok, err = HostLifecycle.applyOnLoad(def, mutation, nil, store)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(buildCalls, 0)
+end
+
 function TestDefinitionLifecycle:testSetDefinitionEnabledCommitsOnlyAfterSuccessfulEnable()
     local store = makeStore(false)
-    local applied = false
+    local target = { Value = false }
     local def = { id = "SuccessfulEnable" }
-    local mutation = ManualMutation(function()
-        applied = true
-    end, function() end)
+    local mutation = PatchMutation(function(plan)
+        plan:set(target, "Value", true)
+    end)
 
     local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
-    lu.assertTrue(applied)
+    lu.assertTrue(target.Value)
     lu.assertTrue(store.read("Enabled"))
 end
 
 function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedEnable()
     local store = makeStore(false)
     local def = { id = "FailedEnable" }
-    local mutation = ManualMutation(function()
+    local mutation = PatchMutation(function()
         error("enable boom")
-    end, function() end)
+    end)
 
     local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
 
@@ -505,96 +502,65 @@ function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedEnab
     lu.assertFalse(store.read("Enabled"))
 end
 
-function TestDefinitionLifecycle:testSetDefinitionEnabledDoesNotCommitFailedDisable()
-    local store = makeStore(true)
-    local def = { id = "FailedDisable" }
-    local mutation = ManualMutation(function() end, function()
-        error("disable boom")
-    end)
-
-    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, false)
-
-    lu.assertFalse(ok)
-    lu.assertStrContains(tostring(err), "disable boom")
-    lu.assertTrue(store.read("Enabled"))
-end
-
 function TestDefinitionLifecycle:testSetDefinitionEnabledReappliesWhenAlreadyEnabled()
     local store = makeStore(true)
-    local calls = {}
+    local target = { Value = 0 }
+    local buildCalls = 0
     local def = { id = "ReapplyEnabled" }
-    local mutation = ManualMutation(function()
-        table.insert(calls, "apply")
-    end, function()
-        table.insert(calls, "revert")
+    local mutation = PatchMutation(function(plan)
+        buildCalls = buildCalls + 1
+        plan:set(target, "Value", buildCalls)
     end)
 
-    local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, store)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, 1)
+
+    ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, true)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
-    lu.assertEquals(calls, { "revert", "apply" })
+    lu.assertEquals(buildCalls, 2)
+    lu.assertEquals(target.Value, 2)
     lu.assertTrue(store.read("Enabled"))
+end
+
+function TestDefinitionLifecycle:testSetDefinitionEnabledDisablesActivePatch()
+    local store = makeStore(true)
+    local target = { Value = "base" }
+    local def = { id = "DisableActivePatch" }
+    local mutation = PatchMutation(function(plan)
+        plan:set(target, "Value", "patched")
+    end)
+
+    local ok, err = AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, store)
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, "patched")
+
+    ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, false)
+
+    lu.assertTrue(ok)
+    lu.assertNil(err)
+    lu.assertEquals(target.Value, "base")
+    lu.assertFalse(store.read("Enabled"))
 end
 
 function TestDefinitionLifecycle:testSetDefinitionEnabledNoOpsWhenAlreadyDisabled()
     local store = makeStore(false)
-    local revertCalls = 0
+    local buildCalls = 0
     local def = { id = "AlreadyDisabled" }
-    local mutation = ManualMutation(function() end, function()
-        revertCalls = revertCalls + 1
+    local mutation = PatchMutation(function()
+        buildCalls = buildCalls + 1
     end)
 
     local ok, err = HostLifecycle.setEnabled(def, mutation, nil, store, false)
 
     lu.assertTrue(ok)
     lu.assertNil(err)
-    lu.assertEquals(revertCalls, 0)
+    lu.assertEquals(buildCalls, 0)
     lu.assertFalse(store.read("Enabled"))
-end
-
-function TestDefinitionLifecycle:testReapplyDefinitionStopsWhenRevertFails()
-    local store = makeStore(true)
-    local applyCalls = 0
-    local def = { id = "RevertFails" }
-    local mutation = ManualMutation(function()
-        applyCalls = applyCalls + 1
-    end, function()
-        error("revert boom")
-    end)
-
-    local ok, err = AdamantModpackLib_Internal.mutation.reapply(def, mutation, nil, store)
-
-    lu.assertFalse(ok)
-    lu.assertStrContains(tostring(err), "revert boom")
-    lu.assertEquals(applyCalls, 0)
-end
-
-function TestDefinitionLifecycle:testHybridOrderingIsPatchThenManualOnApplyAndManualThenPatchOnRevert()
-    local store = makeStore(false)
-    local target = { Value = 0 }
-    local order = {}
-    local def = { id = "HybridOrdering" }
-    local mutation = HybridMutation(function(plan)
-            table.insert(order, "build")
-            plan:set(target, "Value", 10)
-        end, function()
-            table.insert(order, "manual-apply")
-            target.Value = target.Value + 5
-        end, function()
-            table.insert(order, "manual-revert")
-            target.Value = -1
-        end)
-
-    local ok = AdamantModpackLib_Internal.mutation.apply(def, mutation, nil, store)
-    lu.assertTrue(ok)
-    lu.assertEquals(order, { "build", "manual-apply" })
-    lu.assertEquals(target.Value, 15)
-
-    ok = AdamantModpackLib_Internal.mutation.revert(def, mutation, nil, store)
-    lu.assertTrue(ok)
-    lu.assertEquals(order, { "build", "manual-apply", "manual-revert" })
-    lu.assertEquals(target.Value, 0)
 end
 
 

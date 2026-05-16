@@ -11,13 +11,19 @@ This guide describes the supported module contract in Lib:
 Module code should use:
 - `lib.config`
 - `lib.createModule(...)`
+- `lib.tryCreateModule(...)`
 - `lib.standaloneHost(...)`
+- `lib.getLiveModuleHost(...)`
 - `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hooks.*`
+- `lib.overlays.*`
+- `lib.integrations.*`
+- `lib.gameObject.*`
 - `lib.hashing.*`
 - `lib.mutation.*`
 - `lib.coordinator.*`
+- `lib.imguiHelpers.*`
 - `lib.widgets.*`
 - `lib.nav.*`
 
@@ -78,7 +84,7 @@ If the module does not register runtime hooks, omit `registerHooks`.
 For `createModule(...)`, `owner` is the single persistent owner for structural
 hot-reload tracking and hook refresh ownership.
 Call `host.tryActivate()` after construction. That activation step publishes the
-live host, registers hooks, runs integrations, and syncs initial runtime behavior.
+live host, registers hooks, overlays, integrations, and syncs initial runtime behavior.
 Pack-level orchestrators can use `lib.tryCreateModule(...)` and
 `host.tryActivate()` when an invalid module should be logged and skipped rather
 than stopping sibling modules. These helpers preserve the lifecycle split:
@@ -109,9 +115,8 @@ Callback argument order follows a stable convention:
 - state/context handle next, using `session` for staged UI state and `host` for runtime/module context
 - `store` last when persisted runtime values are needed
 
-Examples: `drawTab(imgui, session, host)`, `registerHooks(host, store)`,
-`registerPatchMutation(plan, host, store)`, and manual mutation
-`apply(host, store)` / `revert(host, store)`.
+Examples: `drawTab(imgui, session, host)`, `registerHooks(host, store)`, and
+`registerPatchMutation(plan, host, store)`.
 
 ## Definition Rules
 
@@ -353,10 +358,8 @@ Rules:
 
 Register mutation callbacks only when the module actually mutates live run data.
 
-Supported mutation shapes:
-- patch only: `registerPatchMutation(plan, host, store)`
-- manual only: `registerManualMutation = { apply = function(host, store) ..., revert = function(host, store) ... }`
-- hybrid: both
+Supported mutation shape:
+- patch plan: `registerPatchMutation(plan, host, store)`
 
 Patch-plan example:
 
@@ -383,6 +386,15 @@ host.tryActivate()
 
 Lib applies and reverts these mutations through the live host. Module authors
 normally provide the callbacks and let `createModule(...)` wire the lifecycle.
+
+Patch plans are the only supported run-data mutation API. Manual apply/revert
+callbacks are not supported because Lib cannot inspect or reliably restore
+arbitrary side effects. If a real mutation cannot be expressed by the current
+plan surface, add a first-class patch-plan operation instead.
+
+`plan:transform(tbl, key, fn)` tracks and restores only `tbl[key]`. The callback
+receives a copy of the current value and must return the replacement value for
+that key. Mutating unrelated global state inside the callback is unsupported.
 
 ## Coordinated Modules
 

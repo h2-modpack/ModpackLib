@@ -48,7 +48,7 @@ Typical module flow:
 
 1. `main.lua` calls `lib.createModule(...)`.
 2. The returned author host is kept local in `main.lua`.
-3. `host.tryActivate()` registers hooks, integrations, and the live host.
+3. `host.tryActivate()` registers hooks, overlays, integrations, and the live host.
 4. UI code edits staged values through the session passed into draw callbacks.
 5. Host/framework plumbing commits staged persistent values when appropriate.
 6. Gameplay logic reads persisted state through `store.read(...)`.
@@ -110,10 +110,9 @@ Owns gameplay and mutation behavior:
 
 - `internal.RegisterHooks(host, store)`
 - optional `internal.BuildPatchPlan(...)`
-- optional manual mutation apply/revert callbacks
 
 This code should read persisted state through the `store` passed to
-`RegisterHooks(...)`, mutation callbacks, or narrower access/read closures
+`RegisterHooks(...)`, patch mutation callbacks, or narrower access/read closures
 derived from that store.
 
 ## First Module Checklist
@@ -281,8 +280,9 @@ local function BuildPatchPlan(plan, host, store)
 end
 ```
 
-Use `registerPatchMutation` when possible. Reach for `registerManualMutation`
-only when the mutation is not naturally expressed as reversible table edits.
+Use `registerPatchMutation` for live run-data edits. If a mutation is not
+naturally expressed by the current patch-plan surface, add a patch-plan
+operation instead of bypassing the tracked lifecycle.
 
 If the module installs runtime hooks, declare them through ownerless `lib.hooks.*`
 calls from `internal.RegisterHooks(...)`:

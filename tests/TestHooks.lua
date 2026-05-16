@@ -416,8 +416,8 @@ end
 
 function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
     local packId = "hook-pack"
-    local applyCalls = 0
-    local revertCalls = 0
+    local buildCalls = 0
+    local target = { Value = "base" }
     lib.coordinator.register(packId, { ModEnabled = true })
 
     local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
@@ -452,31 +452,26 @@ function TestHooks:testCreateModuleHostSyncsCoordinatedRuntimeImmediately()
     local host = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "hook-pack.Alpha",
         definition = definition,
-        registerManualMutation = {
-            apply = function()
-                applyCalls = applyCalls + 1
-            end,
-            revert = function()
-                revertCalls = revertCalls + 1
-            end,
-        },
+        registerPatchMutation = function(plan)
+            buildCalls = buildCalls + 1
+            plan:set(target, "Value", "patched")
+        end,
         store = store,
         session = session,
         drawTab = function() end,
     })
     AdamantModpackLib_Internal.moduleHost.activate(host)
 
-    lu.assertEquals(applyCalls, 1)
-    lu.assertEquals(revertCalls, 0)
+    lu.assertEquals(buildCalls, 1)
+    lu.assertEquals(target.Value, "patched")
     lib.coordinator.register(packId, nil)
 end
 
 function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState()
     local packId = "hook-reload-pack"
-    local firstApplyCalls = 0
-    local firstRevertCalls = 0
-    local secondApplyCalls = 0
-    local secondRevertCalls = 0
+    local firstBuildCalls = 0
+    local secondBuildCalls = 0
+    local target = { Value = "base" }
     lib.coordinator.register(packId, { ModEnabled = true })
 
     local function createSession()
@@ -516,14 +511,10 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
     local firstHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "hook-reload-pack.Alpha",
         definition = firstDefinition,
-        registerManualMutation = {
-            apply = function()
-                firstApplyCalls = firstApplyCalls + 1
-            end,
-            revert = function()
-                firstRevertCalls = firstRevertCalls + 1
-            end,
-        },
+        registerPatchMutation = function(plan)
+            firstBuildCalls = firstBuildCalls + 1
+            plan:set(target, "Value", "first")
+        end,
         store = store,
         session = firstSession,
         drawTab = function() end,
@@ -540,24 +531,19 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
     local secondHost = AdamantModpackLib_Internal.moduleHost.create({
         pluginGuid = "hook-reload-pack.Alpha",
         definition = secondDefinition,
-        registerManualMutation = {
-            apply = function()
-                secondApplyCalls = secondApplyCalls + 1
-            end,
-            revert = function()
-                secondRevertCalls = secondRevertCalls + 1
-            end,
-        },
+        registerPatchMutation = function(plan)
+            secondBuildCalls = secondBuildCalls + 1
+            plan:set(target, "Value", "second")
+        end,
         store = store,
         session = secondSession,
         drawTab = function() end,
     })
     AdamantModpackLib_Internal.moduleHost.activate(secondHost)
 
-    lu.assertEquals(firstApplyCalls, 1)
-    lu.assertEquals(firstRevertCalls, 1)
-    lu.assertEquals(secondApplyCalls, 1)
-    lu.assertEquals(secondRevertCalls, 0)
+    lu.assertEquals(firstBuildCalls, 1)
+    lu.assertEquals(secondBuildCalls, 1)
+    lu.assertEquals(target.Value, "second")
 
     lib.coordinator.register(packId, nil)
     AdamantModpackLib_Internal.mutation.revert({
@@ -567,11 +553,9 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
         storage = {},
     }, {
         affectsRunData = true,
-        manualMutation = {
-            apply = function() end,
-            revert = function()
-            secondRevertCalls = secondRevertCalls + 1
-            end,
-        },
+        patchMutation = function(plan)
+            plan:set(target, "Value", "second")
+        end,
     }, nil, store)
+    lu.assertEquals(target.Value, "base")
 end

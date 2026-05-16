@@ -433,6 +433,227 @@ function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidHashGroupPrefi
     end)
 end
 
+function TestPrepareDefinition:testPrepareDefinitionRejectsUnknownHashGroupField()
+    lu.assertErrorMsgContains("unknown hashGroupPlan[1] field 'itemz'", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    itemz = {
+                        "EnabledFlag",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsDuplicateHashGroupPrefix()
+    lu.assertErrorMsgContains("duplicate hashGroupPlan keyPrefix 'main'", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+                { type = "bool", alias = "OtherFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "EnabledFlag",
+                    },
+                },
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "OtherFlag",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsDuplicateHashGroupAlias()
+    lu.assertErrorMsgContains("duplicate hashGroupPlan alias 'EnabledFlag'", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+                { type = "bool", alias = "OtherFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        { "EnabledFlag", "OtherFlag" },
+                    },
+                },
+                {
+                    keyPrefix = "extra",
+                    items = {
+                        "EnabledFlag",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsInvalidHashGroupItemShape()
+    lu.assertErrorMsgContains("hashGroupPlan[1].items[1] must be an alias string or alias list", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        7,
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsUnknownHashGroupAlias()
+    lu.assertErrorMsgContains("references unknown storage alias 'MissingAlias'", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "MissingAlias",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsHashGroupEnabledAlias()
+    lu.assertErrorMsgContains("alias 'Enabled' is encoded as module enable state", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "bool", alias = "EnabledFlag", default = false },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "Enabled",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsHashGroupPackedChildAlias()
+    lu.assertErrorMsgContains("is a packed child alias; only root storage aliases are supported", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                {
+                    type = "packedInt",
+                    alias = "PackedRoot",
+                    bits = {
+                        { alias = "EnabledBit", offset = 0, width = 1, type = "bool", default = false },
+                    },
+                },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "EnabledBit",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsHashGroupNonHashAlias()
+    lu.assertErrorMsgContains("is excluded from hashes; only hash root aliases are supported", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "string", alias = "FilterMode", persist = false, hash = false, default = "all", maxLen = 16 },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "FilterMode",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsHashGroupUnpackableAlias()
+    lu.assertErrorMsgContains("alias 'FilterMode' cannot be packed", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "string", alias = "FilterMode", default = "all", maxLen = 16 },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        "FilterMode",
+                    },
+                },
+            },
+        })
+    end)
+end
+
+function TestPrepareDefinition:testPrepareDefinitionRejectsHashGroupItemOver32Bits()
+    lu.assertErrorMsgContains("hashGroupPlan[1].items[1] exceeds 32 packed bits", function()
+        AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
+            id = "BadHashGroup",
+            name = "Bad Hash Group",
+            storage = {
+                { type = "int", alias = "WideA", default = 0, min = 0, max = 1, width = 20 },
+                { type = "int", alias = "WideB", default = 0, min = 0, max = 1, width = 20 },
+            },
+            hashGroupPlan = {
+                {
+                    keyPrefix = "main",
+                    items = {
+                        { "WideA", "WideB" },
+                    },
+                },
+            },
+        })
+    end)
+end
+
 function TestPrepareDefinition:testPrepareDefinitionUsesStorageDefaultsInFingerprint()
     local owner = {}
     local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {

@@ -14,6 +14,11 @@ local KnownDefinitionKeys = {
     hashGroupPlan = true,
 }
 
+local KnownHashGroupKeys = {
+    keyPrefix = true,
+    items = true,
+}
+
 local BuiltInStorageNodes = {
     { type = "bool", alias = "Enabled", default = false },
     { type = "bool", alias = "DebugMode", default = false, hash = false },
@@ -34,6 +39,23 @@ local KnownStructuralSurfaceKeys = {
 
 local function IsStableIdentifier(value)
     return type(value) == "string" and string.match(value, StableIdentifierPattern) ~= nil
+end
+
+local function ValidateListShape(value, prefix, path)
+    local count = 0
+    local maxIndex = 0
+    for key in pairs(value) do
+        if type(key) ~= "number" or key < 1 or math.floor(key) ~= key then
+            internal.violate("definition.invalid_field_type", "%s: %s must be a list", prefix, path)
+        end
+        count = count + 1
+        if key > maxIndex then
+            maxIndex = key
+        end
+    end
+    if count ~= maxIndex then
+        internal.violate("definition.invalid_field_type", "%s: %s must be a contiguous list", prefix, path)
+    end
 end
 
 local function NormalizeStructuralSurface(surface)
@@ -85,6 +107,9 @@ local function ValidateHashGroupPlan(definition, prefix)
         return
     end
 
+    ValidateListShape(hashGroupPlan, prefix, "hashGroupPlan")
+    local seenPrefixes = {}
+
     for groupIndex, group in ipairs(hashGroupPlan) do
         if type(group) ~= "table" then
             internal.violate(
@@ -93,6 +118,18 @@ local function ValidateHashGroupPlan(definition, prefix)
                 prefix,
                 groupIndex
             )
+        end
+
+        for key in pairs(group) do
+            if not KnownHashGroupKeys[key] then
+                internal.violate(
+                    "definition.unknown_key",
+                    "%s: unknown hashGroupPlan[%d] field '%s'",
+                    prefix,
+                    groupIndex,
+                    tostring(key)
+                )
+            end
         end
 
         local keyPrefix = group.keyPrefix
@@ -112,6 +149,200 @@ local function ValidateHashGroupPlan(definition, prefix)
                 keyPrefix,
                 StableIdentifierDescription
             )
+        end
+
+        if seenPrefixes[keyPrefix] then
+            internal.violate(
+                "definition.invalid_field_type",
+                "%s: duplicate hashGroupPlan keyPrefix '%s'",
+                prefix,
+                keyPrefix
+            )
+        end
+        seenPrefixes[keyPrefix] = true
+
+        if type(group.items) ~= "table" then
+            internal.violate(
+                "definition.invalid_field_type",
+                "%s: hashGroupPlan[%d].items is required",
+                prefix,
+                groupIndex
+            )
+        end
+        ValidateListShape(group.items, prefix, string.format("hashGroupPlan[%d].items", groupIndex))
+        if #group.items == 0 then
+            internal.violate(
+                "definition.invalid_field_type",
+                "%s: hashGroupPlan[%d].items must contain at least one item",
+                prefix,
+                groupIndex
+            )
+        end
+
+        for itemIndex, item in ipairs(group.items) do
+            if type(item) == "string" then
+                if item == "" then
+                    internal.violate(
+                        "definition.invalid_field_type",
+                        "%s: hashGroupPlan[%d].items[%d] must be a non-empty alias string",
+                        prefix,
+                        groupIndex,
+                        itemIndex
+                    )
+                end
+            elseif type(item) == "table" then
+                local itemPath = string.format("hashGroupPlan[%d].items[%d]", groupIndex, itemIndex)
+                ValidateListShape(item, prefix, itemPath)
+                if #item == 0 then
+                    internal.violate(
+                        "definition.invalid_field_type",
+                        "%s: %s must contain at least one alias",
+                        prefix,
+                        itemPath
+                    )
+                end
+                for aliasIndex, alias in ipairs(item) do
+                    if type(alias) ~= "string" or alias == "" then
+                        internal.violate(
+                            "definition.invalid_field_type",
+                            "%s: %s[%d] must be a non-empty alias string",
+                            prefix,
+                            itemPath,
+                            aliasIndex
+                        )
+                    end
+                end
+            else
+                internal.violate(
+                    "definition.invalid_field_type",
+                    "%s: hashGroupPlan[%d].items[%d] must be an alias string or alias list",
+                    prefix,
+                    groupIndex,
+                    itemIndex
+                )
+            end
+        end
+    end
+end
+
+local function GetHashGroupPackWidth(node)
+    local storageType = node and node.type and storageInternal.types[node.type] or nil
+    if storageType and storageType.packWidth ~= nil then
+        return storageType.packWidth(node)
+    end
+    return nil
+end
+
+local function ValidateHashGroupAlias(aliasNodes, alias, prefix, path)
+    if alias == "Enabled" then
+        internal.violate(
+            "definition.invalid_field_type",
+            "%s: %s alias '%s' is encoded as module enable state; storage groups cannot include it",
+            prefix,
+            path,
+            alias
+        )
+    end
+
+    local node = aliasNodes[alias]
+    if not node then
+        internal.violate(
+            "definition.invalid_field_type",
+            "%s: %s references unknown storage alias '%s'",
+            prefix,
+            path,
+            alias
+        )
+    end
+    if node._isBitAlias then
+        internal.violate(
+            "definition.invalid_field_type",
+            "%s: %s alias '%s' is a packed child alias; only root storage aliases are supported",
+            prefix,
+            path,
+            alias
+        )
+    end
+    if node._hash ~= true then
+        internal.violate(
+            "definition.invalid_field_type",
+            "%s: %s alias '%s' is excluded from hashes; only hash root aliases are supported",
+            prefix,
+            path,
+            alias
+        )
+    end
+
+    local width = GetHashGroupPackWidth(node)
+    if not width then
+        internal.violate(
+            "definition.invalid_field_type",
+            "%s: %s alias '%s' cannot be packed",
+            prefix,
+            path,
+            alias
+        )
+    end
+    return width
+end
+
+local function RecordHashGroupAlias(seenAliases, alias, prefix, path)
+    local existingPath = seenAliases[alias]
+    if existingPath then
+        internal.violate(
+            "definition.invalid_field_type",
+            "%s: duplicate hashGroupPlan alias '%s' at %s; first used at %s",
+            prefix,
+            alias,
+            path,
+            existingPath
+        )
+    end
+    seenAliases[alias] = path
+end
+
+local function ValidatePreparedHashGroupPlan(definition, prefix)
+    local hashGroupPlan = definition.hashGroupPlan
+    if hashGroupPlan == nil then
+        return
+    end
+
+    local aliasNodes = storageInternal.getAliases(definition.storage)
+    local seenAliases = {}
+    for groupIndex, group in ipairs(hashGroupPlan) do
+        for itemIndex, item in ipairs(group.items) do
+            local itemWidth = 0
+            if type(item) == "string" then
+                local path = string.format("hashGroupPlan[%d].items[%d]", groupIndex, itemIndex)
+                itemWidth = ValidateHashGroupAlias(
+                    aliasNodes,
+                    item,
+                    prefix,
+                    path
+                )
+                RecordHashGroupAlias(seenAliases, item, prefix, path)
+            else
+                for aliasIndex, alias in ipairs(item) do
+                    local path = string.format("hashGroupPlan[%d].items[%d][%d]", groupIndex, itemIndex, aliasIndex)
+                    itemWidth = itemWidth + ValidateHashGroupAlias(
+                        aliasNodes,
+                        alias,
+                        prefix,
+                        path
+                    )
+                    RecordHashGroupAlias(seenAliases, alias, prefix, path)
+                end
+            end
+
+            if itemWidth > 32 then
+                internal.violate(
+                    "definition.invalid_field_type",
+                    "%s: hashGroupPlan[%d].items[%d] exceeds 32 packed bits",
+                    prefix,
+                    groupIndex,
+                    itemIndex
+                )
+            end
         end
     end
 end
@@ -302,6 +533,7 @@ function internal.moduleHost.prepareDefinition(owner, definition, structuralSurf
 
     ValidateDefinition(prepared, label)
     storageInternal.validate(prepared.storage, label)
+    ValidatePreparedHashGroupPlan(prepared, label)
 
     local fingerprint = GetStructuralFingerprint(prepared, structuralSurface)
     prepared._preparedDefinition = true
