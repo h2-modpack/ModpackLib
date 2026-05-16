@@ -33,21 +33,21 @@ function internal.integrations.beginTransaction()
     }
 end
 
----@param providerId string Stable provider id.
+---@param refreshOwnerId string Stable lifecycle owner for this refresh pass.
 ---@param register fun()
-function internal.integrations.refresh(providerId, register)
-    if type(providerId) ~= "string" or providerId == "" then
-        internal.violate("integrations.invalid_args", "internal.integrations.refresh: providerId must be a non-empty string")
+function internal.integrations.refresh(refreshOwnerId, register)
+    if type(refreshOwnerId) ~= "string" or refreshOwnerId == "" then
+        internal.violate("integrations.invalid_args", "internal.integrations.refresh: owner id must be a non-empty string")
     end
     if type(register) ~= "function" then
         internal.violate("integrations.invalid_args", "internal.integrations.refresh: register must be a function")
     end
 
-    local refresh = registry.getProviderRefresh(providerId, true)
+    local refresh = registry.getProviderRefresh(refreshOwnerId, true)
     refresh.generation = refresh.generation + 1
     refresh.refreshing = true
 
-    ActiveProviderStack[#ActiveProviderStack + 1] = providerId
+    ActiveProviderStack[#ActiveProviderStack + 1] = refreshOwnerId
     local ok, err = pcall(register)
     ActiveProviderStack[#ActiveProviderStack] = nil
     refresh.refreshing = false
@@ -72,7 +72,7 @@ end
 --- Registers or replaces an optional cross-module integration provider.
 --- Re-registering the same `id` and `providerId` updates the API in place.
 ---@param id string Domain-named integration id, e.g. "run-director.god-availability".
----@param providerId string Stable provider id, usually `definition.id`.
+---@param providerId string Public provider identity, independent from module lifecycle ownership.
 ---@param api table Provider API table exposed to consumers.
 ---@return table api The registered API table.
 function public.integrations.register(id, providerId, api)
@@ -96,7 +96,7 @@ end
 
 --- Unregisters one provider for one integration id.
 ---@param id string Integration id.
----@param providerId string Stable provider id.
+---@param providerId string Public provider identity.
 ---@return boolean removed True when a provider was removed.
 function public.integrations.unregister(id, providerId)
     if type(id) ~= "string" or id == "" then
@@ -113,7 +113,7 @@ function public.integrations.unregister(id, providerId)
 end
 
 --- Unregisters a provider from all integration ids.
----@param providerId string Stable provider id.
+---@param providerId string Public provider identity.
 ---@return number count Number of removed provider registrations.
 function public.integrations.unregisterProvider(providerId)
     if type(providerId) ~= "string" or providerId == "" then

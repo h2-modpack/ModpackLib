@@ -239,6 +239,12 @@ function TestStandaloneHost:testErrorsWhenPluginGuidMissing()
     end)
 end
 
+function TestStandaloneHost:testBridgeErrorsWhenPluginGuidMissing()
+    lu.assertErrorMsgContains("pluginGuid is required", function()
+        lib.standaloneUiBridge()
+    end)
+end
+
 function TestStandaloneHost:testErrorsWhenModuleHasNoLiveHost()
     local restoreHost = installHost(nil)
 
@@ -247,6 +253,18 @@ function TestStandaloneHost:testErrorsWhenModuleHasNoLiveHost()
     end)
 
     restoreHost()
+end
+
+function TestStandaloneHost:testBridgeCallbacksNoOpBeforeRuntimeExists()
+    local bridge = lib.standaloneUiBridge(PLUGIN_GUID)
+
+    local okMenu, errMenu = pcall(bridge.addMenuBar)
+    local okRender, errRender = pcall(bridge.renderWindow)
+    local okClosed, errClosed = pcall(bridge.handleHostGuiClosed)
+
+    lu.assertTrue(okMenu, errMenu)
+    lu.assertTrue(okRender, errRender)
+    lu.assertTrue(okClosed, errClosed)
 end
 
 function TestStandaloneHost:testAppliesOnLoadWhenModuleIsNotCoordinated()
@@ -261,6 +279,45 @@ function TestStandaloneHost:testAppliesOnLoadWhenModuleIsNotCoordinated()
     lu.assertEquals(type(runtime.addMenuBar), "function")
     lu.assertEquals(type(runtime.handleHostGuiClosed), "function")
     lu.assertEquals(host.calls.applyOnLoad, 1)
+end
+
+function TestStandaloneHost:testBridgeDispatchesInstalledRuntime()
+    local bridge = lib.standaloneUiBridge(PLUGIN_GUID)
+    local host = makeHost({ modpack = "standalone-pack" })
+    local restoreHost = installHost(host)
+    lib.coordinator.register("standalone-pack", nil)
+    local imgui = makeImgui({ menuClicked = true })
+    rom.ImGui = imgui
+
+    lib.standaloneHost(PLUGIN_GUID)
+    bridge.addMenuBar()
+    bridge.renderWindow()
+
+    restoreHost()
+    lu.assertEquals(host.calls.drawTab, 1)
+end
+
+function TestStandaloneHost:testBridgeDispatchesReplacementRuntime()
+    local bridge = lib.standaloneUiBridge(PLUGIN_GUID)
+    local firstHost = makeHost({ modpack = "standalone-pack", name = "First Standalone" })
+    local restoreFirstHost = installHost(firstHost)
+    lib.coordinator.register("standalone-pack", nil)
+    rom.ImGui = makeImgui({ menuClicked = true })
+    lib.standaloneHost(PLUGIN_GUID)
+    bridge.addMenuBar()
+    bridge.renderWindow()
+
+    local secondHost = makeHost({ modpack = "standalone-pack", name = "Second Standalone" })
+    local restoreSecondHost = installHost(secondHost)
+    rom.ImGui = makeImgui({ menuClicked = true })
+    lib.standaloneHost(PLUGIN_GUID)
+    bridge.addMenuBar()
+    bridge.renderWindow()
+
+    restoreSecondHost()
+    restoreFirstHost()
+    lu.assertEquals(firstHost.calls.drawTab, 1)
+    lu.assertEquals(secondHost.calls.drawTab, 1)
 end
 
 function TestStandaloneHost:testSkipsStandaloneLifecycleAndUiWhenCoordinated()

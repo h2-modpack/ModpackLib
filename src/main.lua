@@ -31,6 +31,7 @@ internal.pendingCoordinatorRebuilds = internal.pendingCoordinatorRebuilds
 ---@field createModule fun(opts: ModuleCreateOpts): AuthorHost, ManagedStore
 ---@field tryCreateModule fun(opts: ModuleCreateOpts): AuthorHost|nil, ManagedStore|nil, string|nil
 ---@field standaloneHost fun(pluginGuid: string): StandaloneRuntime
+---@field standaloneUiBridge fun(pluginGuid: string): StandaloneRuntime
 ---@field getLiveModuleHost fun(pluginGuid: string|nil): ModuleHost|nil
 ---@field coordinator table
 ---@field mutation table

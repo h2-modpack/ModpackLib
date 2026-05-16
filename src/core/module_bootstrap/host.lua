@@ -21,7 +21,6 @@ local hostLifecycle = import('core/module_bootstrap/private_host_lifecycle.lua',
 ---@field tryActivate fun(): boolean, string|nil
 
 ---@class ModuleHostOpts
----@field owner table|nil
 ---@field definition ModuleDefinition
 ---@field pluginGuid string
 ---@field store ManagedStore
@@ -66,7 +65,6 @@ function public.getLiveModuleHost(pluginGuid)
 end
 
 local KnownHostOpts = {
-    owner = true,
     definition = true,
     pluginGuid = true,
     store = true,
@@ -131,7 +129,6 @@ function internal.moduleHost.create(opts)
         internal.violate("host.invalid_create_opts", "moduleHost.create: opts must be a table")
     end
     ValidateKnownOpts(opts, "moduleHost.create")
-    local owner = opts.owner
     local def = opts.definition
     local pluginGuid = opts.pluginGuid
     local store = opts.store
@@ -156,6 +153,7 @@ function internal.moduleHost.create(opts)
     local drawTab = opts.drawTab
     local drawQuickContent = opts.drawQuickContent
     local mutationBundle, settingsObserver = BuildMutationBundle(opts)
+    local runtime = internal.moduleRuntime.get(pluginGuid)
 
     if type(drawTab) ~= "function" then
         internal.violate("host.invalid_create_opts", "moduleHost.create: drawTab is required")
@@ -163,9 +161,6 @@ function internal.moduleHost.create(opts)
     if registerHooks ~= nil then
         if type(registerHooks) ~= "function" then
             internal.violate("host.invalid_create_opts", "moduleHost.create: registerHooks must be a function")
-        end
-        if type(owner) ~= "table" then
-            internal.violate("host.invalid_create_opts", "moduleHost.create: owner is required when registerHooks is provided")
         end
     end
     if registerIntegrations ~= nil and type(registerIntegrations) ~= "function" then
@@ -175,17 +170,16 @@ function internal.moduleHost.create(opts)
         if type(registerOverlays) ~= "function" then
             internal.violate("host.invalid_create_opts", "moduleHost.create: registerOverlays must be a function")
         end
-        if type(owner) ~= "table" then
-            internal.violate("host.invalid_create_opts", "moduleHost.create: owner is required when registerOverlays is provided")
-        end
     end
-    local hookOwner = owner or {}
+    local hookOwner = runtime.hookOwner
+    local overlayOwner = runtime.overlayOwner
+    local mutationKey = runtime.mutationKey
 
     local function notifySettingsCommitted(activeHost, activeStore, commit)
         if settingsObserver ~= nil then
             settingsObserver(activeHost, activeStore, commit)
         end
-        internal.overlays.dispatchCommit(hookOwner, commit)
+        internal.overlays.dispatchCommit(overlayOwner, commit)
     end
 
     local authorSession = internal.moduleState.createAuthorSession(session, {
@@ -240,7 +234,8 @@ function internal.moduleHost.create(opts)
     function host.writeAndFlush(alias, value)
         requireActivated("writeAndFlush")
         session.write(alias, value)
-        local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
+        local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
+            mutationKey)
         return ok, err
     end
 
@@ -254,7 +249,8 @@ function internal.moduleHost.create(opts)
         if not session.isDirty() then
             return true
         end
-        return hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
+        return hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
+            mutationKey)
     end
 
     function host.reloadFromConfig()
@@ -277,7 +273,8 @@ function internal.moduleHost.create(opts)
         if not session.isDirty() then
             return true, nil, false
         end
-        local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session)
+        local ok, err = hostLifecycle.commitSession(def, mutationBundle, notifySettingsCommitted, authorHost, store, session,
+            mutationKey)
         return ok, err, ok == true
     end
 
@@ -287,7 +284,7 @@ function internal.moduleHost.create(opts)
 
     function host.setEnabled(enabled)
         requireActivated("setEnabled")
-        return hostLifecycle.setEnabled(def, mutationBundle, authorHost, store, enabled)
+        return hostLifecycle.setEnabled(def, mutationBundle, authorHost, store, enabled, mutationKey)
     end
 
     function host.setDebugMode(enabled)
@@ -309,17 +306,17 @@ function internal.moduleHost.create(opts)
 
     function host.applyOnLoad()
         requireActivated("applyOnLoad")
-        return hostLifecycle.applyOnLoad(def, mutationBundle, authorHost, store)
+        return hostLifecycle.applyOnLoad(def, mutationBundle, authorHost, store, mutationKey)
     end
 
     function host.applyMutation()
         requireActivated("applyMutation")
-        return internal.mutation.apply(def, mutationBundle, authorHost, store)
+        return internal.mutation.applyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     end
 
     function host.revertMutation()
         requireActivated("revertMutation")
-        return internal.mutation.revert(def, mutationBundle, authorHost, store)
+        return internal.mutation.revertForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     end
 
     function host.tryActivate()
@@ -345,7 +342,10 @@ function internal.moduleHost.create(opts)
         mutationBundle = mutationBundle,
         pluginGuid = pluginGuid,
         store = store,
-        owner = hookOwner,
+        runtime = runtime,
+        hookOwner = hookOwner,
+        overlayOwner = overlayOwner,
+        mutationKey = mutationKey,
         registerHooks = registerHooks,
         registerIntegrations = registerIntegrations,
         registerOverlays = registerOverlays,
@@ -367,7 +367,10 @@ function internal.moduleHost.activate(host)
     end
 
     local pluginGuid = state.pluginGuid
-    local owner = state.owner
+    local hookOwner = state.hookOwner
+    local overlayOwner = state.overlayOwner
+    local mutationKey = state.mutationKey
+    local integrationRefreshOwnerId = state.runtime.integrationRefreshOwnerId
     local registerHooks = state.registerHooks
     local registerIntegrations = state.registerIntegrations
     local registerOverlays = state.registerOverlays
@@ -388,24 +391,24 @@ function internal.moduleHost.activate(host)
     local hasPendingCoordinatorRebuild = pendingCoordinatorRebuild ~= nil
     local previousHost = internal.liveModuleHosts[pluginGuid]
     local hadPreviousHost = previousHost ~= nil
-    local hookTransaction = internal.hooks.beginTransaction(owner)
+    local hookTransaction = internal.hooks.beginTransaction(hookOwner)
     local integrationTransaction = internal.integrations.beginTransaction()
-    local overlayTransaction = internal.overlays.beginTransaction(owner)
+    local overlayTransaction = internal.overlays.beginTransaction(overlayOwner)
     state.activating = true
 
     internal.liveModuleHosts[pluginGuid] = host
     local ok, err = pcall(function()
-        internal.hooks.refresh(owner, function()
+        internal.hooks.refresh(hookOwner, function()
             if registerHooks ~= nil then
                 return registerHooks(authorHost, store)
             end
         end)
-        internal.integrations.refresh(def.id, function()
+        internal.integrations.refresh(integrationRefreshOwnerId, function()
             if registerIntegrations then
                 return registerIntegrations(authorHost, store)
             end
         end)
-        internal.overlays.refresh(owner, pluginGuid, authorHost, store, function(overlays)
+        internal.overlays.refresh(overlayOwner, pluginGuid, authorHost, store, function(overlays)
             if registerOverlays then
                 return registerOverlays(overlays, authorHost, store)
             end
@@ -415,7 +418,7 @@ function internal.moduleHost.activate(host)
             and type(packId) == "string"
             and packId ~= ""
             and public.coordinator.isRegistered(packId) then
-            local syncOk, syncErr = hostLifecycle.applyOnLoad(def, state.mutationBundle, authorHost, store)
+            local syncOk, syncErr = hostLifecycle.applyOnLoad(def, state.mutationBundle, authorHost, store, mutationKey)
             if not syncOk then
                 internal.violate("host.coordinated_runtime_sync_failed", "%s coordinated runtime sync failed: %s",
                     tostring(meta.name or identity.id or "module"),

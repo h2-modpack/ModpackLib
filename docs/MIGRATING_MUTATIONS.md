@@ -33,7 +33,6 @@ Before:
 
 ```lua
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = internal.definition,
@@ -52,15 +51,17 @@ local host = lib.createModule({
 After:
 
 ```lua
+local definition = import("mods/definition.lua")
+local ui = import("mods/ui.lua")
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
-    definition = internal.definition,
+    definition = definition,
     registerPatchMutation = function(plan, host, store)
         plan:set(SomeGameTable, "SomeKey", true)
     end,
-    drawTab = internal.DrawTab,
+    drawTab = ui.drawTab,
 })
 ```
 

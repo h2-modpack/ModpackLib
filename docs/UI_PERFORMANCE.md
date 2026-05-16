@@ -3,16 +3,16 @@
 Reference for writing or auditing module draw code without re-deriving render-path performance analysis from scratch.
 
 This guidance applies to module draw code:
-- `DrawTab(ui, session, host)`
-- optional `DrawQuickContent(ui, session, host)`
+- `drawTab(ui, session, host)`
+- optional `drawQuickContent(ui, session, host)`
 - `lib.widgets.*`
 - raw ImGui for structure
 
 ## Why Draw Paths Need Care
 
 Module UI is immediate-mode:
-- `DrawTab(ui, session, host)`
-- optional `DrawQuickContent(ui, session, host)`
+- `drawTab(ui, session, host)`
+- optional `drawQuickContent(ui, session, host)`
 
 These run every imgui frame.
 Any unnecessary allocation or repeated C-boundary call inside those paths shows up immediately.
@@ -27,7 +27,8 @@ This document assumes:
 - debug toggles write persisted values through the host/framework flow
 - hash/profile plumbing stages arbitrary values through `session.write(...)` and flushes with `session._flushToConfig()`
 - framework/host own `session` commit timing
-- standalone UI goes through `lib.standaloneHost(...)`
+- standalone UI registers ROM callbacks through `lib.standaloneUiBridge(...)`
+  and installs the active runtime through `lib.standaloneHost(...)`
 
 ## Per-Frame Checklist
 
@@ -98,10 +99,12 @@ Prefer this over raw mutable staging values unless you have a concrete reason no
 Do not hand-roll flush logic inside draw code.
 
 Ownership:
-- framework-hosted modules commit after `DrawTab` / `DrawQuickContent`
-- standalone modules should go through `lib.standaloneHost(...)`
+- framework-hosted modules commit after `drawTab` / `drawQuickContent`
+- standalone modules should register GUI callbacks through
+  `lib.standaloneUiBridge(...)` and install runtime state through
+  `lib.standaloneHost(...)`
 
-The module’s job is:
+The module's job is:
 - render from `session`
 - stage edits into `session`
 

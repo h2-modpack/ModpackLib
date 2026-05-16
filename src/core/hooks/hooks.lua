@@ -32,7 +32,7 @@ local function getActiveOwner(apiName)
     return owner
 end
 
---- Registers or updates a stable ModUtil Path.Wrap dispatcher using the active module owner.
+--- Registers or updates a stable ModUtil Path.Wrap dispatcher using the active hook owner.
 ---@param path string ModUtil path to wrap.
 ---@param keyOrHandler string|function Explicit hook key, or handler when no key is needed.
 ---@param maybeHandler function|nil Handler when an explicit key is supplied.
@@ -41,7 +41,7 @@ function public.hooks.Wrap(path, keyOrHandler, maybeHandler)
 end
 
 --- Registers or updates a stable ModUtil Path.Wrap dispatcher for an explicit owner.
---- Re-running with the same owner/path/key updates the wrapped handler without stacking another wrapper.
+--- Re-running with the same hook owner/path/key updates the wrapped handler without stacking another wrapper.
 ---@param owner table Persistent module/framework internal table.
 ---@param path string ModUtil path to wrap.
 ---@param keyOrHandler string|function Explicit hook key, or handler when no key is needed.
@@ -63,7 +63,7 @@ function public.hooks.WrapOwned(owner, path, keyOrHandler, maybeHandler)
     registry.clearPendingState(state)
 end
 
---- Registers or updates a stable ModUtil Path.Override using the active module owner.
+--- Registers or updates a stable ModUtil Path.Override using the active hook owner.
 ---@param path string ModUtil path to override.
 ---@param keyOrReplacement string|any Explicit hook key, or replacement when no key is needed.
 ---@param maybeReplacement any|nil Replacement when an explicit key is supplied.
@@ -90,7 +90,7 @@ function public.hooks.OverrideOwned(owner, path, keyOrReplacement, maybeReplacem
     registry.clearPendingState(state)
 end
 
---- Registers or updates a stable ModUtil Path.Context.Wrap dispatcher using the active module owner.
+--- Registers or updates a stable ModUtil Path.Context.Wrap dispatcher using the active hook owner.
 ---@param path string ModUtil path to context-wrap.
 ---@param keyOrContext string|function Explicit hook key, or context function when no key is needed.
 ---@param maybeContext function|nil Context function when an explicit key is supplied.
@@ -121,7 +121,7 @@ function public.hooks.Context.WrapOwned(owner, path, keyOrContext, maybeContext)
     registry.clearPendingState(state)
 end
 
---- Starts a rollback boundary for hook refreshes owned by one persistent owner.
+--- Starts a rollback boundary for hook refreshes owned by one persistent hook owner.
 ---@param owner table Persistent module/framework internal table.
 function internal.hooks.beginTransaction(owner)
     local ownerRegistry = registry.getRegistry(owner)

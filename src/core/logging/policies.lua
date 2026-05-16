@@ -14,7 +14,7 @@ return {
     },
     ["definition.invalid_args"] = {
         severity = "error",
-        description = "Definition preparation requires valid owner and definition arguments.",
+        description = "Definition preparation requires valid structural state and definition arguments.",
     },
     ["definition.missing_id"] = {
         severity = "error",
@@ -131,6 +131,11 @@ return {
     ["integrations.provider_failed"] = {
         severity = "warn",
         description = "An integration provider method failed; Lib returned the caller fallback.",
+    },
+
+    ["mutation.invalid_runtime_key"] = {
+        severity = "error",
+        description = "Mutation lifecycle operations require a stable plugin guid runtime key.",
     },
 
     ["lifecycle.on_settings_committed_failed"] = {

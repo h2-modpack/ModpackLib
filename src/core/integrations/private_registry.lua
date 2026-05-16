@@ -132,15 +132,15 @@ local function RecordRegistrationChange(id, providerId, bucket)
     }
 end
 
-local function GetProviderRefresh(providerId, create)
-    local refresh = providerRegistry[providerId]
+local function GetProviderRefresh(refreshOwnerId, create)
+    local refresh = providerRegistry[refreshOwnerId]
     if not refresh and create then
         refresh = {
             generation = 0,
             refreshing = false,
             slots = {},
         }
-        providerRegistry[providerId] = refresh
+        providerRegistry[refreshOwnerId] = refresh
     end
     return refresh
 end
@@ -159,8 +159,8 @@ local function RecordProviderSlot(refreshProviderId, id, providerId)
     }
 end
 
-local function ClearProviderRefresh(providerId)
-    providerRegistry[providerId] = nil
+local function ClearProviderRefresh(refreshOwnerId)
+    providerRegistry[refreshOwnerId] = nil
 end
 
 return {

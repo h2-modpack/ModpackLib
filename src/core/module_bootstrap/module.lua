@@ -1,7 +1,6 @@
 local internal = AdamantModpackLib_Internal
 
 ---@class ModuleCreateOpts
----@field owner table
 ---@field pluginGuid string
 ---@field config table
 ---@field definition ModuleDefinition
@@ -14,7 +13,6 @@ local internal = AdamantModpackLib_Internal
 ---@field drawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
 
 local KnownModuleOpts = {
-    owner = true,
     pluginGuid = true,
     config = true,
     definition = true,
@@ -48,18 +46,18 @@ function public.createModule(opts)
     if type(opts.config) ~= "table" then
         internal.violate("host.invalid_create_opts", "createModule: config is required")
     end
-    if type(opts.owner) ~= "table" then
-        internal.violate("host.invalid_create_opts", "createModule: owner is required")
+    if type(opts.pluginGuid) ~= "string" or opts.pluginGuid == "" then
+        internal.violate("host.invalid_create_opts", "createModule: pluginGuid is required")
     end
 
-    local definition = internal.moduleHost.prepareDefinition(opts.owner, opts.definition, {
+    local runtime = internal.moduleRuntime.get(opts.pluginGuid)
+    local definition = internal.moduleHost.prepareDefinition(runtime.definitionState, opts.definition, {
         hasQuickContent = type(opts.drawQuickContent) == "function",
     })
     local state = internal.moduleState.create(opts.config, definition)
     local store = state.store
     local session = state.session
     local _, authorHost = internal.moduleHost.create({
-        owner = opts.owner,
         definition = definition,
         pluginGuid = opts.pluginGuid,
         store = store,

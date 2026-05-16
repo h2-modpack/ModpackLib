@@ -71,7 +71,7 @@ function TestRetainedOverlays:tearDown()
     rom.mods["SGG_Modding-ModUtil"] = self.previousRomModUtil
 end
 
-local function createHostWithOverlays(owner, registerOverlays, opts)
+local function createHostWithOverlays(pluginGuid, registerOverlays, opts)
     opts = opts or {}
     local definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, {
         id = opts.id or "RetainedOverlayHost",
@@ -83,8 +83,7 @@ local function createHostWithOverlays(owner, registerOverlays, opts)
         DebugMode = false,
     }, definition)
     local host, authorHost = AdamantModpackLib_Internal.moduleHost.create({
-        owner = owner,
-        pluginGuid = opts.pluginGuid or "test-retained-overlay-host",
+        pluginGuid = pluginGuid,
         definition = definition,
         store = store,
         session = session,
@@ -222,9 +221,9 @@ function TestRetainedOverlays:testProjectionContextDoesNotExposeOwner()
 end
 
 function TestRetainedOverlays:testHostCommitDispatchesOverlaysAfterSettingsObserver()
-    local owner = {}
+    local pluginGuid = "test-retained-overlay-commit"
     local order = {}
-    local host, authorHost, _, session = createHostWithOverlays(owner, function(overlays)
+    local host, authorHost, _, session = createHostWithOverlays(pluginGuid, function(overlays)
         overlays.onCommit(function()
             order[#order + 1] = "overlay"
         end)
@@ -296,8 +295,8 @@ function TestRetainedOverlays:testAfterHookObservesResultsWithoutChangingReturn(
     }
     rom.mods["SGG_Modding-ModUtil"] = modutil
 
-    local owner = {}
-    local _, authorHost = createHostWithOverlays(owner, function(overlays)
+    local pluginGuid = "test-retained-overlay-after-hook"
+    local _, authorHost = createHostWithOverlays(pluginGuid, function(overlays)
         overlays.afterHook("StartNewRun", function(_, event)
             observed = {
                 arg = event.args[1],
@@ -427,9 +426,8 @@ function TestRetainedOverlays:testExplicitOwnerAfterHookRollsBackOnRegistrationF
 end
 
 function TestRetainedOverlays:testActivationFailureRollsBackOverlayDeclarations()
-    local owner = {}
     local pluginGuid = "test-retained-rollback"
-    local firstHost, firstAuthorHost = createHostWithOverlays(owner, function(overlays)
+    local firstHost, firstAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
         overlays.createLine("stable", {
             region = "middleRightStack",
             columns = {
@@ -437,12 +435,11 @@ function TestRetainedOverlays:testActivationFailureRollsBackOverlayDeclarations(
             },
         })
     end, {
-        pluginGuid = pluginGuid,
         id = "RetainedRollback",
     })
     firstAuthorHost.tryActivate()
 
-    local _, secondAuthorHost = createHostWithOverlays(owner, function(overlays)
+    local _, secondAuthorHost = createHostWithOverlays(pluginGuid, function(overlays)
         overlays.createLine("replacement", {
             region = "middleRightStack",
             columns = {
@@ -450,7 +447,6 @@ function TestRetainedOverlays:testActivationFailureRollsBackOverlayDeclarations(
             },
         })
     end, {
-        pluginGuid = pluginGuid,
         id = "RetainedRollback",
         registerIntegrations = function()
             error("rollback after overlays")
@@ -461,7 +457,7 @@ function TestRetainedOverlays:testActivationFailureRollsBackOverlayDeclarations(
 
     lu.assertFalse(ok)
     lu.assertStrContains(err, "rollback after overlays")
-    local retained = AdamantModpackLib_OverlayState.retained.tableRegistries[owner]
+    local retained = AdamantModpackLib_OverlayState.retained.explicitRegistries["module:" .. pluginGuid]
     lu.assertNotNil(retained.elements.stable)
     lu.assertNil(retained.elements.replacement)
     lu.assertEquals(lib.getLiveModuleHost(pluginGuid), firstHost)

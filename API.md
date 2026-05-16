@@ -6,6 +6,7 @@ Preferred usage uses top-level module authoring helpers plus namespaces for spec
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
 - `lib.standaloneHost(...)`
+- `lib.standaloneUiBridge(...)`
 - `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`
 - `lib.hashing.*`
@@ -77,6 +78,10 @@ lib.integrations.register("run-director.god-availability", MODULE_ID, {
 })
 ```
 
+`providerId` is the public provider identity returned to integration consumers.
+Module lifecycle refresh is scoped separately by `pluginGuid`; provider ids do
+not need to match the module's `pluginGuid`.
+
 Typical consumer:
 
 ```lua
@@ -140,25 +145,28 @@ Rules:
 ### `lib.createModule(opts)`
 
 Canonical module-construction helper.
-`owner` is used for structural hot-reload tracking and hook refresh ownership.
-When a module declares runtime hooks, use a persistent owner table so Lib can
-remove omitted hook declarations on later reloads.
+`pluginGuid` is the stable lifecycle identity. Lib owns the internal per-plugin
+runtime state used for structural hot-reload tracking, hook refresh ownership,
+overlay ownership, integration refresh, mutation runtime, and live-host lookup.
 
 ```lua
+local data = import("mods/data.lua")
+local logic = import("mods/logic.lua").bind(data)
+local ui = import("mods/ui.lua").bind(data)
+
 local host, store = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = "ExampleModule",
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
-    registerPatchMutation = internal.BuildPatchPlan,
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerPatchMutation = logic.buildPatchPlan,
+    registerHooks = logic.registerHooks,
+    drawTab = ui.drawTab,
+    drawQuickContent = ui.drawQuickContent,
 })
 host.tryActivate()
 ```
@@ -398,7 +406,7 @@ Options:
 Reload-stable wrappers around ModUtil path hooks.
 
 Hosted modules normally call ownerless hook APIs inside `registerHooks(...)`.
-Lib scopes those calls to the persistent owner passed to `createModule(...)`.
+Lib scopes those calls to the module's Lib-owned runtime slot for its `pluginGuid`.
 
 ### `lib.hooks.Wrap(path, handler)`
 
@@ -434,7 +442,7 @@ authors should prefer the ownerless APIs inside `registerHooks(...)`.
 ### Typical module pattern
 
 ```lua
-function internal.RegisterHooks(host, store)
+local function registerHooks(host, store)
     lib.hooks.Wrap("GetEligibleLootNames", function(base, ...)
         local result = base(...)
         if host.isEnabled() and store.read("FeatureEnabled") then
@@ -445,24 +453,25 @@ function internal.RegisterHooks(host, store)
 end
 
 local PLUGIN_GUID = _PLUGIN.guid
+local data = import("mods/data.lua")
+local ui = import("mods/ui.lua").bind(data)
 
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = MODULE_ID,
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
+    registerHooks = registerHooks,
+    drawTab = ui.drawTab,
 })
 host.tryActivate()
 ```
 
-When `host.tryActivate()` runs with `owner` and `registerHooks`, activation runs the registration pass and deactivates hooks omitted by a later pass for the same owner.
+When `host.tryActivate()` runs with `registerHooks`, activation runs the registration pass and deactivates hooks omitted by a later pass for the same `pluginGuid`.
 
 ## `lib.overlays`
 
@@ -510,7 +519,7 @@ registerOverlays = function(overlays, host, store)
 end
 ```
 
-Retained element names are local to the module owner and do not collide across modules.
+Retained element names are local to the module's `pluginGuid` runtime slot and do not collide across modules.
 
 ### `overlays.createLine(name, spec)`
 
@@ -699,7 +708,8 @@ Enabled/debug transitions, startup mutation sync, and session commit/resync are 
 
 Initializes standalone module hosting and returns window/menu-bar renderers.
 
-Useful when the module is not framework-hosted.
+Call this after successful module activation. It is safe for coordinated modules;
+the returned runtime suppresses its window/menu when a coordinator is registered.
 
 `pluginGuid` must be the same plugin guid passed to `lib.createModule(...)`.
 
@@ -719,6 +729,27 @@ Behavior:
   - `Resync Session`
 - then calls `moduleHost.drawTab(...)`
 - commits dirty staged state through `moduleHost.commitIfDirty()`
+
+### `lib.standaloneUiBridge(pluginGuid)`
+
+Returns stable no-op-safe callbacks for module-owned ROM GUI registration.
+
+Use this when a module needs its own `rom.gui.add_imgui(...)` and
+`rom.gui.add_to_menu_bar(...)` callsites to remain in `main.lua`, while Lib owns
+the reload-sensitive standalone runtime pointer.
+
+```lua
+local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
+
+local function registerGui()
+    rom.gui.add_imgui(standaloneUi.renderWindow)
+    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
+end
+```
+
+The bridge late-reads the current runtime installed by
+`lib.standaloneHost(pluginGuid)`. If no runtime exists yet, the callbacks return
+without error.
 
 ### `lib.getLiveModuleHost(pluginGuid)`
 

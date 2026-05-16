@@ -158,8 +158,6 @@ local lib = {}
 ---| fun(host: AdamantModpackLib.AuthorHost, store: AdamantModpackLib.ManagedStore)
 
 ---@class AdamantModpackLib.ModuleCreateOpts
---- Persistent module owner used for structural hot-reload tracking and hook refresh ownership.
----@field owner table
 ---@field pluginGuid string Plugin guid captured at module file load time.
 ---@field config table Module config table.
 ---@field definition AdamantModpackLib.ModuleDefinition Raw module definition.
@@ -243,7 +241,7 @@ local lib = {}
 ---@field setElement AdamantModpackLib.MutationPlanFn
 
 ---@class AdamantModpackLib.IntegrationProvider
----@field providerId string
+---@field providerId string Public provider identity returned to integration consumers.
 ---@field api table
 
 ---@class AdamantModpackLib.GameObjectApi
@@ -432,19 +430,19 @@ end
 lib.integrations = {}
 
 ---@param id string
----@param providerId string
+---@param providerId string Public provider identity, independent from module lifecycle ownership.
 ---@param api table
 ---@return table api
 function lib.integrations.register(id, providerId, api)
 end
 
 ---@param id string
----@param providerId string
+---@param providerId string Public provider identity.
 ---@return boolean removed
 function lib.integrations.unregister(id, providerId)
 end
 
----@param providerId string
+---@param providerId string Public provider identity.
 ---@return integer count
 function lib.integrations.unregisterProvider(providerId)
 end
@@ -876,6 +874,11 @@ end
 ---@param pluginGuid string Plugin guid used when creating the module host.
 ---@return AdamantModpackLib.StandaloneRuntime runtime
 function lib.standaloneHost(pluginGuid)
+end
+
+---@param pluginGuid string Plugin guid used when creating the module host.
+---@return AdamantModpackLib.StandaloneRuntime bridge
+function lib.standaloneUiBridge(pluginGuid)
 end
 
 ---@param pluginGuid string?

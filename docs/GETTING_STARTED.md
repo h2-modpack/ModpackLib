@@ -65,8 +65,8 @@ If you ignore that boundary, the module will still often "work", but you will cr
 `lib.createModule(...)` owns the normal construction pipeline so store/session
 ownership stays paired. Use the lower-level construction functions only when the
 module needs custom setup.
-The same `owner` table is used for structural hot-reload tracking and hook
-refresh ownership.
+`pluginGuid` is the stable lifecycle identity. Lib owns the internal per-plugin
+runtime state for structural hot-reload tracking and hook refresh ownership.
 
 ## File Roles
 
@@ -99,8 +99,8 @@ Use this file to declare module data. UI belongs in `ui.lua`; gameplay behavior 
 
 Owns immediate-mode UI:
 
-- `internal.DrawTab(imgui, session, host)`
-- optional `internal.DrawQuickContent(imgui, session, host)`
+- `drawTab(imgui, session, host)`
+- optional `drawQuickContent(imgui, session, host)`
 
 This code should read and write staged values through the author-facing `session` it receives from the host.
 
@@ -108,11 +108,11 @@ This code should read and write staged values through the author-facing `session
 
 Owns gameplay and mutation behavior:
 
-- `internal.RegisterHooks(host, store)`
-- optional `internal.BuildPatchPlan(...)`
+- `registerHooks(host, store)`
+- optional `buildPatchPlan(...)`
 
 This code should read persisted state through the `store` passed to
-`RegisterHooks(...)`, patch mutation callbacks, or narrower access/read closures
+`registerHooks(...)`, patch mutation callbacks, or narrower access/read closures
 derived from that store.
 
 ## First Module Checklist
@@ -124,8 +124,11 @@ Start with the template, then fill in these pieces in order.
 At minimum:
 
 ```lua
+local data = import("mods/data.lua")
+local logic = import("mods/logic.lua").bind(data)
+local ui = import("mods/ui.lua").bind(data)
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
@@ -148,7 +151,6 @@ modules:
 
 ```lua
 local host, store, err = lib.tryCreateModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
@@ -186,7 +188,6 @@ Then attach it to the module definition:
 
 ```lua
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
@@ -219,18 +220,17 @@ hashes, declare `stage = false, hash = false` and use
 
 ```lua
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = "ExampleModule",
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerHooks = logic.registerHooks,
+    drawTab = ui.drawTab,
+    drawQuickContent = ui.drawQuickContent,
 })
 host.tryActivate()
 ```
@@ -243,14 +243,16 @@ The returned store is kept only when gameplay logic needs runtime reads.
 Example:
 
 ```lua
-function internal.DrawTab(ui, session, host)
+local MODE_VALUES = { "Vanilla", "Chaos" }
+
+local function drawTab(ui, session, host)
     lib.widgets.checkbox(ui, session, "FeatureEnabled", {
         label = "Enable Feature",
     })
 
     lib.widgets.dropdown(ui, session, "Mode", {
         label = "Mode",
-        values = internal.MODE_VALUES,
+        values = MODE_VALUES,
         controlWidth = 180,
     })
 end
@@ -285,10 +287,10 @@ naturally expressed by the current patch-plan surface, add a patch-plan
 operation instead of bypassing the tracked lifecycle.
 
 If the module installs runtime hooks, declare them through ownerless `lib.hooks.*`
-calls from `internal.RegisterHooks(...)`:
+calls from `registerHooks(...)`:
 
 ```lua
-function internal.RegisterHooks(host, store)
+local function registerHooks(host, store)
     lib.hooks.Wrap("SomeGameFunction", function(base, ...)
         local result = base(...)
 
@@ -304,20 +306,23 @@ end
 ### 6. Create the module in `main.lua`
 
 ```lua
+local data = import("mods/data.lua")
+local logic = import("mods/logic.lua").bind(data)
+local ui = import("mods/ui.lua").bind(data)
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = MODULE_ID,
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
-    registerPatchMutation = internal.BuildPatchPlan,
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerPatchMutation = logic.buildPatchPlan,
+    registerHooks = logic.registerHooks,
+    drawTab = ui.drawTab,
+    drawQuickContent = ui.drawQuickContent,
 })
 host.tryActivate()
 ```
@@ -344,13 +349,15 @@ If the module is not coordinated:
 
 ```lua
 local PLUGIN_GUID = _PLUGIN.guid
-internal.standaloneUi = lib.standaloneHost(PLUGIN_GUID)
+local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
+
+local function registerGui()
+    rom.gui.add_imgui(standaloneUi.renderWindow)
+    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
+end
 ```
 
-Then wire:
-
-- `internal.standaloneUi.renderWindow()` into `rom.gui.add_imgui(...)`
-- `internal.standaloneUi.addMenuBar()` into `rom.gui.add_to_menu_bar(...)`
+Then call `lib.standaloneHost(PLUGIN_GUID)` after successful `host.tryActivate()`.
 
 Standalone hosting automatically suppresses itself when the module is coordinated.
 
@@ -439,7 +446,7 @@ Keep UI and game mutation separate. UI edits state; logic applies state.
 
 ### Putting UI outside draw functions
 
-Author UI through draw functions such as `internal.DrawTab(ui, session, host)`.
+Author UI through draw functions such as `drawTab(ui, session, host)`.
 
 ## LuaLS Setup
 
@@ -450,16 +457,17 @@ The template already shows the pattern that gives good editor inference:
 lib = mods["adamant-ModpackLib"]
 ```
 
-And for the module internal table:
+And for local callback declarations:
 
 ```lua
----@class TemplateModuleInternal
----@field DrawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
----@field DrawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
+---@type fun(imgui: table, session: AuthorSession, host: AuthorHost)
+local drawTab
+---@type fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
+local drawQuickContent
 ```
 
 That lets LuaLS infer the author `session` and `host` types through
-`internal.DrawTab = function(...)`.
+`local function drawTab(...)`.
 
 ## Recommended Next Reads
 

@@ -61,14 +61,14 @@ local function isEnabled(store, packId)
     return store.read("Enabled") == true
 end
 
-local function applyOnLoad(def, mutationBundle, authorHost, store)
+local function applyOnLoad(def, mutationBundle, authorHost, store, mutationKey)
     if isEnabled(store, def and def.modpack) then
-        local ok, err = mutation.apply(def, mutationBundle, authorHost, store)
+        local ok, err = mutation.applyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
         if not ok then
             return false, err
         end
     else
-        local ok, err = mutation.revertActive(def, authorHost, store)
+        local ok, err = mutation.revertActiveForPlugin(mutationKey)
         if not ok then
             return false, err
         end
@@ -94,7 +94,7 @@ local function resyncSession(def, session)
     return mismatches
 end
 
-local function commitSession(def, mutationBundle, settingsObserver, authorHost, store, session)
+local function commitSession(def, mutationBundle, settingsObserver, authorHost, store, session, mutationKey)
     if not session.isDirty() then
         return true, nil
     end
@@ -116,7 +116,7 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
         return notifySettingsCommitted(def, settingsObserver, authorHost, store, commitContext)
     end
 
-    local ok, err = mutation.reapply(def, mutationBundle, authorHost, store)
+    local ok, err = mutation.reapplyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     if ok then
         return notifySettingsCommitted(def, settingsObserver, authorHost, store, commitContext)
     end
@@ -124,7 +124,7 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
     session._restoreConfigSnapshot(snapshot)
     session._reloadFromConfig()
 
-    local rollbackOk, rollbackErr = mutation.reapply(def, mutationBundle, authorHost, store)
+    local rollbackOk, rollbackErr = mutation.reapplyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     if not rollbackOk then
         internal.violate("lifecycle.session_rollback_reapply_failed", "%s: session rollback reapply failed: %s",
             tostring(def.name or def.id or "module"),
@@ -135,17 +135,17 @@ local function commitSession(def, mutationBundle, settingsObserver, authorHost, 
     return false, err
 end
 
-local function setEnabled(def, mutationBundle, authorHost, store, enabled)
+local function setEnabled(def, mutationBundle, authorHost, store, enabled, mutationKey)
     local nextEnabled = enabled == true
     local current = store.read("Enabled") == true
 
     local ok, err
     if nextEnabled and current then
-        ok, err = mutation.reapply(def, mutationBundle, authorHost, store)
+        ok, err = mutation.reapplyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     elseif nextEnabled then
-        ok, err = mutation.apply(def, mutationBundle, authorHost, store)
+        ok, err = mutation.applyForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     elseif current then
-        ok, err = mutation.revert(def, mutationBundle, authorHost, store)
+        ok, err = mutation.revertForPlugin(mutationKey, def, mutationBundle, authorHost, store)
     else
         ok, err = true, nil
     end

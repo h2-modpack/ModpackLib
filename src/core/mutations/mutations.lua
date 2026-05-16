@@ -4,7 +4,6 @@ public.mutation = public.mutation or {}
 internal.mutation = internal.mutation or {}
 
 AdamantModpackLib_MutationState = AdamantModpackLib_MutationState or {
-    storeRuntime = setmetatable({}, { __mode = "k" }),
     moduleRuntime = {},
     planExecutors = setmetatable({}, { __mode = "k" }),
 }
@@ -276,30 +275,20 @@ end
 ---@class MutationInfo
 ---@field hasPatch boolean
 
-local function GetRuntimeKey(def, store)
-    if def and type(def.id) == "string" and def.id ~= "" then
-        local packId = type(def.modpack) == "string" and def.modpack or ""
-        return "module:" .. packId .. ":" .. def.id, mutationState.moduleRuntime
+local function GetRuntimeKey(pluginGuid)
+    if type(pluginGuid) ~= "string" or pluginGuid == "" then
+        internal.violate("mutation.invalid_runtime_key", "mutation lifecycle requires pluginGuid")
     end
-    if store then
-        return store, mutationState.storeRuntime
-    end
-    return nil, nil
+    return "plugin:" .. pluginGuid, mutationState.moduleRuntime
 end
 
-local function GetRuntimeState(def, store)
-    local key, bucket = GetRuntimeKey(def, store)
-    if not bucket then
-        return nil, nil, nil
-    end
+local function GetRuntimeState(pluginGuid)
+    local key, bucket = GetRuntimeKey(pluginGuid)
     return bucket[key], key, bucket
 end
 
-local function SetRuntimeState(def, store, state)
-    local key, bucket = GetRuntimeKey(def, store)
-    if not bucket then
-        return
-    end
+local function SetRuntimeState(pluginGuid, state)
+    local key, bucket = GetRuntimeKey(pluginGuid)
     if state == nil or state.plan == nil then
         bucket[key] = nil
         return
@@ -307,14 +296,14 @@ local function SetRuntimeState(def, store, state)
     bucket[key] = state
 end
 
-local function SetActiveMutationPlan(def, store, plan)
-    local runtime = GetRuntimeState(def, store) or {}
+local function SetActiveMutationPlan(pluginGuid, plan)
+    local runtime = GetRuntimeState(pluginGuid) or {}
     runtime.plan = plan
-    SetRuntimeState(def, store, runtime)
+    SetRuntimeState(pluginGuid, runtime)
 end
 
-local function CaptureActiveMutation(def, store)
-    local runtime = GetRuntimeState(def, store)
+local function CaptureActiveMutation(pluginGuid)
+    local runtime = GetRuntimeState(pluginGuid)
     if not runtime then
         return nil
     end
@@ -327,7 +316,7 @@ local function HasActiveMutationSnapshot(snapshot)
     return snapshot and snapshot.plan ~= nil
 end
 
-local function RestoreActiveMutation(def, store, snapshot)
+local function RestoreActiveMutation(pluginGuid, snapshot)
     if not HasActiveMutationSnapshot(snapshot) then
         return true, nil
     end
@@ -337,7 +326,7 @@ local function RestoreActiveMutation(def, store, snapshot)
         return false, errPlan
     end
 
-    SetActiveMutationPlan(def, store, snapshot.plan)
+    SetActiveMutationPlan(pluginGuid, snapshot.plan)
     return true, nil
 end
 
@@ -352,8 +341,8 @@ local function BuildMutationPlan(mutationBundle, authorHost, store)
     return plan
 end
 
-local function RevertActivePlan(def, store)
-    local runtime = GetRuntimeState(def, store)
+local function RevertActivePlan(pluginGuid)
+    local runtime = GetRuntimeState(pluginGuid)
     local activePlan = runtime and runtime.plan or nil
     if not activePlan then
         return true, nil, false
@@ -361,15 +350,15 @@ local function RevertActivePlan(def, store)
 
     local okPlan, errPlan = pcall(internal.mutation.revertPlan, activePlan)
     runtime.plan = nil
-    SetRuntimeState(def, store, runtime)
+    SetRuntimeState(pluginGuid, runtime)
     if not okPlan then
         return false, errPlan, true
     end
     return true, nil, true
 end
 
-local function RevertActiveMutation(def, store)
-    return RevertActivePlan(def, store)
+local function RevertActiveMutation(pluginGuid)
+    return RevertActivePlan(pluginGuid)
 end
 
 local function InferMutation(mutationBundle)
@@ -395,23 +384,25 @@ function internal.mutation.affectsRunData(mutationBundle)
 end
 
 --- Applies a module's current mutation lifecycle to live run data.
+---@param pluginGuid string Stable plugin guid owning the active mutation slot.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
 ---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle applied successfully.
 ---@return string|nil err Error message when the apply step fails.
-function internal.mutation.apply(def, mutationBundle, authorHost, store)
+local function ApplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
     local inferred, info = InferMutation(mutationBundle)
-    local previousMutation = CaptureActiveMutation(def, store)
+    local previousMutation = CaptureActiveMutation(pluginGuid)
+    local defLabel = def and (def.name or def.id) or "module"
 
-    local okActive, errActive = RevertActiveMutation(def, store)
+    local okActive, errActive = RevertActiveMutation(pluginGuid)
     if not okActive then
         return false, errActive
     end
 
     local function failApply(err)
         if HasActiveMutationSnapshot(previousMutation) then
-            local okRestore, restoreErr = RestoreActiveMutation(def, store, previousMutation)
+            local okRestore, restoreErr = RestoreActiveMutation(pluginGuid, previousMutation)
             if not okRestore then
                 return false, tostring(err) .. " (previous mutation restore failed: " .. tostring(restoreErr) .. ")"
             end
@@ -423,7 +414,7 @@ function internal.mutation.apply(def, mutationBundle, authorHost, store)
         if not internal.mutation.affectsRunData(mutationBundle) then
             return true, nil
         end
-        return failApply("no supported mutation lifecycle found")
+        return failApply(tostring(defLabel) .. ": no supported mutation lifecycle found")
     end
 
     if info.hasPatch then
@@ -437,44 +428,53 @@ function internal.mutation.apply(def, mutationBundle, authorHost, store)
             if not okApply then
                 return failApply(errApply)
             end
-            SetActiveMutationPlan(def, store, builtPlan)
+            SetActiveMutationPlan(pluginGuid, builtPlan)
         end
     end
 
     return true, nil
 end
 
+function internal.mutation.applyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    return ApplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
+end
+
 --- Reverts any active tracked mutation state without invoking fallback lifecycle hooks.
----@param def ModuleDefinition Module definition declaring mutation behavior.
----@param store ManagedStore|nil Managed module store associated with the definition.
+---@param pluginGuid string Stable plugin guid owning the active mutation slot.
 ---@return boolean ok True when active mutation state was absent or reverted successfully.
 ---@return string|nil err Error message when active cleanup fails.
-function internal.mutation.revertActive(def, _, store)
-    local ok, err = RevertActiveMutation(def, store)
+local function RevertActive(pluginGuid)
+    local ok, err = RevertActiveMutation(pluginGuid)
     return ok, err
 end
 
+function internal.mutation.revertActiveForPlugin(pluginGuid)
+    return RevertActive(pluginGuid)
+end
+
 --- Reverts a module's current mutation lifecycle from live run data.
+---@param pluginGuid string Stable plugin guid owning the active mutation slot.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
 ---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reverted successfully.
 ---@return string|nil err Error message when the revert step fails.
-function internal.mutation.revert(def, mutationBundle, _, store)
+local function RevertMutation(pluginGuid, def, mutationBundle)
     local inferred, info = InferMutation(mutationBundle)
+    local defLabel = def and (def.name or def.id) or "module"
     if not inferred then
-        local okActive, errActive, didActive = RevertActiveMutation(def, store)
+        local okActive, errActive, didActive = RevertActiveMutation(pluginGuid)
         if not okActive then
             return false, errActive
         end
         if didActive or not internal.mutation.affectsRunData(mutationBundle) then
             return true, nil
         end
-        return false, "no supported mutation lifecycle found"
+        return false, tostring(defLabel) .. ": no supported mutation lifecycle found"
     end
 
     if info.hasPatch then
-        local okPlan, errPlan = RevertActivePlan(def, store)
+        local okPlan, errPlan = RevertActivePlan(pluginGuid)
         if not okPlan then
             return false, errPlan
         end
@@ -483,22 +483,31 @@ function internal.mutation.revert(def, mutationBundle, _, store)
     return true, nil
 end
 
+function internal.mutation.revertForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    return RevertMutation(pluginGuid, def, mutationBundle, authorHost, store)
+end
+
 --- Reverts and reapplies a module's mutation lifecycle.
+---@param pluginGuid string Stable plugin guid owning the active mutation slot.
 ---@param def ModuleDefinition Module definition declaring mutation behavior.
 ---@param mutationBundle table|nil Module mutation callbacks.
 ---@param store ManagedStore|nil Managed module store associated with the definition.
 ---@return boolean ok True when the mutation lifecycle reapplied successfully.
 ---@return string|nil err Error message when the reapply step fails.
-function internal.mutation.reapply(def, mutationBundle, authorHost, store)
-    local okRevert, errRevert = internal.mutation.revert(def, mutationBundle, authorHost, store)
+local function ReapplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
+    local okRevert, errRevert = RevertMutation(pluginGuid, def, mutationBundle, authorHost, store)
     if not okRevert then
         return false, errRevert
     end
 
-    local okApply, errApply = internal.mutation.apply(def, mutationBundle, authorHost, store)
+    local okApply, errApply = ApplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
     if not okApply then
         return false, errApply
     end
 
     return true, nil
+end
+
+function internal.mutation.reapplyForPlugin(pluginGuid, def, mutationBundle, authorHost, store)
+    return ReapplyMutation(pluginGuid, def, mutationBundle, authorHost, store)
 end

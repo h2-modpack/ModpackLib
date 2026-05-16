@@ -6,6 +6,9 @@ It covers how `adamant-ModpackLib`, `adamant-ModpackFramework`, coordinator shel
 
 For the raw behavior of `SGG_Modding-ReLoad`, `SGG_Modding-ModUtil`, and `SGG_Modding-Chalk`, read [RELOAD_MODUTIL_CHALK_REFERENCE.md](RELOAD_MODUTIL_CHALK_REFERENCE.md) first.
 
+For the proposed next-generation host runtime transaction design, read
+[HOST_RUNTIME_SYNC_DESIGN.md](HOST_RUNTIME_SYNC_DESIGN.md).
+
 ## Goals
 
 - keep normal player sessions safe without requiring code edits
@@ -30,7 +33,6 @@ The stack deliberately stores reload-sensitive state on `_G` tables:
 
 - `AdamantModpackLib_Internal`
 - `AdamantModpackFramework_Internal`
-- each module's `RunDirector*_Internal` table
 
 These tables are initialized with `X = X or {}` so they survive a file reload in the same game process.
 
@@ -44,11 +46,15 @@ Safe to rebuild on every module `init`:
 
 Expected to persist across reloads:
 - Lib coordinator registrations
-- Lib hook registries keyed by persistent module owner tables
+- Lib per-plugin module runtime slots keyed by `pluginGuid`
+- Lib hook registries owned by those per-plugin runtime slots
 - Framework pack registry and stable GUI callbacks
-- module-local `MODULE_ANCHOR` tables passed as `owner`
+- module-owned ROM GUI callbacks that call Lib bridge functions from
+  `lib.standaloneUiBridge(pluginGuid)`
 
-Do not replace the persistent module owner table during reload. Replacing it breaks hook ownership, mutation tracking, and any live closures that intentionally point at the persistent owner.
+Modules pass `pluginGuid` as their lifecycle identity. Lib owns the internal
+runtime slot used for structural hot-reload tracking, hook refresh ownership,
+overlay ownership, integration refresh, mutation runtime, and live-host lookup.
 
 ## Layer Responsibilities
 
@@ -100,7 +106,7 @@ Modules own their local rebuild:
 - keep `chalk`, `reload`, and raw config local to `main.lua`
 - keep persisted runtime reads on `store`
 - keep staged UI edits on the author-facing `session`
-- declare runtime hooks from `internal.RegisterHooks(host, store)`
+- declare runtime hooks from a local or imported `registerHooks(host, store)` callback
 - declare retained overlays from `registerOverlays(overlays, host, store)`
 
 ## Bootstrap Pattern
@@ -136,8 +142,8 @@ The important part is the split:
 During module creation and activation:
 - the module host closes over the current `definition`, `store`, and `session`
 - `host.tryActivate()` publishes the live host
-- Lib refreshes that owner's hook registrations; absent hook registrations for that owner are deactivated
-- Lib refreshes integration registrations under required `definition.id`; absent integration providers for that module id are removed
+- Lib refreshes hook registrations for the module's `pluginGuid`; absent hook registrations for that module are deactivated
+- Lib refreshes integration registrations under the module's `pluginGuid`; absent integration providers for that module are removed
 - if the coordinator for `definition.modpack` is already registered, Lib immediately syncs live mutation state
 
 That means one coordinated module reload refreshes its live runtime behavior immediately without forcing a pack rebuild.
@@ -184,14 +190,13 @@ Supported public hook entrypoints:
 - `lib.hooks.Context.Wrap`
 
 The model is:
-- use a persistent owner table, typically the module `MODULE_ANCHOR`
 - register hook sites from `registerHooks(host, store)`
-- pass `owner` and `registerHooks` into `lib.createModule(...)`
+- pass `pluginGuid` and `registerHooks` into `lib.createModule(...)`
 - call `host.tryActivate()` after construction
 - Lib runs the full registration pass during module activation
 
 Behavior:
-- the same owner/path/key updates the live handler and keeps one active wrapper
+- the same plugin-guid/path/key updates the live handler and keeps one active wrapper
 - function overrides dispatch through a stable wrapper
 - omitted wrap and context-wrap registrations become inert
 - omitted override registrations are restored
@@ -224,7 +229,7 @@ implementation reloads.
 
 Important properties:
 - active tracked mutation state survives store recreation during module reload
-- active state is keyed by stable module identity when available
+- active module-host state is keyed by `pluginGuid`
 - host startup sync synchronizes live mutation state to the module's effective enabled state
 - if a module is disabled on reload, tracked active mutation state is reverted
 
@@ -306,7 +311,7 @@ coordinated path, use a full reload.
 - recreate `definition`, `store`, `session`, and the Lib-created live host in `init`
 - keep `session` local to `main.lua`; draw callbacks receive the restricted author session through the host
 - register runtime hooks through `registerHooks(host, store)` and ownerless `lib.hooks.*`
-- pass `owner` and `registerHooks` to `lib.createModule(...)` when the module owns runtime hooks
+- pass `pluginGuid` and `registerHooks` to `lib.createModule(...)` when the module owns runtime hooks
 - call `host.tryActivate()` after construction
 - keep stable GUI callbacks outside `init`
 - late-read current framework or module state from those stable callbacks when a stale closure would matter

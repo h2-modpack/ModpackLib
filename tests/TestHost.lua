@@ -17,7 +17,6 @@ end
 local function createActivatedHost(pluginGuid, opts, activationOpts)
     activationOpts = activationOpts or {}
     opts.pluginGuid = pluginGuid
-    opts.owner = activationOpts.owner
     opts.registerHooks = activationOpts.registerHooks
     opts.registerIntegrations = activationOpts.registerIntegrations
     local host, authorHost = AdamantModpackLib_Internal.moduleHost.create(opts)
@@ -347,10 +346,9 @@ function TestHost:testCreateModuleHostSkipsImmediateCoordinatedSyncWhenFramework
 
     local applyCalls = 0
 
-    local owner = {
-        _definitionStructuralFingerprint = definition._structuralFingerprint,
-    }
-    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(owner, {
+    local runtime = AdamantModpackLib_Internal.moduleRuntime.get("reload-pack.ReloadHost")
+    runtime.definitionState._definitionStructuralFingerprint = definition._structuralFingerprint
+    local prepared = AdamantModpackLib_Internal.moduleHost.prepareDefinition(runtime.definitionState, {
         modpack = packId,
         id = "ReloadHost",
         name = "Reload Host",

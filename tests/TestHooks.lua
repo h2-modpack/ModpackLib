@@ -89,7 +89,7 @@ local function restorePathMock()
     savedRomModutil = nil
 end
 
-local function createHostWithHooks(owner, registerHooks, activationOpts)
+local function createHostWithHooks(pluginGuid, registerHooks, activationOpts)
     activationOpts = activationOpts or {}
     local store = {
         read = function()
@@ -112,8 +112,7 @@ local function createHostWithHooks(owner, registerHooks, activationOpts)
         end,
     }
     local host = AdamantModpackLib_Internal.moduleHost.create({
-        owner = owner,
-        pluginGuid = "hook-test-module",
+        pluginGuid = pluginGuid,
         definition = AdamantModpackLib_Internal.moduleHost.prepareDefinition({}, { id = "HookTest", name = "Hook Test", storage = {} }),
         store = store,
         session = session,
@@ -162,12 +161,12 @@ end
 
 function TestHooks:testWrapRefreshOmissionFallsBackToBase()
     installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-wrap-refresh"
     _G.AdamantHookTestWrapRefresh = function(value)
         return "base:" .. value
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Wrap("AdamantHookTestWrapRefresh", function(base, value)
             return "wrapped:" .. base(value)
         end)
@@ -175,7 +174,7 @@ function TestHooks:testWrapRefreshOmissionFallsBackToBase()
 
     lu.assertEquals(_G.AdamantHookTestWrapRefresh("x"), "wrapped:base:x")
 
-    createHostWithHooks(owner, function() end)
+    createHostWithHooks(pluginGuid, function() end)
 
     lu.assertEquals(_G.AdamantHookTestWrapRefresh("x"), "base:x")
     restorePathMock()
@@ -183,12 +182,12 @@ end
 
 function TestHooks:testMissingRegisterHooksRefreshRemovesPreviousHooks()
     installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-missing-register-hooks"
     _G.AdamantHookTestMissingRegisterHooks = function(value)
         return "base:" .. value
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Wrap("AdamantHookTestMissingRegisterHooks", function(base, value)
             return "wrapped:" .. base(value)
         end)
@@ -196,7 +195,7 @@ function TestHooks:testMissingRegisterHooksRefreshRemovesPreviousHooks()
 
     lu.assertEquals(_G.AdamantHookTestMissingRegisterHooks("x"), "wrapped:base:x")
 
-    createHostWithHooks(owner, nil)
+    createHostWithHooks(pluginGuid, nil)
 
     lu.assertEquals(_G.AdamantHookTestMissingRegisterHooks("x"), "base:x")
     restorePathMock()
@@ -204,12 +203,12 @@ end
 
 function TestHooks:testRegisterHooksCanUseOwnerlessHookApi()
     installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-ownerless-wrap"
     _G.AdamantHookTestOwnerlessWrap = function(value)
         return "base:" .. value
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Wrap("AdamantHookTestOwnerlessWrap", function(base, value)
             return "scoped:" .. base(value)
         end)
@@ -250,12 +249,12 @@ end
 
 function TestHooks:testOverrideRefreshOmissionRestoresOriginal()
     local counts = installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-override-refresh"
     _G.AdamantHookTestOverrideRefresh = function()
         return "base"
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Override("AdamantHookTestOverrideRefresh", function()
             return "override"
         end)
@@ -263,7 +262,7 @@ function TestHooks:testOverrideRefreshOmissionRestoresOriginal()
 
     lu.assertEquals(_G.AdamantHookTestOverrideRefresh(), "override")
 
-    createHostWithHooks(owner, function() end)
+    createHostWithHooks(pluginGuid, function() end)
 
     lu.assertEquals(counts.restore, 1)
     lu.assertEquals(_G.AdamantHookTestOverrideRefresh(), "base")
@@ -295,20 +294,20 @@ end
 
 function TestHooks:testContextWrapRefreshOmissionBecomesInert()
     installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-context-refresh"
     local observed = {}
 
     _G.AdamantHookTestContextRefresh = function()
         table.insert(observed, "base")
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Context.Wrap("AdamantHookTestContextRefresh", function()
             table.insert(observed, "context")
         end)
     end)
 
-    createHostWithHooks(owner, function() end)
+    createHostWithHooks(pluginGuid, function() end)
     _G.AdamantHookTestContextRefresh()
 
     lu.assertEquals(observed, { "base" })
@@ -317,7 +316,7 @@ end
 
 function TestHooks:testRefreshFailureKeepsPreviousLiveHookState()
     local counts = installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-refresh-failure"
     local observed = {}
 
     _G.AdamantHookTestFailureWrap = function(value)
@@ -333,7 +332,7 @@ function TestHooks:testRefreshFailureKeepsPreviousLiveHookState()
         return "new-base:" .. value
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Wrap("AdamantHookTestFailureWrap", function(base, value)
             return "first:" .. base(value)
         end)
@@ -346,7 +345,7 @@ function TestHooks:testRefreshFailureKeepsPreviousLiveHookState()
     end)
 
     local ok = pcall(function()
-        createHostWithHooks(owner, function()
+        createHostWithHooks(pluginGuid, function()
             lib.hooks.Wrap("AdamantHookTestFailureWrap", function(base, value)
                 return "second:" .. base(value)
             end)
@@ -384,12 +383,12 @@ end
 
 function TestHooks:testActivationFailureAfterHookRefreshRestoresPreviousLiveHookState()
     installPathMock()
-    local owner = {}
+    local pluginGuid = "hook-test-activation-rollback"
     _G.AdamantHookTestActivationRollback = function(value)
         return "base:" .. value
     end
 
-    createHostWithHooks(owner, function()
+    createHostWithHooks(pluginGuid, function()
         lib.hooks.Wrap("AdamantHookTestActivationRollback", function(base, value)
             return "first:" .. base(value)
         end)
@@ -398,7 +397,7 @@ function TestHooks:testActivationFailureAfterHookRefreshRestoresPreviousLiveHook
     lu.assertEquals(_G.AdamantHookTestActivationRollback("x"), "first:base:x")
 
     local ok = pcall(function()
-        createHostWithHooks(owner, function()
+        createHostWithHooks(pluginGuid, function()
             lib.hooks.Wrap("AdamantHookTestActivationRollback", function(base, value)
                 return "second:" .. base(value)
             end)
@@ -546,7 +545,7 @@ function TestHooks:testCreateModuleHostHotReloadReplacesCoordinatedRuntimeState(
     lu.assertEquals(target.Value, "second")
 
     lib.coordinator.register(packId, nil)
-    AdamantModpackLib_Internal.mutation.revert({
+    AdamantModpackLib_Internal.mutation.revertForPlugin("hook-reload-pack.Alpha", {
         modpack = packId,
         id = "Alpha",
         name = "Alpha",

@@ -6,6 +6,7 @@ function TestIntegrations:setUp()
     lib.integrations.unregisterProvider("ProviderA")
     lib.integrations.unregisterProvider("ProviderB")
     lib.integrations.unregisterProvider("ProviderC")
+    lib.integrations.unregisterProvider("LifecycleProvider")
 end
 
 function TestIntegrations:tearDown()
@@ -13,6 +14,7 @@ function TestIntegrations:tearDown()
     lib.integrations.unregisterProvider("ProviderB")
     lib.integrations.unregisterProvider("ProviderC")
     lib.integrations.unregisterProvider("RefreshProvider")
+    lib.integrations.unregisterProvider("LifecycleProvider")
 end
 
 function TestIntegrations:testRegisterAndGetIntegration()
@@ -185,6 +187,22 @@ function TestIntegrations:testRefreshRemovesOmittedProviderRegistrations()
     lu.assertEquals(providerId, "RefreshProvider")
 
     lib.integrations.unregisterProvider("RefreshProvider")
+end
+
+function TestIntegrations:testRefreshOwnerCanDifferFromProviderId()
+    local refreshOwnerId = "plugin-guid.integration-owner"
+
+    AdamantModpackLib_Internal.integrations.refresh(refreshOwnerId, function()
+        lib.integrations.register("test.refresh.lifecycle-owner", "LifecycleProvider", { value = 1 })
+    end)
+
+    local found, providerId = lib.integrations.get("test.refresh.lifecycle-owner")
+    lu.assertEquals(found.value, 1)
+    lu.assertEquals(providerId, "LifecycleProvider")
+
+    AdamantModpackLib_Internal.integrations.refresh(refreshOwnerId, function() end)
+
+    lu.assertNil(lib.integrations.get("test.refresh.lifecycle-owner"))
 end
 
 function TestIntegrations:testFailedRefreshKeepsPreviousProviderRegistrations()

@@ -17,8 +17,11 @@ The library is designed around immediate-mode UI. Module authors write normal
 draw functions, then expose them through a module host:
 
 ```lua
+local data = import("mods/data.lua")
+local logic = import("mods/logic.lua").bind(data)
+local ui = import("mods/ui.lua").bind(data)
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
@@ -26,15 +29,16 @@ local host = lib.createModule({
         name = "Example Module",
         ...
     },
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerHooks = logic.registerHooks,
+    drawTab = ui.drawTab,
+    drawQuickContent = ui.drawQuickContent,
 })
 host.tryActivate()
 ```
 
-`owner` is used for structural hot-reload tracking and hook refresh ownership.
-Pass `registerHooks` when the module uses `lib.hooks.*`.
+`pluginGuid` is the stable lifecycle identity; Lib owns the internal hot-reload
+state for hooks, overlays, integrations, mutation runtime, and structural reload
+tracking. Pass `registerHooks` when the module uses `lib.hooks.*`.
 `host.tryActivate()` registers the live host for coordinated discovery and standalone hosting.
 Every module definition must declare a stable `id` and display `name`; `modpack`
 is optional and marks modules that participate in Framework coordination.
@@ -59,6 +63,8 @@ is optional and marks modules that participate in Framework coordination.
   Stack hot-reload contract for Lib, Framework, Core, and coordinated modules.
 - [docs/MIGRATING_MUTATIONS.md](docs/MIGRATING_MUTATIONS.md)
   Migration notes for the patch-only runtime mutation API.
+- [docs/MIGRATING_PLUGIN_GUID_RUNTIME.md](docs/MIGRATING_PLUGIN_GUID_RUNTIME.md)
+  Migration notes for ownerless module lifecycle identity.
 - [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
   Accepted architecture boundaries and runtime constraints.
 - [docs/FUTURE_RISKS.md](docs/FUTURE_RISKS.md)
@@ -84,6 +90,7 @@ Common top-level helpers:
 - `lib.createModule(...)`
 - `lib.tryCreateModule(...)`
 - `lib.standaloneHost(...)`
+- `lib.standaloneUiBridge(...)`
 - `lib.getLiveModuleHost(...)`
 - `lib.coordinator.isRegistered(...)`
 - `lib.resetStorageToDefaults(...)`

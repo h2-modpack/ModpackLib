@@ -21,7 +21,7 @@ overlays:
 This is more machinery than integrations appear to need at first glance, because
 integration registration mostly updates Lib-owned registry tables. A proposed
 simplification was to remove the activation-level integration transaction and
-make `internal.integrations.refresh(providerId, register)` locally rollback only
+make `internal.integrations.refresh(refreshOwnerId, register)` locally rollback only
 registrations performed during that refresh.
 
 That local rollback shape is coherent by itself:

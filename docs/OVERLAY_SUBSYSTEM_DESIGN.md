@@ -35,12 +35,13 @@ registerOverlays = function(overlays, host, store)
 end
 ```
 
-`registerOverlays` is called during host activation. It uses the same stable module owner as hooks and
-integrations. Overlay activation participates in host activation rollback.
+`registerOverlays` is called during host activation. It uses the same Lib-owned
+per-plugin runtime slot as hooks and integrations. Overlay activation
+participates in host activation rollback.
 
 ## Owner Scoping
 
-Overlay element names are local to the owner:
+Overlay element names are local to the module `pluginGuid` runtime slot:
 
 ```lua
 overlays.createLine("summary.igt", spec)
@@ -49,7 +50,7 @@ overlays.createTable("runs", spec)
 
 Lib builds globally stable backing identifiers from:
 
-- Owner identity.
+- Module runtime identity.
 - Local overlay name.
 - Retained table row slot, when applicable.
 - Column key, when applicable.
@@ -269,7 +270,7 @@ The implementation should not block a future `event.results` shape for multi-ret
 
 ## Hot Reload And Rollback
 
-Overlay refresh follows the same owner-refresh principle as hooks and integrations:
+Overlay refresh follows the same runtime-refresh principle as hooks and integrations:
 
 ```lua
 internal.overlays.refresh(owner, registerFn)

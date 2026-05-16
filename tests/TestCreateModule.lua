@@ -11,7 +11,6 @@ function TestCreateModule:tearDown()
 end
 
 function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
-    local owner = {}
     local callbackHost = nil
     local drawHost = nil
     local authorSchemaNode = nil
@@ -19,7 +18,6 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     local config = {}
 
     local host, store = lib.createModule({
-        owner = owner,
         pluginGuid = "test-create-module",
         config = config,
         definition = {
@@ -65,18 +63,15 @@ function TestCreateModule:testCreateModuleRunsCanonicalPipeline()
     lu.assertEquals(authorSchemaNode.alias, "Flag")
     lu.assertEquals(authorSchemaNode.type, "bool")
     lu.assertEquals(authorRowValue, 2)
-    lu.assertNil(owner.store)
-    lu.assertNil(owner.host)
-    lu.assertEquals(type(owner._definitionStructuralFingerprint), "string")
+    local runtime = AdamantModpackLib_Internal.moduleRuntime.get("test-create-module")
+    lu.assertEquals(type(runtime.definitionState._definitionStructuralFingerprint), "string")
 end
 
 function TestCreateModule:testCreateModulePassesRuntimeHandlesToHookRefresh()
-    local owner = {}
     local hookSawStore = false
     local hookSawHost = false
 
     local host, store = lib.createModule({
-        owner = owner,
         pluginGuid = "test-create-module-publish-store",
         config = {},
         definition = {
@@ -94,8 +89,6 @@ function TestCreateModule:testCreateModulePassesRuntimeHandlesToHookRefresh()
         drawTab = function() end,
     })
 
-    lu.assertNil(owner.store)
-    lu.assertNil(owner.host)
     lu.assertFalse(hookSawStore)
     host.tryActivate()
     lu.assertTrue(hookSawStore)
@@ -106,7 +99,6 @@ end
 
 function TestCreateModule:testCreateModuleReturnsOnlyAuthorHostSurface()
     local host = lib.createModule({
-        owner = {},
         pluginGuid = "test-create-module-author-surface",
         config = {},
         definition = {
@@ -132,7 +124,6 @@ end
 
 function TestCreateModule:testTryCreateModuleReturnsErrorAndLogsWarning()
     local host, store, err = lib.tryCreateModule({
-        owner = {},
         pluginGuid = "test-try-create-module-invalid",
         config = {},
         definition = {
@@ -152,7 +143,6 @@ end
 
 function TestCreateModule:testCreateModuleActivationIsSingleUse()
     local host = lib.createModule({
-        owner = {},
         pluginGuid = "test-create-module-single-activate",
         config = {},
         definition = {
@@ -170,9 +160,10 @@ function TestCreateModule:testCreateModuleActivationIsSingleUse()
     lu.assertStrContains(err, "already activated")
 end
 
-function TestCreateModule:testCreateModuleRequiresOwner()
-    lu.assertErrorMsgContains("owner is required", function()
+function TestCreateModule:testCreateModuleRejectsOwnerOption()
+    lu.assertErrorMsgContains("unknown option 'owner'", function()
         lib.createModule({
+            owner = {},
             pluginGuid = "test-create-module-hooks-no-owner",
             config = {},
             definition = {
@@ -187,7 +178,6 @@ end
 function TestCreateModule:testCreateModuleTreatsManualMutationAsUnknownOption()
     lu.assertErrorMsgContains("unknown option 'registerManualMutation'", function()
         lib.createModule({
-            owner = {},
             pluginGuid = "test-create-module-manual-mutation-unknown",
             config = {},
             definition = {
@@ -204,11 +194,8 @@ function TestCreateModule:testCreateModuleTreatsManualMutationAsUnknownOption()
 end
 
 function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceOnly()
-    local firstOwner = {}
-
     lib.createModule({
-        owner = firstOwner,
-        pluginGuid = "test-create-module-quick-content-stable-1",
+        pluginGuid = "test-create-module-quick-content-stable",
         config = {},
         definition = {
             modpack = "create-module-pack",
@@ -220,8 +207,7 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
     })
 
     lib.createModule({
-        owner = firstOwner,
-        pluginGuid = "test-create-module-quick-content-stable-2",
+        pluginGuid = "test-create-module-quick-content-stable",
         config = {},
         definition = {
             modpack = "create-module-pack",
@@ -232,13 +218,12 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
         drawQuickContent = function() end,
     })
 
-    lu.assertNil(firstOwner.requiresFullReload)
+    local firstRuntime = AdamantModpackLib_Internal.moduleRuntime.get("test-create-module-quick-content-stable")
+    lu.assertNil(firstRuntime.definitionState.requiresFullReload)
     lu.assertEquals(#Warnings, 0)
 
-    local secondOwner = {}
     lib.createModule({
-        owner = secondOwner,
-        pluginGuid = "test-create-module-quick-content-added-1",
+        pluginGuid = "test-create-module-quick-content-added",
         config = {},
         definition = {
             modpack = "create-module-pack",
@@ -249,8 +234,7 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
     })
 
     lib.createModule({
-        owner = secondOwner,
-        pluginGuid = "test-create-module-quick-content-added-2",
+        pluginGuid = "test-create-module-quick-content-added",
         config = {},
         definition = {
             modpack = "create-module-pack",
@@ -261,7 +245,8 @@ function TestCreateModule:testCreateModuleFingerprintTracksQuickContentPresenceO
         drawQuickContent = function() end,
     })
 
-    lu.assertTrue(secondOwner.requiresFullReload)
+    local secondRuntime = AdamantModpackLib_Internal.moduleRuntime.get("test-create-module-quick-content-added")
+    lu.assertTrue(secondRuntime.definitionState.requiresFullReload)
     lu.assertEquals(#Warnings, 1)
     lu.assertStrContains(Warnings[1], "structural definition changed during hot reload")
 end

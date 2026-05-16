@@ -512,7 +512,7 @@ local function InjectBuiltInStorage(definition, label)
     end
 end
 
-function internal.moduleHost.prepareDefinition(owner, definition, structuralSurface, ...)
+function internal.moduleHost.prepareDefinition(structuralState, definition, structuralSurface, ...)
     if select("#", ...) ~= 0 then
         internal.violate(
             "definition.invalid_args",
@@ -520,8 +520,8 @@ function internal.moduleHost.prepareDefinition(owner, definition, structuralSurf
         )
     end
     structuralSurface = NormalizeStructuralSurface(structuralSurface)
-    if owner ~= nil and type(owner) ~= "table" then
-        internal.violate("definition.invalid_args", "prepareDefinition: owner must be a table when provided")
+    if structuralState ~= nil and type(structuralState) ~= "table" then
+        internal.violate("definition.invalid_args", "prepareDefinition: structuralState must be a table when provided")
     end
     if type(definition) ~= "table" then
         internal.violate("definition.invalid_args", "prepareDefinition: definition must be a table")
@@ -539,10 +539,10 @@ function internal.moduleHost.prepareDefinition(owner, definition, structuralSurf
     prepared._preparedDefinition = true
     prepared._structuralFingerprint = fingerprint
 
-    if owner then
-        local previousFingerprint = rawget(owner, "_definitionStructuralFingerprint")
+    if structuralState then
+        local previousFingerprint = rawget(structuralState, "_definitionStructuralFingerprint")
         if previousFingerprint ~= nil and previousFingerprint ~= fingerprint then
-            owner.requiresFullReload = true
+            structuralState.requiresFullReload = true
             if type(prepared.modpack) == "string" and public.coordinator.isRegistered(prepared.modpack) then
                 internal.pendingCoordinatorRebuilds[prepared] = {
                     kind = "structural_definition_changed",
@@ -555,7 +555,7 @@ function internal.moduleHost.prepareDefinition(owner, definition, structuralSurf
                     "structural definition changed during hot reload; full reload required")
             end
         end
-        owner._definitionStructuralFingerprint = fingerprint
+        structuralState._definitionStructuralFingerprint = fingerprint
     end
 
     return prepared

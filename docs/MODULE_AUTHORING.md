@@ -4,7 +4,7 @@ This guide describes the supported module contract in Lib:
 - namespaced public API
 - managed storage and explicit `session`
 - immediate-mode widgets
-- direct draw-function authoring through `internal.DrawTab(ui, session, host)`
+- direct draw-function authoring through `drawTab(ui, session, host)`
 
 ## Lib Surface
 
@@ -34,7 +34,7 @@ Use the namespaced API directly.
 Typical coordinated module:
 
 ```lua
-function internal.DrawTab(ui, session, host)
+local function drawTab(ui, session, host)
     lib.widgets.checkbox(ui, session, "EnabledFlag", {
         label = "Enabled",
     })
@@ -46,7 +46,7 @@ function internal.DrawTab(ui, session, host)
     })
 end
 
-function internal.DrawQuickContent(ui, session, host)
+local function drawQuickContent(ui, session, host)
     lib.widgets.dropdown(ui, session, "Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos" },
@@ -54,8 +54,13 @@ function internal.DrawQuickContent(ui, session, host)
     })
 end
 
+local function registerHooks(host, store)
+    lib.hooks.Wrap("SomeGameFunction", function(base, ...)
+        return base(...)
+    end)
+end
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
@@ -69,20 +74,22 @@ local host = lib.createModule({
             { type = "string", alias = "FilterText", persist = false, hash = false, default = "", maxLen = 64 },
         },
     },
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerHooks = registerHooks,
+    drawTab = drawTab,
+    drawQuickContent = drawQuickContent,
 })
 host.tryActivate()
 ```
 
 This example assumes coordinated/framework hosting.
-For standalone-only modules, `DrawQuickContent` is optional and only matters if some external host uses it.
+For standalone-only modules, `drawQuickContent` is optional and only matters if some external host uses it.
 If the module does not register runtime hooks, omit `registerHooks`.
 
 `lib.createModule(...)` is the supported module construction path.
-For `createModule(...)`, `owner` is the single persistent owner for structural
-hot-reload tracking and hook refresh ownership.
+For `createModule(...)`, `pluginGuid` is the single stable lifecycle identity.
+Lib owns the internal per-plugin runtime state for structural hot-reload
+tracking, hook refresh ownership, overlays, integrations, mutation runtime, and
+live-host lookup.
 Call `host.tryActivate()` after construction. That activation step publishes the
 live host, registers hooks, overlays, integrations, and syncs initial runtime behavior.
 Pack-level orchestrators can use `lib.tryCreateModule(...)` and
@@ -92,12 +99,12 @@ construction stays separate from activation, and each `try*` helper only wraps
 one phase.
 When `registerHooks` is provided, Lib calls it as
 `registerHooks(host, store)`. Ownerless `lib.hooks.*` calls inside this
-callback are scoped to the module owner passed to `createModule`, so hook files
-do not need to know the persistent owner table. Modules that use shared runtime helper files
+callback are scoped to the module's `pluginGuid`, so hook files do not need to
+know or manage an owner token. Modules that use shared runtime helper files
 should pass the needed store or narrower access/read closures into those helpers:
 
 ```lua
-function internal.RegisterHooks(host, store)
+local function registerHooks(host, store)
     lib.hooks.Wrap("SomeGameFunction", function(base, ...)
         if not host.isEnabled() then
             return base(...)
@@ -310,9 +317,9 @@ Lib widgets cover common controls. Use raw ImGui for custom structure and layout
 
 Framework Quick Setup reads:
 - coordinator `renderQuickSetup(ctx)`
-- module `DrawQuickContent(ui, session, host)`
+- module `drawQuickContent(ui, session, host)`
 
-`DrawQuickContent` is a Framework Quick Setup hook.
+`drawQuickContent` is a Framework Quick Setup hook.
 
 ## Runtime Hooks
 
@@ -321,7 +328,7 @@ Modules that register ModUtil path hooks should do that through `lib.hooks.*`.
 Typical shape:
 
 ```lua
-function internal.RegisterHooks(host, store)
+local function registerHooks(host, store)
     lib.hooks.Wrap("GetEligibleLootNames", function(base, ...)
         local result = base(...)
         if host.isEnabled() and store.read("FeatureEnabled") then
@@ -331,28 +338,29 @@ function internal.RegisterHooks(host, store)
     end)
 end
 
+local data = import("mods/data.lua")
+local ui = import("mods/ui.lua").bind(data)
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = MODULE_ID,
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerHooks = registerHooks,
+    drawTab = ui.drawTab,
+    drawQuickContent = ui.drawQuickContent,
 })
 host.tryActivate()
 ```
 
 Rules:
-- use a persistent owner table such as the module `internal`
-- declare hook sites inside `RegisterHooks(host, store)`
+- declare hook sites inside `registerHooks(host, store)`
 - call `host.tryActivate()` after construction
-- use the keyed overload when one owner needs several hooks on the same path
+- use the keyed overload when one module needs several hooks on the same path
 
 ## Mutation Lifecycle
 
@@ -364,22 +372,24 @@ Supported mutation shape:
 Patch-plan example:
 
 ```lua
+local data = import("mods/data.lua")
+local ui = import("mods/ui.lua").bind(data)
+
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = MODULE_ID,
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
     registerPatchMutation = function(plan, host, store)
         plan:set(SomeTable, "Enabled", true)
         plan:appendUnique(SomeTable, "Pool", "NewEntry")
         host.logIf("Built patch plan")
     end,
-    drawTab = internal.DrawTab,
+    drawTab = ui.drawTab,
 })
 host.tryActivate()
 ```
@@ -420,47 +430,50 @@ For non-framework hosting, use:
 
 ```lua
 local PLUGIN_GUID = _PLUGIN.guid
+local data = import("mods/data.lua")
+local logic = import("mods/logic.lua").bind(data)
+local ui = import("mods/ui.lua").bind(data)
+local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
 
 local host = lib.createModule({
-    owner = internal,
     pluginGuid = PLUGIN_GUID,
     config = config,
     definition = {
         modpack = PACK_ID,
         id = "ExampleModule",
         name = "Example Module",
-        storage = internal.BuildStorage(),
+        storage = data.buildStorage(),
     },
-    registerHooks = internal.RegisterHooks,
-    drawTab = internal.DrawTab,
-    drawQuickContent = internal.DrawQuickContent,
+    registerHooks = logic.registerHooks,
+    drawTab = ui.drawTab,
+    drawQuickContent = ui.drawQuickContent,
 })
 host.tryActivate()
-
-local runtime = lib.standaloneHost(PLUGIN_GUID)
+lib.standaloneHost(PLUGIN_GUID)
 
 local function registerGui()
-    rom.gui.add_imgui(runtime.renderWindow)
-    rom.gui.add_to_menu_bar(runtime.addMenuBar)
+    rom.gui.add_imgui(standaloneUi.renderWindow)
+    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
 end
 ```
 
 Notes:
 - `lib.standaloneHost(...)` suppresses its window/menu when the module is coordinated
 - `lib.standaloneHost(...)` applies startup lifecycle state for non-coordinated modules
+- `lib.standaloneUiBridge(...)` keeps module-owned ROM GUI callsites stable while Lib owns the current runtime pointer
 - the standalone window includes built-in:
   - `Enabled`
   - `Debug Mode`
   - `Resync Session`
-- the standalone window renders `DrawTab`; Framework Quick Setup renders `DrawQuickContent`
+- the standalone window renders `drawTab`; Framework Quick Setup renders `drawQuickContent`
 
 ## Complete Example
 
 This is a minimal end-to-end module shape showing:
 - `main.lua`
 - storage
-- `DrawTab`
-- optional `DrawQuickContent`
+- `drawTab`
+- optional `drawQuickContent`
 - standalone wiring
 
 ```lua
@@ -481,22 +494,16 @@ local config = chalk.auto("config.lua")
 
 local PACK_ID = "example-pack"
 local PLUGIN_GUID = _PLUGIN.guid
----@class ExampleModuleInternal
----@field standaloneUi StandaloneRuntime|nil
----@field RegisterHooks fun(host: AuthorHost, store: ManagedStore)|nil
----@field DrawTab fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
----@field DrawQuickContent fun(imgui: table, session: AuthorSession, host: AuthorHost)|nil
-ExampleModule_Internal = ExampleModule_Internal or {}
----@type ExampleModuleInternal
-local internal = ExampleModule_Internal
+local standaloneUi = lib.standaloneUiBridge(PLUGIN_GUID)
 
-internal.standaloneUi = nil
+local drawTab
+local drawQuickContent
+local registerHooks
 
 local function init()
     import_as_fallback(rom.game)
 
     local host = lib.createModule({
-        owner = internal,
         pluginGuid = PLUGIN_GUID,
         config = config,
         definition = {
@@ -520,16 +527,16 @@ local function init()
                 },
             },
         },
-        registerHooks = internal.RegisterHooks,
-        drawTab = internal.DrawTab,
-        drawQuickContent = internal.DrawQuickContent,
+        registerHooks = registerHooks,
+        drawTab = drawTab,
+        drawQuickContent = drawQuickContent,
     })
     host.tryActivate()
 
-    internal.standaloneUi = lib.standaloneHost(PLUGIN_GUID)
+    lib.standaloneHost(PLUGIN_GUID)
 end
 
-function internal.DrawTab(ui, session, host)
+function drawTab(ui, session, host)
     lib.widgets.checkbox(ui, session, "FeatureEnabled", {
         label = "Enable Feature",
         tooltip = "Turns the feature logic on for this module.",
@@ -553,7 +560,7 @@ function internal.DrawTab(ui, session, host)
     })
 end
 
-function internal.DrawQuickContent(ui, session, host)
+function drawQuickContent(ui, session, host)
     lib.widgets.dropdown(ui, session, "Mode", {
         label = "Mode",
         values = { "Vanilla", "Chaos", "Custom" },
@@ -561,7 +568,7 @@ function internal.DrawQuickContent(ui, session, host)
     })
 end
 
-function internal.RegisterHooks(host, store)
+function registerHooks(host, store)
     lib.hooks.Wrap("SomeGameFunction", function(base, ...)
         if host.isEnabled() and store.read("FeatureEnabled") then
             -- Optional runtime behavior goes here.
@@ -573,17 +580,8 @@ end
 local loader = reload.auto_single()
 
 local function registerGui()
-    rom.gui.add_imgui(function()
-        if internal.standaloneUi and internal.standaloneUi.renderWindow then
-            internal.standaloneUi.renderWindow()
-        end
-    end)
-
-    rom.gui.add_to_menu_bar(function()
-        if internal.standaloneUi and internal.standaloneUi.addMenuBar then
-            internal.standaloneUi.addMenuBar()
-        end
-    end)
+    rom.gui.add_imgui(standaloneUi.renderWindow)
+    rom.gui.add_to_menu_bar(standaloneUi.addMenuBar)
 end
 
 modutil.once_loaded.game(function()
@@ -596,7 +594,8 @@ Notes on the example:
 - `store` is passed to runtime hooks and mutation callbacks
 - draw callbacks receive the restricted author session through the live host
 - `host.tryActivate()` owns live coordinated host registration
-- `internal.RegisterHooks(host, store)` is the normal place for `lib.hooks.*` declarations
-- `DrawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
-- `DrawQuickContent` is optional
+- `registerHooks(host, store)` is the normal place for `lib.hooks.*` declarations
+- `drawTab` uses raw ImGui for structure and `lib.widgets.*` for controls
+- `drawQuickContent` is optional
+- `standaloneUi` is a Lib bridge; the module still owns its ROM GUI registration callsites
 - packed widgets use the session or row handle passed to the draw path

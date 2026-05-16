@@ -9,13 +9,56 @@ local DEFAULT_WINDOW_WIDTH = 960
 local DEFAULT_WINDOW_HEIGHT = 720
 local fallbackHud = import 'core/standalone_host/private_fallback_hud.lua'
 
+local function validatePluginGuid(apiName, pluginGuid)
+    if type(pluginGuid) ~= "string" or pluginGuid == "" then
+        internal.violate("host.invalid_standalone_binding", "%s: pluginGuid is required", apiName)
+    end
+end
+
+local function getStandaloneRuntime(pluginGuid)
+    local runtimes = internal.standaloneRuntimes
+    if type(runtimes) ~= "table" then
+        return nil
+    end
+    local runtime = runtimes[pluginGuid]
+    if type(runtime) ~= "table" then
+        return nil
+    end
+    return runtime
+end
+
+--- Creates stable callbacks that late-read the current standalone runtime.
+---@param pluginGuid string Plugin guid used when creating the module host.
+---@return StandaloneRuntime bridge Standalone bridge with `renderWindow` and `addMenuBar` callbacks.
+function public.standaloneUiBridge(pluginGuid)
+    validatePluginGuid("standaloneUiBridge", pluginGuid)
+
+    local function callRuntime(method)
+        local runtime = getStandaloneRuntime(pluginGuid)
+        local callback = runtime and runtime[method] or nil
+        if type(callback) == "function" then
+            return callback()
+        end
+    end
+
+    return {
+        renderWindow = function()
+            return callRuntime("renderWindow")
+        end,
+        addMenuBar = function()
+            return callRuntime("addMenuBar")
+        end,
+        handleHostGuiClosed = function()
+            return callRuntime("handleHostGuiClosed")
+        end,
+    }
+end
+
 --- Initializes standalone module hosting and returns window/menu-bar renderers.
 ---@param pluginGuid string Plugin guid used when creating the module host.
 ---@return StandaloneRuntime runtime Standalone runtime with `renderWindow` and `addMenuBar` callbacks.
 function public.standaloneHost(pluginGuid)
-    if type(pluginGuid) ~= "string" or pluginGuid == "" then
-        internal.violate("host.invalid_standalone_binding", "standaloneHost: pluginGuid is required")
-    end
+    validatePluginGuid("standaloneHost", pluginGuid)
     local moduleHost = public.getLiveModuleHost(pluginGuid)
     if type(moduleHost) ~= "table" then
         internal.violate(
